@@ -1,0 +1,6 @@
+{
+  "name": "Journal of Artificial Intelligence in Medicine & Public Health",
+  "description": "Multi-role workflow simulator and architectural model for the Journal of Artificial Intelligence in Medicine & Public Health, featuring strict role security boundaries, a conditional override state machine, and programmatic anonymization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
