@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import TuliticsLogo from './TuliticsLogo';
 import { 
   LayoutDashboard, 
   FileText, 
@@ -433,23 +434,8 @@ export default function CoordinatorWorkspace({ manuscripts: propManuscripts, onU
       
       {/* 1. TOP BAR SPANNING FULL WIDTH (matching Image 1 & 2) */}
       <header className="bg-[#001c12] border-b border-[#002f1f] px-6 py-4 flex items-center justify-between shrink-0 text-white z-10">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center font-bold text-lg text-white shadow-md shadow-emerald-500/20">
-            <BookOpen className="w-5 h-5 text-white" />
-          </div>
-          <div className="text-left">
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-sm tracking-wider uppercase text-white">
-                Journal of AI in Medicine
-              </span>
-              <span className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono font-bold text-[8.5px] uppercase tracking-wider px-1.5 py-0.5 rounded">
-                JMS Core v3.5
-              </span>
-            </div>
-            <p className="text-[10px] text-emerald-100/40 font-semibold tracking-wide mt-0.5">
-              Specialized Peer-Review Multi-Tenant Substrate
-            </p>
-          </div>
+        <div className="shrink-0">
+          <TuliticsLogo iconSize={36} showText={true} textColorClass="text-white" subTitle="COORDINATOR WORKSPACE • JMS CORE v3.5" usePng={true} />
         </div>
 
         {/* SEARCH BAR & ACTIVE BADGE */}

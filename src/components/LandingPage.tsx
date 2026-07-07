@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Manuscript } from '../types';
+import TuliticsLogo from './TuliticsLogo';
 import {
   BookOpen,
   FileText,
@@ -67,27 +68,13 @@ export default function LandingPage({ manuscripts, onSubmitClick, onLoginClick }
   return (
     <div id="jms-public-landing-container" className="bg-[#fcfdfd] min-h-screen flex flex-col font-sans text-left">
       
-      {/* PURE GREEN TOP NOTIFICATION BANNER (AUTHENTIC MOCKUP MATCH) */}
-      <div className="bg-[#f0fdf4] text-[#15803d] border-b border-[#bbf7d0]/40 px-6 py-3.5 text-xs sm:text-[13px] font-sans font-medium flex items-center gap-2 tracking-normal shadow-[inset_0_-1px_0_0_rgba(0,0,0,0.03)] justify-start animate-fade-in relative z-20">
-        <div className="w-5 h-5 rounded-full bg-[#15803d] flex items-center justify-center shrink-0">
-          <CheckCircle className="w-3.5 h-3.5 text-white stroke-[3px]" />
-        </div>
-        <span className="font-semibold">Dynamic Event Callback: You have logged out successfully.</span>
-      </div>
-
       {/* 2. MAIN WHITE NAVIGATION HEADER BAR */}
       <header className="border-b border-gray-150/80 bg-white sticky top-0 z-30 shadow-xs">
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col lg:flex-row items-center justify-between gap-6">
           
           {/* Logo / Title Area */}
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-            <div className="w-10 h-10 rounded-lg bg-[#008751] flex items-center justify-center text-white font-black text-xl shadow-xs font-sans">
-              T
-            </div>
-            <div>
-              <h1 className="text-3xl font-black text-slate-900 lowercase tracking-tight leading-none font-sans">tulatics</h1>
-              <span className="text-[10px] text-slate-400 font-bold font-mono tracking-wider block mt-1">CHRONICLE PUBLISHING GROUP • EST. 2026</span>
-            </div>
+          <div className="cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+            <TuliticsLogo iconSize="lg" showText={true} textColorClass="text-[#155e42]" usePng={true} />
           </div>
 
           {/* Nav Items */}
@@ -156,14 +143,14 @@ export default function LandingPage({ manuscripts, onSubmitClick, onLoginClick }
           {/* Hero text (Left Side) */}
           <div className="lg:col-span-7 flex flex-col items-start space-y-6">
             
-            <span className="bg-white border border-[#bbf7d0] text-[#165b33] font-mono font-black tracking-widest uppercase text-[10px] px-3.5 py-1.5 rounded-lg inline-flex items-center gap-1.5">
+            <span className="bg-white border border-[#bbf7d0] text-[#155e42] font-mono font-black tracking-widest uppercase text-xs px-3.5 py-1.5 rounded-lg inline-flex items-center gap-1.5">
               🌱 OPEN ACCESS | PEER-REVIEWED | GLOBAL IMPACT
             </span>
 
             <h2 className="text-4xl sm:text-5xl lg:text-[52px] font-serif font-black tracking-tight text-slate-900 leading-[1.125] max-w-2xl text-left">
               Journal of Artificial <br className="hidden md:inline" />
               Intelligence in Medicine & <br />
-              <span className="text-[#008751] block md:inline font-bold">Public Health</span>
+              <span className="text-[#155e42] block md:inline font-bold">Public Health</span>
             </h2>
 
             <p className="text-sm sm:text-base text-slate-600 leading-relaxed max-w-xl font-medium">
@@ -250,8 +237,8 @@ export default function LandingPage({ manuscripts, onSubmitClick, onLoginClick }
                   <Activity className="w-4 h-4 text-emerald-500" />
                 </div>
                 <div>
-                  <span className="block text-[10px] font-bold text-slate-400 font-mono leading-none">BPM METRIC</span>
-                  <span className="block text-[11px] font-black text-slate-800 mt-1">Cardiac Wave</span>
+                  <span className="block text-xs font-bold text-slate-400 font-mono leading-none">BPM METRIC</span>
+                  <span className="block text-xs font-black text-slate-800 mt-1">Cardiac Wave</span>
                 </div>
               </div>
 
@@ -262,9 +249,9 @@ export default function LandingPage({ manuscripts, onSubmitClick, onLoginClick }
                 </svg>
               </div>
 
-              <div className="flex items-center justify-between font-mono text-[9px] font-bold text-slate-400 leading-none">
+              <div className="flex items-center justify-between font-mono text-xs font-bold text-slate-400 leading-none">
                 <span>REF 0928</span>
-                <span className="text-[#008751] animate-pulse">● LIVE</span>
+                <span className="text-[#155e42] animate-pulse">● LIVE</span>
               </div>
             </div>
 
@@ -282,56 +269,56 @@ export default function LandingPage({ manuscripts, onSubmitClick, onLoginClick }
           
           {/* Metric 1 */}
           <div className="flex items-center gap-3.5 pt-4 md:pt-0">
-            <div className="w-11 h-11 rounded-xl bg-[#008751]/10 flex items-center justify-center text-[#008751] shrink-0 shadow-xs">
+            <div className="w-11 h-11 rounded-xl bg-[#155e42]/10 flex items-center justify-center text-[#155e42] shrink-0 shadow-xs">
               <FileText className="w-5.5 h-5.5" />
             </div>
             <div>
               <span className="block text-xl font-black text-slate-900 leading-none">2,450+</span>
-              <span className="block text-[11px] text-slate-400 font-bold mt-1.5 uppercase tracking-wider font-mono">Articles Published</span>
+              <span className="block text-xs text-slate-500 font-bold mt-1.5 uppercase tracking-wider font-mono">Articles Published</span>
             </div>
           </div>
 
           {/* Metric 2 */}
           <div className="flex items-center gap-3.5 pt-4 md:pt-0 md:pl-6">
-            <div className="w-11 h-11 rounded-xl bg-[#008751]/10 flex items-center justify-center text-[#008751] shrink-0 shadow-xs">
+            <div className="w-11 h-11 rounded-xl bg-[#155e42]/10 flex items-center justify-center text-[#155e42] shrink-0 shadow-xs">
               <Globe className="w-5.5 h-5.5" />
             </div>
             <div>
               <span className="block text-xl font-black text-slate-900 leading-none">98+</span>
-              <span className="block text-[11px] text-slate-400 font-bold mt-1.5 uppercase tracking-wider font-mono">Countries Reached</span>
+              <span className="block text-xs text-slate-500 font-bold mt-1.5 uppercase tracking-wider font-mono">Countries Reached</span>
             </div>
           </div>
 
           {/* Metric 3 */}
           <div className="flex items-center gap-3.5 pt-4 md:pt-0 md:pl-6">
-            <div className="w-11 h-11 rounded-xl bg-[#008751]/10 flex items-center justify-center text-[#008751] shrink-0 shadow-xs">
+            <div className="w-11 h-11 rounded-xl bg-[#155e42]/10 flex items-center justify-center text-[#155e42] shrink-0 shadow-xs">
               <Activity className="w-5.5 h-5.5" />
             </div>
             <div>
               <span className="block text-xl font-black text-slate-900 leading-none">15.3</span>
-              <span className="block text-[11px] text-slate-400 font-bold mt-1.5 uppercase tracking-wider font-mono">CiteScore 2024</span>
+              <span className="block text-xs text-slate-500 font-bold mt-1.5 uppercase tracking-wider font-mono">CiteScore 2024</span>
             </div>
           </div>
 
           {/* Metric 4 */}
           <div className="flex items-center gap-3.5 pt-4 md:pt-0 md:pl-6">
-            <div className="w-11 h-11 rounded-xl bg-[#008751]/10 flex items-center justify-center text-[#008751] shrink-0 shadow-xs">
+            <div className="w-11 h-11 rounded-xl bg-[#155e42]/10 flex items-center justify-center text-[#155e42] shrink-0 shadow-xs">
               <Clock className="w-5.5 h-5.5" />
             </div>
             <div>
               <span className="block text-xl font-black text-slate-900 leading-none">3 Days</span>
-              <span className="block text-[11px] text-slate-400 font-bold mt-1.5 uppercase tracking-wider font-mono">Avg. First Decision</span>
+              <span className="block text-xs text-slate-500 font-bold mt-1.5 uppercase tracking-wider font-mono">Avg. First Decision</span>
             </div>
           </div>
 
           {/* Metric 5 */}
           <div className="flex items-center gap-3.5 pt-4 md:pt-0 md:pl-6">
-            <div className="w-11 h-11 rounded-xl bg-[#008751]/10 flex items-center justify-center text-[#008751] shrink-0 shadow-xs">
+            <div className="w-11 h-11 rounded-xl bg-[#155e42]/10 flex items-center justify-center text-[#155e42] shrink-0 shadow-xs">
               <Lock className="w-5.5 h-5.5" />
             </div>
             <div>
               <span className="block text-xl font-black text-slate-900 leading-none">100%</span>
-              <span className="block text-[11px] text-slate-400 font-bold mt-1.5 uppercase tracking-wider font-mono">Open Access</span>
+              <span className="block text-xs text-slate-500 font-bold mt-1.5 uppercase tracking-wider font-mono">Open Access</span>
             </div>
           </div>
 
@@ -355,44 +342,44 @@ export default function LandingPage({ manuscripts, onSubmitClick, onLoginClick }
             
             {/* Pillar 1 */}
             <div className="bg-white border border-slate-100 p-6 sm:p-7 rounded-2xl space-y-4 hover:shadow-lg hover:shadow-slate-100/30 transition-all duration-200 text-left">
-              <div className="w-11 h-11 rounded-xl bg-[#008751]/10 flex items-center justify-center text-[#008751] shadow-xs">
+              <div className="w-11 h-11 rounded-xl bg-[#155e42]/10 flex items-center justify-center text-[#155e42] shadow-xs">
                 <CheckCircle className="w-5.5 h-5.5 stroke-[2px]" />
               </div>
               <h4 className="font-sans font-extrabold text-slate-900 text-base">Rigorous Peer Review</h4>
-              <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed font-semibold">
+              <p className="text-sm text-slate-600 leading-relaxed font-semibold">
                 Double-blind review by leading experts to ensure research quality and credibility.
               </p>
             </div>
 
             {/* Pillar 2 */}
             <div className="bg-white border border-slate-100 p-6 sm:p-7 rounded-2xl space-y-4 hover:shadow-lg hover:shadow-slate-100/30 transition-all duration-200 text-left">
-              <div className="w-11 h-11 rounded-xl bg-[#008751]/10 flex items-center justify-center text-[#008751] shadow-xs">
+              <div className="w-11 h-11 rounded-xl bg-[#155e42]/10 flex items-center justify-center text-[#155e42] shadow-xs">
                 <Sparkles className="w-5.5 h-5.5" />
               </div>
               <h4 className="font-sans font-bold text-slate-900 text-base">Faster Publishing</h4>
-              <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed font-semibold">
+              <p className="text-sm text-slate-600 leading-relaxed font-semibold">
                 Streamlined workflows and AI assistance for efficient editorial and review processes.
               </p>
             </div>
 
             {/* Pillar 3 */}
             <div className="bg-white border border-slate-100 p-6 sm:p-7 rounded-2xl space-y-4 hover:shadow-lg hover:shadow-slate-100/30 transition-all duration-200 text-left">
-              <div className="w-11 h-11 rounded-xl bg-[#008751]/10 flex items-center justify-center text-[#008751] shadow-xs">
+              <div className="w-11 h-11 rounded-xl bg-[#155e42]/10 flex items-center justify-center text-[#155e42] shadow-xs">
                 <Globe className="w-5.5 h-5.5" />
               </div>
               <h4 className="font-sans font-bold text-slate-900 text-base">Global Visibility</h4>
-              <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed font-semibold">
+              <p className="text-sm text-slate-600 leading-relaxed font-semibold">
                 Maximize the impact of your research with worldwide exposure and indexing.
               </p>
             </div>
 
             {/* Pillar 4 */}
             <div className="bg-white border border-slate-100 p-6 sm:p-7 rounded-2xl space-y-4 hover:shadow-lg hover:shadow-slate-100/30 transition-all duration-200 text-left">
-              <div className="w-11 h-11 rounded-xl bg-[#008751]/10 flex items-center justify-center text-[#008751] shadow-xs">
+              <div className="w-11 h-11 rounded-xl bg-[#155e42]/10 flex items-center justify-center text-[#155e42] shadow-xs">
                 <Lock className="w-5.5 h-5.5" />
               </div>
               <h4 className="font-sans font-bold text-slate-900 text-base">Open & Ethical</h4>
-              <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed font-semibold">
+              <p className="text-sm text-slate-600 leading-relaxed font-semibold">
                 We are committed to open access, research integrity, and ethical publishing standards.
               </p>
             </div>
@@ -755,11 +742,9 @@ export default function LandingPage({ manuscripts, onSubmitClick, onLoginClick }
             
             {/* TULITICS BRANDING BLOCKS */}
             <div className="flex items-center gap-2.5 bg-slate-950 p-2 px-4 rounded-xl border border-slate-900 shadow-inner">
-              <div className="w-6 h-6 bg-[#135a37] text-white flex items-center justify-center font-extrabold rounded text-sm font-mono">
-                T
-              </div>
+              <TuliticsLogo iconSize={24} showText={false} usePng={true} />
               <span className="font-mono text-xs font-bold text-white tracking-widest uppercase">
-                TULATICS
+                TULITICS
               </span>
             </div>
 

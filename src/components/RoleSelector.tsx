@@ -1,4 +1,5 @@
 import { Role } from '../types';
+import TuliticsLogo from './TuliticsLogo';
 import { 
   Shield, 
   FileText, 
@@ -104,24 +105,8 @@ export default function RoleSelector({
           <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-4">
             
             {/* Left: Brand Identity with Custom Logo */}
-            <div className="flex items-center gap-3 shrink-0">
-              <div className="w-9 h-9 bg-gradient-to-br from-[#10b981] to-[#006837] text-white flex items-center justify-center rounded-xl font-black select-none shadow-md">
-                <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  <path d="M12 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
-                </svg>
-              </div>
-              <div className="text-left">
-                <h1 className="font-sans font-black text-xs md:text-sm text-white tracking-tight flex items-center gap-2 leading-none">
-                  <span>JOURNAL OF AI IN MEDICINE</span>
-                  <span className="text-[9px] font-mono font-black bg-[#004d2e] text-[#a3cfbb] border border-[#006837] rounded-md px-1.5 py-0.5 select-none leading-none">
-                    JMS CORE v3.5
-                  </span>
-                </h1>
-                <p className="text-[10px] text-emerald-100/60 font-bold tracking-wide mt-1 leading-none">
-                  Specialized Peer-Review Multi-Tenant Substrate
-                </p>
-              </div>
+            <div className="shrink-0">
+              <TuliticsLogo iconSize={36} showText={true} textColorClass="text-white" subTitle="JMS CORE v3.5 • COORDINATOR GATES" usePng={true} />
             </div>
 
             {/* Middle Search Bar matching mockup */}
@@ -249,21 +234,8 @@ export default function RoleSelector({
       <div className="max-w-[1600px] mx-auto px-6 py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
         
         {/* Brand & Identity */}
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-[#005a36] text-white flex items-center justify-center rounded-xl font-bold tracking-tight text-sm select-none">
-            JA
-          </div>
-          <div className="text-left">
-            <h1 className="font-sans font-black text-xs md:text-sm text-[#004d2e] tracking-tight flex items-center gap-2">
-              <span>JOURNAL OF AI IN MEDICINE</span>
-              <span className="text-[9px] font-mono font-extrabold bg-[#e6f4ea] text-[#137333] border border-[#a3cfbb] rounded-md px-1.5 py-0.5 select-none leading-none">
-                JMS CORE v3.5
-              </span>
-            </h1>
-            <p className="text-[10px] text-slate-400 font-medium tracking-wide mt-0.5 leading-none">
-              Specialized Peer-Review Multi-Tenant Substrate
-            </p>
-          </div>
+        <div className="shrink-0">
+          <TuliticsLogo iconSize={36} showText={true} textColorClass="text-[#155e42]" subTitle="JMS CORE v3.5 • SPECIALIZED REVIEWS" usePng={true} />
         </div>
 
         {/* Middle Badge: EDITOR SESSION ACTIVE */}
@@ -353,32 +325,32 @@ export default function RoleSelector({
       </div>
 
       {/* 2. SECONDARY CONTEXT & TELEMETRY STRIP */}
-      <div className="bg-[#fcfdfe] border-t border-gray-150 px-6 py-1.5">
-        <div className="max-w-[1600px] mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-[11px] text-slate-500">
+      <div className="bg-[#fcfdfe] border-t border-gray-150 px-6 py-2.5">
+        <div className="max-w-[1600px] mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-xs md:text-sm text-slate-500">
           
           {/* Simulated Session Persona Status */}
           <div className="flex items-center gap-2 flex-wrap text-left justify-center md:justify-start">
-            <span className="px-1.5 py-0.5 bg-slate-200/70 text-slate-600 rounded text-[9px] font-mono font-bold tracking-wider uppercase border border-slate-300/40 select-none leading-none">
+            <span className="px-2 py-0.5 bg-slate-200/70 text-slate-600 rounded text-[11px] font-mono font-bold tracking-wider uppercase border border-slate-300/40 select-none leading-none">
               SIMULATED PERSONA
             </span>
-            <span className="font-sans text-[11px] font-bold text-slate-600">
-              Acting as <strong className="text-slate-800 font-mono text-[11px] font-extrabold">{activeRoleInfo?.user || 'chief-editor@jms-journal.org'}</strong>
+            <span className="font-sans text-xs md:text-sm font-bold text-slate-600">
+              Acting as <strong className="text-slate-800 font-mono text-xs md:text-sm font-extrabold">{activeRoleInfo?.user || 'chief-editor@jms-journal.org'}</strong>
             </span>
             
-            <span className="flex items-center gap-1 bg-[#fff3cd] text-[#664d03] border border-[#ffecb5] px-2 py-0.5 rounded-[5px] text-[10px] font-extrabold leading-none select-none">
+            <span className="flex items-center gap-1 bg-[#fff3cd] text-[#664d03] border border-[#ffecb5] px-2 py-0.5 rounded-[5px] text-xs font-extrabold leading-none select-none">
               <span className="w-1.5 h-1.5 rounded-full bg-[#664d03] animate-pulse"></span>
               strict workflow lock
             </span>
           </div>
  
           {/* Access Scope Info / Description - Inline & Sleek */}
-          <div className="hidden lg:flex items-center gap-1.5 text-slate-450 italic shrink-0 text-[11px]">
+          <div className="hidden lg:flex items-center gap-1.5 text-slate-450 italic shrink-0 text-xs">
             <span className="text-slate-400 animate-pulse">🕒</span>
             <span className="font-sans font-medium text-slate-500">Scope: {activeRoleInfo?.desc || 'Orchestrate reviewers, access cover letters, override thresholds, decide gates.'}</span>
           </div>
 
           {/* Database live metric pills */}
-          <div className="flex items-center gap-2 font-mono text-[10px] select-none shrink-0 font-bold">
+          <div className="flex items-center gap-2 font-mono text-xs select-none shrink-0 font-bold">
             <span className="flex items-center gap-1.5 bg-[#f8fafc] px-2.5 py-1 rounded-lg border border-slate-250 hover:bg-slate-50 transition shadow-tiny text-slate-600 leading-none">
               <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
               Unassigned: <strong className="text-slate-800">{unassignedCount}</strong>

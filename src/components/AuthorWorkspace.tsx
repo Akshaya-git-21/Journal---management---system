@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Manuscript, Role } from '../types';
+import TuliticsLogo from './TuliticsLogo';
 import {
   Bell,
   User,
@@ -331,18 +332,8 @@ export default function AuthorWorkspace({
       <header className="bg-white text-slate-850 border-b border-[#e2e8f0] px-6 py-3 flex items-center justify-between sticky top-0 z-50 shadow-xs">
         
         {/* Left identity logo */}
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-[#008751] flex items-center justify-center text-white font-extrabold text-lg shadow-sm border border-white/10 font-sans">
-            T
-          </div>
-          <div className="text-left select-none">
-            <span className="text-slate-900 font-black text-xl tracking-tight leading-none block font-sans lowercase">
-              tulatics
-            </span>
-            <span className="text-[9px] text-[#008751] font-sans uppercase tracking-widest block font-bold mt-0.5">
-              OPEN JOURNAL SYSTEMS • PKP PORTAL
-            </span>
-          </div>
+        <div className="shrink-0">
+          <TuliticsLogo iconSize={36} showText={true} textColorClass="text-[#155e42]" subTitle="AUTHOR WORKSPACE • PKP PORTAL" usePng={true} />
         </div>
 
         {/* Right tools (Bell notification bar & Profile bar) */}

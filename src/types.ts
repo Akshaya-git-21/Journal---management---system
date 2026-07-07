@@ -108,3 +108,4 @@ export interface Manuscript {
   editorsNotes: string; // Editors notes section
   language?: string;
 }
+

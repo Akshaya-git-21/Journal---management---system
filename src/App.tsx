@@ -246,7 +246,7 @@ export default function App() {
         <div id="global-success-banner" className="bg-emerald-700 text-white p-3 shadow-md shrink-0">
           <div className="max-w-7xl mx-auto px-4 flex items-center gap-2 text-xs font-mono">
             <CheckCircle2 className="w-4 h-4 text-emerald-200 shrink-0" />
-            <span className="font-bold uppercase tracking-wide">Dynamic Event Callback:</span>
+            <span className="font-bold uppercase tracking-wide">NOTIFICATION:</span>
             <span>{notification}</span>
           </div>
         </div>
