@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { Role, Manuscript } from './types';
 import { INITIAL_MANUSCRIPTS } from './initialData';
 import RoleSelector from './components/RoleSelector';
+import TuliticsLogo from './components/TuliticsLogo';
 import AuthorWorkspace from './components/AuthorWorkspace';
 import EditorWorkspace from './components/EditorWorkspace';
 import ReviewerWorkspace from './components/ReviewerWorkspace';
@@ -360,9 +361,14 @@ export default function App() {
               <p className="font-bold text-white uppercase tracking-wider text-xs">
                 Journal of Artificial Intelligence in Medicine & Public Health
               </p>
-              <p className="text-slate-400 mt-1">
-                JMS™ Specialized OJS-Style Multi-Tenant Enterprise System • Designed and Built for <strong className="text-slate-200">TULITICS</strong>
-              </p>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-1.5">
+                <p className="text-slate-400">
+                  JMS™ Specialized OJS-Style Multi-Tenant Enterprise System • Designed and Built for <strong className="text-slate-200">TULITICS</strong>
+                </p>
+                <div className="bg-slate-950 p-1 px-2 rounded-lg border border-slate-850 shrink-0 w-fit self-start sm:self-auto">
+                  <TuliticsLogo iconSize={18} showText={false} usePng={true} />
+                </div>
+              </div>
             </div>
             <p className="text-slate-500 text-right">© {new Date().getFullYear()} TULITICS. All rights reserved.</p>
           </div>

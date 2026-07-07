@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import TuliticsLogo from './TuliticsLogo';
 import { Manuscript, ReviewerRecommendation, ReviewStatus } from '../types';
 import { AVAILABLE_REVIEWERS } from '../initialData';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
@@ -369,7 +370,17 @@ export default function ReviewerWorkspace({
   const navSectionHeaderClass = "block text-[9px] font-mono uppercase tracking-widest text-slate-400 font-extrabold mb-2.5 mt-5 px-4 select-none";
 
   return (
-    <div id="reviewer-console-container" className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
+    <div className="w-full bg-[#f8fafc] min-h-screen text-slate-800 pb-12 flex flex-col">
+      <header className="bg-white text-slate-800 border-b border-slate-200/80 px-6 py-3.5 flex items-center justify-between sticky top-0 z-40 shadow-xs w-full">
+        <div className="shrink-0">
+          <TuliticsLogo iconSize={36} showText={true} textColorClass="text-[#155e42]" subTitle="REVIEWER WORKSPACE • PEER VALIDATION PORTAL" usePng={true} />
+        </div>
+        <div className="flex items-center gap-4 text-xs font-mono font-bold text-slate-500">
+          <span>Logged in as: <strong className="text-slate-900">{currentUser?.name || reviewerName}</strong></span>
+        </div>
+      </header>
+
+      <div id="reviewer-console-container" className="max-w-7xl mx-auto px-4 sm:px-6 py-10 w-full flex-grow">
       
       {feedbackMsg && (
         <div id="feedback-success-indicator" className="bg-[#f0fdf4] border border-[#bbf7d0]/80 text-[#165b33] p-4 shadow-xs rounded-xl mb-6 text-xs flex items-center justify-between font-semibold animate-fade-in">
@@ -1378,6 +1389,7 @@ export default function ReviewerWorkspace({
 
       </div>
 
+    </div>
     </div>
   );
 }

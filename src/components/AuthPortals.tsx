@@ -283,29 +283,29 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
       <div className="bg-white rounded-3xl border border-slate-100 shadow-[0_15px_50px_rgba(4,120,87,0.06)] overflow-hidden grid grid-cols-1 md:grid-cols-12 max-w-4xl w-full animate-fade-in relative z-10">
         
         {/* Left Decorative Sidebar */}
-        <div id="auth-decorative-sidebar" className="md:col-span-4 bg-gradient-to-b from-[#004d2b] to-[#012515] text-white p-8 sm:p-10 flex flex-col justify-between relative overflow-hidden select-none min-h-[320px] md:min-h-[500px]">
-          <div className="absolute inset-0 bg-[radial-gradient(#10b981_0.7px,transparent_0.7px)] [background-size:24px_24px] opacity-15 pointer-events-none z-0" />
-          <div className="absolute -left-12 -top-12 w-64 h-64 bg-emerald-400/10 rounded-full blur-2xl pointer-events-none z-0" />
+        <div id="auth-decorative-sidebar" className="md:col-span-4 bg-white text-slate-800 border-r border-slate-100 p-8 sm:p-10 flex flex-col justify-between relative overflow-hidden select-none min-h-[320px] md:min-h-[500px]">
+          <div className="absolute inset-0 bg-[radial-gradient(#10b981_0.7px,transparent_0.7px)] [background-size:24px_24px] opacity-5 pointer-events-none z-0" />
+          <div className="absolute -left-12 -top-12 w-64 h-64 bg-emerald-50 rounded-full blur-2xl pointer-events-none z-0" />
           
           <div className="relative z-10 space-y-6">
-            <TuliticsLogo iconSize={32} showText={true} textColorClass="text-white" subTitle="ENTERPRISE SYSTEM" usePng={true} />
+            <TuliticsLogo iconSize={32} showText={true} textColorClass="text-[#155e42]" subTitle="ENTERPRISE SYSTEM" usePng={true} />
             
             <div className="pt-2">
-              <span className="bg-white/10 border border-white/20 text-[#34d399] font-mono font-black tracking-widest uppercase text-xs px-3 py-1 rounded-lg inline-flex items-center gap-1.5">
+              <span className="bg-[#f0fdf4] border border-[#bbf7d0] text-[#155e42] font-mono font-black tracking-widest uppercase text-xs px-3 py-1 rounded-lg inline-flex items-center gap-1.5">
                 ✦ {activeRole} GATES ✦
               </span>
             </div>
-            <h3 className="font-sans font-black text-2xl sm:text-3xl tracking-tight text-white leading-tight">
+            <h3 className="font-sans font-black text-2xl sm:text-3xl tracking-tight text-slate-900 leading-tight">
               {colors.label}
             </h3>
-            <p className="text-sm text-slate-200 leading-relaxed font-semibold">
+            <p className="text-sm text-slate-500 leading-relaxed font-semibold">
               Review and record peer assessments, index DOIs, and dispatch manuscripts downstream on a secure decentralized pipeline.
             </p>
           </div>
 
-          <div className="relative z-10 pt-12 text-xs text-slate-300 font-mono space-y-3 border-t border-white/10 mt-8">
-            <div className="flex items-center gap-2 font-black text-[#58ffa4]">
-              <Shield className="w-4.5 h-4.5 text-emerald-400 stroke-[2px]" />
+          <div className="relative z-10 pt-12 text-xs text-slate-500 font-mono space-y-3 border-t border-slate-100 mt-8">
+            <div className="flex items-center gap-2 font-black text-[#155e42]">
+              <Shield className="w-4.5 h-4.5 text-emerald-600 stroke-[2px]" />
               <span>Double-Blind Encryption</span>
             </div>
             <p className="leading-relaxed font-semibold">Your data is secure and protected under multi-tenant enterprise isolation algorithms.</p>

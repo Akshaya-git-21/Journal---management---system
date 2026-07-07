@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import TuliticsLogo from './TuliticsLogo';
 import { Database, GitFork, ArrowRightLeft, FileCode, Check, Copy } from 'lucide-react';
 
 export default function ArchitectWorkspace() {
@@ -393,7 +394,17 @@ export const recordEditorialDecisionGate = async (
   };
 
   return (
-    <div id="architect-panel-root" className="max-w-6xl mx-auto px-4 py-8">
+    <div className="w-full bg-[#f8fafc] min-h-screen text-slate-800 pb-12 flex flex-col text-left">
+      <header className="bg-white text-slate-800 border-b border-slate-200/80 px-6 py-3.5 flex items-center justify-between sticky top-0 z-40 shadow-xs w-full mb-6">
+        <div className="shrink-0">
+          <TuliticsLogo iconSize={36} showText={true} textColorClass="text-[#155e42]" subTitle="ARCHITECT WORKSPACE • BLUEPRINT CENTRE" usePng={true} />
+        </div>
+        <div className="flex items-center gap-4 text-xs font-mono font-bold text-slate-500">
+          <span className="bg-slate-100 border border-slate-200 text-slate-700 px-3 py-1 rounded-full text-[10px] tracking-wide uppercase">System Blueprint Node</span>
+        </div>
+      </header>
+
+      <div id="architect-panel-root" className="max-w-6xl mx-auto px-4 w-full flex-grow">
       
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b pb-4 mb-6 gap-3">
         <div>
@@ -507,6 +518,7 @@ export const recordEditorialDecisionGate = async (
 
       </div>
 
+    </div>
     </div>
   );
 }

@@ -743,9 +743,6 @@ export default function LandingPage({ manuscripts, onSubmitClick, onLoginClick }
             {/* TULITICS BRANDING BLOCKS */}
             <div className="flex items-center gap-2.5 bg-slate-950 p-2 px-4 rounded-xl border border-slate-900 shadow-inner">
               <TuliticsLogo iconSize={24} showText={false} usePng={true} />
-              <span className="font-mono text-xs font-bold text-white tracking-widest uppercase">
-                TULITICS
-              </span>
             </div>
 
             <p className="text-slate-500 font-sans text-xs">

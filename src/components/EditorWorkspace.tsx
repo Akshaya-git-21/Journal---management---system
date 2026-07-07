@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import TuliticsLogo from './TuliticsLogo';
 import { Manuscript, ReviewerAssignment, ManuscriptStatus, ReviewStatus } from '../types';
 import { AVAILABLE_REVIEWERS } from '../initialData';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
@@ -766,8 +767,17 @@ export default function EditorWorkspace({
   const countDec = mFiltered.filter(m => m.status === 'REJECTED').length;
 
   return (
-    <div className="w-full bg-[#f4faf6] min-h-screen text-slate-800 pb-12">
-      <div id="editor-console-container" className="max-w-7xl mx-auto px-6 py-10">
+    <div className="w-full bg-[#f4faf6] min-h-screen text-slate-800 pb-12 flex flex-col">
+      <header className="bg-white text-slate-800 border-b border-slate-200/80 px-6 py-3.5 flex items-center justify-between sticky top-0 z-40 shadow-xs w-full">
+        <div className="shrink-0">
+          <TuliticsLogo iconSize={36} showText={true} textColorClass="text-[#155e42]" subTitle="EDITOR WORKSPACE • MANAGEMENT PORTAL" usePng={true} />
+        </div>
+        <div className="flex items-center gap-4 text-xs font-mono font-bold text-slate-500">
+          <span>Logged in as: <strong className="text-slate-900">{currentUser?.name || "Dr. Cynthia Dwork"}</strong></span>
+        </div>
+      </header>
+
+      <div id="editor-console-container" className="max-w-7xl mx-auto px-6 py-10 w-full flex-grow">
       
       {!selectedManuscriptId ? (
         

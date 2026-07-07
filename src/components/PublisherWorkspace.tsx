@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import TuliticsLogo from './TuliticsLogo';
 import { Manuscript } from '../types';
 import {
   FileText,
@@ -118,7 +119,17 @@ export default function PublisherWorkspace({
   };
 
   return (
-    <div id="publisher-console-container" className="max-w-7xl mx-auto px-6 py-10 text-left">
+    <div className="w-full bg-[#f8fafc] min-h-screen text-slate-800 pb-12 flex flex-col">
+      <header className="bg-white text-slate-800 border-b border-slate-200/80 px-6 py-3.5 flex items-center justify-between sticky top-0 z-40 shadow-xs w-full">
+        <div className="shrink-0">
+          <TuliticsLogo iconSize={36} showText={true} textColorClass="text-[#155e42]" subTitle="PUBLISHER WORKSPACE • DISTRIBUTION HUB" usePng={true} />
+        </div>
+        <div className="flex items-center gap-4 text-xs font-mono font-bold text-slate-500">
+          <span>Logged in as: <strong className="text-slate-900">{currentUser?.name || "Dr. John Backus"}</strong></span>
+        </div>
+      </header>
+
+      <div id="publisher-console-container" className="max-w-7xl mx-auto px-6 py-10 text-left w-full flex-grow">
       
       {successBanner && (
         <div id="success-banner" className="bg-emerald-600 text-white p-3.5 shadow rounded-xl mb-6 text-xs font-mono flex items-center justify-between">
@@ -513,6 +524,7 @@ export default function PublisherWorkspace({
 
       </div>
 
+    </div>
     </div>
   );
 }

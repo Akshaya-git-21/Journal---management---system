@@ -1,5 +1,6 @@
 import React from 'react';
-import tuliticsLogo from '../assets/tulitics-logo.png';
+
+const tuliticsLogo = "https://tulitics.vercel.app/images/logo.png";
 
 interface TuliticsLogoProps {
   className?: string;
@@ -38,6 +39,7 @@ export default function TuliticsLogo({
         className="object-contain"
         width={calculatedWidth}
         height={calculatedHeight}
+        referrerPolicy="no-referrer"
       />
       {showText && subTitle && (
         <span className="text-[9px] font-mono tracking-widest text-slate-400 font-bold block mt-1 uppercase">
