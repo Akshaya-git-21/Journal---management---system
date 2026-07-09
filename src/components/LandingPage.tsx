@@ -113,6 +113,13 @@ export default function LandingPage({ manuscripts, onSubmitClick, onLoginClick }
             <a href="#aim-scope" className="hover:text--[#008751] py-0.5 transition-colors">Information For</a>
             
             <a href="#aim-scope" className="hover:text--[#008751] py-0.5 transition-colors">Resources</a>
+            
+            <button
+              onClick={() => onLoginClick('AUTHOR', 'LOGIN')}
+              className="text-slate-600 hover:text-[#008751] font-bold py-0.5 transition-colors cursor-pointer"
+            >
+              Sign In
+            </button>
 
             <button
               onClick={onSubmitClick}
@@ -388,149 +395,41 @@ export default function LandingPage({ manuscripts, onSubmitClick, onLoginClick }
         </div>
       </section>
 
-      {/* 3. SIMULATED ACADEMIC PORTALS ACCESS PANEL (Polished Light Theme) */}
+      {/* 3. SIMULATED ACADEMIC PORTALS ACCESS PANEL (Polished Single Unified Access Gate) */}
       <section className="bg-gradient-to-b from-[#f8fafc] to-[#f0f9f5] py-16 px-6 border-t border-b border-slate-150/70 relative">
-        <div className="max-w-7xl mx-auto space-y-8">
+        <div className="max-w-4xl mx-auto text-center space-y-8 relative z-10">
           
-          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 pb-6 border-b border-emerald-100/50">
-            <div className="space-y-2 text-left">
-              <span className="bg-[#008751]/10 border border-[#008751]/20 px-3 py-1 rounded-lg text-xs font-mono text-[#008751] font-bold uppercase tracking-wider block w-fit">
-                Multi-Tenant Role Gates Sandbox
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 font-sans">Active Academic Portal Access Points</h2>
-              <p className="text-slate-500 text-sm sm:text-base leading-normal max-w-3xl">
-                The enterprise publishing system isolates databases according to role definitions. Choose a simulated portal below to examine permissions safeguards, consensus decisions, or XML/DOI pipelines.
-              </p>
-            </div>
-            <div className="bg-white border border-emerald-100 px-3.5 py-1.5 rounded-lg text-xs font-mono text-[#008751] font-bold shrink-0 shadow-xs">
-              ⚡ Status: Standard Compliance v3.5.0
-            </div>
+          <div className="space-y-4 max-w-2xl mx-auto">
+            <span className="bg-[#008751]/10 border border-[#008751]/20 px-3 py-1 rounded-lg text-xs font-mono text-[#008751] font-bold uppercase tracking-wider inline-block">
+              Unified Platform Access Gate
+            </span>
+            <h2 className="text-3xl sm:text-4xl font-black tracking-tight text-slate-900 font-sans">
+              Enter the Publishing System
+            </h2>
+            <p className="text-slate-600 text-sm sm:text-base leading-relaxed">
+              Access standard peer-review workflows, referee evaluation desks, editorial controls, and publication streams from our single unified workspace portal. Select your workspace profile inside the gate.
+            </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
-            
-            {/* AUTHOR PORTAL PANEL */}
-            <div className="bg-white border border-slate-100 rounded-2xl p-6 hover:border-emerald-250 hover:shadow-md transition-all duration-200 flex flex-col justify-between shadow-xs text-left">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[#008751] animate-pulse"></span>
-                  <span className="font-mono text-[10px] uppercase font-black text-[#008751] tracking-wider">Author Gates</span>
-                </div>
-                <h4 className="font-sans font-extrabold text-base text-slate-900">Create Drafts & Track Papers</h4>
-                <p className="text-xs text-slate-500 leading-relaxed font-semibold">
-                  Submit manuscripts, keep updated in blind threads, and track reviews completely live.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-50">
-                <button
-                  onClick={() => onLoginClick('AUTHOR', 'LOGIN')}
-                  className="bg-[#008751] hover:bg-[#007043] text-white font-bold text-xs uppercase px-4 py-2 rounded-lg transition-all cursor-pointer shadow-xs animate-fade-in"
-                >
-                  Login
-                </button>
-                <button
-                  onClick={() => onLoginClick('AUTHOR', 'REGISTER')}
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs uppercase px-4 py-2 rounded-lg transition-all cursor-pointer"
-                >
-                  Register
-                </button>
-              </div>
-            </div>
+          <div className="bg-white border border-slate-150 rounded-2xl p-8 sm:p-10 shadow-[0_15px_40px_rgba(4,120,87,0.04)] max-w-xl mx-auto flex flex-col sm:flex-row items-center justify-center gap-4">
+            <button
+              onClick={() => onLoginClick('AUTHOR', 'LOGIN')}
+              className="w-full sm:w-auto bg-[#008751] hover:bg-[#007043] text-white font-mono text-sm uppercase tracking-widest font-black px-8 py-4 rounded-xl transition-all cursor-pointer shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+            >
+              Sign In / Login
+            </button>
+            <button
+              onClick={() => onLoginClick('AUTHOR', 'REGISTER')}
+              className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-sm uppercase tracking-widest font-black px-8 py-4 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 border border-slate-200"
+            >
+              Sign Up / Register
+            </button>
+          </div>
 
-            {/* REVIEWER PORTAL PANEL */}
-            <div className="bg-white border border-slate-100 rounded-2xl p-6 hover:border-emerald-250 hover:shadow-md transition-all duration-200 flex flex-col justify-between shadow-xs text-left">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[#008751]"></span>
-                  <span className="font-mono text-[10px] uppercase font-black text-[#008751] tracking-wider">Reviewer Desk</span>
-                </div>
-                <h4 className="font-sans font-extrabold text-base text-slate-900">Anonymous Evaluation</h4>
-                <p className="text-xs text-slate-500 leading-relaxed font-semibold">
-                  Access scope-restricted manuscript text files. Conduct peer reviews and submit consensus suggestions.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-50 text-center">
-                <button
-                  onClick={() => onLoginClick('REVIEWER', 'LOGIN')}
-                  className="bg-[#008751] hover:bg-[#007043] text-white font-bold text-xs uppercase px-4 py-2 rounded-lg transition-all cursor-pointer shadow-xs w-full animate-fade-in"
-                >
-                  Referee Access
-                </button>
-              </div>
-            </div>
-
-            {/* EDITOR PORTAL PANEL */}
-            <div className="bg-white border border-slate-100 rounded-2xl p-6 hover:border-emerald-250 hover:shadow-md transition-all duration-200 flex flex-col justify-between shadow-xs text-left">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[#008751] animate-pulse"></span>
-                  <span className="font-mono text-[10px] uppercase font-black text-[#008751] tracking-wider">Editorial Central</span>
-                </div>
-                <h4 className="font-sans font-extrabold text-base text-slate-900">OJS Control Dashboard</h4>
-                <p className="text-xs text-slate-500 leading-relaxed font-semibold">
-                  Monitor all articles, allocate peer referees, and record decisions with warnings logic.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-50 text-center">
-                <button
-                  onClick={() => onLoginClick('EDITOR', 'LOGIN')}
-                  className="bg-[#008751] hover:bg-[#007043] text-white font-bold text-xs uppercase px-4 py-2 rounded-lg transition-all cursor-pointer shadow-xs w-full animate-fade-in"
-                >
-                  Launch Hub
-                </button>
-              </div>
-            </div>
-
-            {/* PUBLISHER PORTAL PANEL */}
-            <div className="bg-white border border-slate-100 rounded-2xl p-6 hover:border-emerald-250 hover:shadow-md transition-all duration-200 flex flex-col justify-between shadow-xs text-left">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[#008751]"></span>
-                  <span className="font-mono text-[10px] uppercase font-black text-[#008751] tracking-wider">Publishing Desk</span>
-                </div>
-                <h4 className="font-sans font-extrabold text-base text-slate-900">Production & DOIs</h4>
-                <p className="text-xs text-slate-500 leading-relaxed font-semibold">
-                  Incorporate digital identifiers, create volume release compilations, and format XML outputs.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-50 text-center">
-                <button
-                  onClick={() => onLoginClick('PUBLISHER', 'LOGIN')}
-                  className="bg-[#008751] hover:bg-[#007043] text-white font-bold text-xs uppercase px-4 py-2 rounded-lg transition-all cursor-pointer shadow-xs w-full animate-fade-in"
-                >
-                  Open Vault
-                </button>
-              </div>
-            </div>
-
-            {/* COORDINATOR PORTAL PANEL */}
-            <div className="bg-white border-2 border-black rounded-2xl p-6 hover:shadow-md transition-all duration-200 flex flex-col justify-between shadow-xs text-left">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-black animate-pulse"></span>
-                  <span className="font-mono text-[10px] uppercase font-black text-black tracking-wider">Coordinator desk</span>
-                </div>
-                <h4 className="font-sans font-extrabold text-base text-slate-900">Oversight & Gates</h4>
-                <p className="text-xs text-slate-500 leading-relaxed font-semibold">
-                  Oversee editorial workflows, adjust quality threshold gates, monitor timeline violations, and view real-time platform logs.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-100">
-                <button
-                  onClick={() => onLoginClick('COORDINATOR', 'LOGIN')}
-                  className="bg-black hover:bg-slate-900 text-white font-bold text-xs uppercase px-4 py-2 rounded-lg transition-all cursor-pointer shadow-xs animate-fade-in"
-                >
-                  Login
-                </button>
-                <button
-                  onClick={() => onLoginClick('COORDINATOR', 'REGISTER')}
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs uppercase px-4 py-2 rounded-lg transition-all cursor-pointer"
-                >
-                  Register
-                </button>
-              </div>
-            </div>
-
+          <div className="flex items-center justify-center gap-2 text-xs font-mono text-slate-400 font-semibold select-none pt-2">
+            <span>🛡️ ISO-27001 Certified encryption safeguards</span>
+            <span>•</span>
+            <span>⚡ Real-Time Pipeline status: online</span>
           </div>
 
         </div>

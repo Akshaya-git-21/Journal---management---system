@@ -363,14 +363,14 @@ export default function App() {
               </p>
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-1.5">
                 <p className="text-slate-400">
-                  JMS™ Specialized OJS-Style Multi-Tenant Enterprise System • Designed and Built for <strong className="text-slate-200">TULITICS</strong>
+                  JMS™ Specialized OJS-Style Multi-Tenant Enterprise System
                 </p>
                 <div className="bg-slate-950 p-1 px-2 rounded-lg border border-slate-850 shrink-0 w-fit self-start sm:self-auto">
                   <TuliticsLogo iconSize={18} showText={false} usePng={true} />
                 </div>
               </div>
             </div>
-            <p className="text-slate-500 text-right">© {new Date().getFullYear()} TULITICS. All rights reserved.</p>
+            <p className="text-slate-500 text-right">© {new Date().getFullYear()} JMS. All rights reserved.</p>
           </div>
         </footer>
       )}

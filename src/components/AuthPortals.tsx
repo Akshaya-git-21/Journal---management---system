@@ -29,10 +29,43 @@ interface AuthPortalsProps {
 }
 
 export default function AuthPortals({ activeRole, initialMode, onBackToLanding, onSuccessAuth }: AuthPortalsProps) {
+  const [localRole, setLocalRole] = useState<Role>(activeRole);
   const [mode, setMode] = useState<'LOGIN' | 'REGISTER'>(initialMode);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+
+  const getPresetEmail = (role: Role) => {
+    if (role === 'AUTHOR') return 'author@stanford.edu';
+    if (role === 'REVIEWER') return 'reviewer@stanford.edu';
+    if (role === 'EDITOR') return 'editor@stanford.edu';
+    if (role === 'PUBLISHER') return 'publisher@stanford.edu';
+    if (role === 'COORDINATOR') return 'coordinator-triage@jms-journal.org';
+    return '';
+  };
+
+  const [email, setEmail] = useState(() => {
+    if (initialMode === 'LOGIN') {
+      return getPresetEmail(activeRole);
+    }
+    return '';
+  });
+
+  const [password, setPassword] = useState(() => {
+    if (initialMode === 'LOGIN') return 'password123';
+    return '';
+  });
+
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  const handleRoleSelect = (role: Role) => {
+    setLocalRole(role);
+    if (mode === 'LOGIN') {
+      setEmail(getPresetEmail(role));
+      setPassword('password123');
+    } else {
+      setEmail('');
+      setPassword('');
+      setConfirmPassword('');
+    }
+  };
   
   // Specific Registration Fields
   const [firstName, setFirstName] = useState('');
@@ -64,7 +97,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
 
   // Dynamic values matching the mockup theme
   const getRoleColors = () => {
-    switch (activeRole) {
+    switch (localRole) {
       case 'AUTHOR':
         return {
           primary: 'emerald',
@@ -183,9 +216,9 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
     
     // Compute registered user full name
     let computedName = 'Simulated User';
-    if (activeRole === 'AUTHOR') {
+    if (localRole === 'AUTHOR') {
       computedName = firstName ? `${firstName} ${lastName}` : 'Ada Lovelace';
-    } else if (activeRole === 'PUBLISHER') {
+    } else if (localRole === 'PUBLISHER') {
       computedName = contactPerson || publisherName || 'Simulated Publisher';
     } else {
       computedName = fullName || 'Simulated Staff';
@@ -214,13 +247,13 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
           mobile_number: mobileNumber
         };
 
-        const res = await registerSupabaseUser(email, password, computedName, activeRole, meta);
+        const res = await registerSupabaseUser(email, password, computedName, localRole, meta);
         setSuccessMsg(`SUCCESS: Account registered for ${computedName} in Supabase Auth!`);
         setTimeout(() => {
           onSuccessAuth({
             name: computedName,
             email: email,
-            role: activeRole
+            role: localRole
           });
         }, 1500);
       } else {
@@ -230,7 +263,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
           onSuccessAuth({
             name: authUser.name,
             email: authUser.email,
-            role: authUser.role
+            role: localRole
           });
         }, 1500);
       }
@@ -248,28 +281,28 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
     setLoading(true);
     setTimeout(() => {
       setLoading(false);
-      const computedName = activeRole === 'AUTHOR' ? 'Dr. Ada Lovelace' : 
-                           activeRole === 'REVIEWER' ? 'Prof. Grace Hopper' : 
-                           activeRole === 'EDITOR' ? 'Dr. Alan Turing' : 
-                           activeRole === 'COORDINATOR' ? 'Sarah Jenkins, MSc' : 'Digital Press Center';
-      const computedEmail = activeRole === 'AUTHOR' ? 'ada@computing.org' : 
-                            activeRole === 'REVIEWER' ? 'grace@cober.org' : 
-                            activeRole === 'EDITOR' ? 'turing@enigma.labs' : 
-                            activeRole === 'COORDINATOR' ? 'coordinator-triage@jms-journal.org' : 'press@jms-digital.org';
+      const computedName = localRole === 'AUTHOR' ? 'Dr. Ada Lovelace' : 
+                           localRole === 'REVIEWER' ? 'Prof. Grace Hopper' : 
+                           localRole === 'EDITOR' ? 'Dr. Alan Turing' : 
+                           localRole === 'COORDINATOR' ? 'Sarah Jenkins, MSc' : 'Digital Press Center';
+      const computedEmail = localRole === 'AUTHOR' ? 'ada@computing.org' : 
+                            localRole === 'REVIEWER' ? 'grace@cober.org' : 
+                            localRole === 'EDITOR' ? 'turing@enigma.labs' : 
+                            localRole === 'COORDINATOR' ? 'coordinator-triage@jms-journal.org' : 'press@jms-digital.org';
       
       setSuccessMsg(`SUCCESS: Connected OAuth from ${provider}. Resolved metadata parameters for ${computedName}.`);
       setTimeout(() => {
         onSuccessAuth({
           name: computedName,
           email: computedEmail,
-          role: activeRole
+          role: localRole
         });
       }, 1500);
     }, 1000);
   };
 
   return (
-    <div id="auth-portal-screen" className="min-h-screen w-full bg-[#f4faf7] px-4 sm:px-6 py-12 md:py-20 flex flex-col items-center justify-center relative">
+    <div id="auth-portal-screen" className="min-h-screen w-full bg-white px-4 sm:px-6 py-12 md:py-20 flex flex-col items-center justify-center relative">
       <div className="absolute inset-0 bg-[radial-gradient(#10b981_0.7px,transparent_0.7px)] [background-size:24px_24px] opacity-[0.04] pointer-events-none" />
       
       <button
@@ -283,27 +316,27 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
       <div className="bg-white rounded-3xl border border-slate-100 shadow-[0_15px_50px_rgba(4,120,87,0.06)] overflow-hidden grid grid-cols-1 md:grid-cols-12 max-w-4xl w-full animate-fade-in relative z-10">
         
         {/* Left Decorative Sidebar */}
-        <div id="auth-decorative-sidebar" className="md:col-span-4 bg-white text-slate-800 border-r border-slate-100 p-8 sm:p-10 flex flex-col justify-between relative overflow-hidden select-none min-h-[320px] md:min-h-[500px]">
-          <div className="absolute inset-0 bg-[radial-gradient(#10b981_0.7px,transparent_0.7px)] [background-size:24px_24px] opacity-5 pointer-events-none z-0" />
-          <div className="absolute -left-12 -top-12 w-64 h-64 bg-emerald-50 rounded-full blur-2xl pointer-events-none z-0" />
+        <div id="auth-decorative-sidebar" className="md:col-span-4 bg-[#f0faf6] text-slate-800 border-r border-[#e2f4ea] p-8 sm:p-10 flex flex-col justify-between relative overflow-hidden select-none min-h-[320px] md:min-h-[500px]">
+          <div className="absolute inset-0 bg-[radial-gradient(#059669_0.7px,transparent_0.7px)] [background-size:24px_24px] opacity-10 pointer-events-none z-0" />
+          <div className="absolute -left-12 -top-12 w-64 h-64 bg-emerald-100/50 rounded-full blur-2xl pointer-events-none z-0" />
           
           <div className="relative z-10 space-y-6">
             <TuliticsLogo iconSize={32} showText={true} textColorClass="text-[#155e42]" subTitle="ENTERPRISE SYSTEM" usePng={true} />
             
             <div className="pt-2">
-              <span className="bg-[#f0fdf4] border border-[#bbf7d0] text-[#155e42] font-mono font-black tracking-widest uppercase text-xs px-3 py-1 rounded-lg inline-flex items-center gap-1.5">
-                ✦ {activeRole} GATES ✦
+              <span className="bg-[#e6f4ea] border border-[#a3e635]/30 text-[#155e42] font-mono font-black tracking-widest uppercase text-xs px-3 py-1 rounded-lg inline-flex items-center gap-1.5">
+                ✦ {localRole} GATES ✦
               </span>
             </div>
-            <h3 className="font-sans font-black text-2xl sm:text-3xl tracking-tight text-slate-900 leading-tight">
+            <h3 className="font-sans font-black text-2xl tracking-tight text-slate-900 leading-tight">
               {colors.label}
             </h3>
-            <p className="text-sm text-slate-500 leading-relaxed font-semibold">
+            <p className="text-sm text-slate-600 leading-relaxed font-semibold">
               Review and record peer assessments, index DOIs, and dispatch manuscripts downstream on a secure decentralized pipeline.
             </p>
           </div>
 
-          <div className="relative z-10 pt-12 text-xs text-slate-500 font-mono space-y-3 border-t border-slate-100 mt-8">
+          <div className="relative z-10 pt-12 text-xs text-slate-500 font-mono space-y-3 border-t border-[#e2f4ea] mt-8">
             <div className="flex items-center gap-2 font-black text-[#155e42]">
               <Shield className="w-4.5 h-4.5 text-emerald-600 stroke-[2px]" />
               <span>Double-Blind Encryption</span>
@@ -314,6 +347,41 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
 
         {/* Dynamic Form Side */}
         <div className="md:col-span-8 p-8 sm:p-10 space-y-6 bg-white">
+          {/* Top Segmented Tab Control */}
+          <div className="flex bg-slate-100/85 p-1 rounded-2xl w-full">
+            <button
+              type="button"
+              onClick={() => {
+                setMode('LOGIN');
+                setEmail(getPresetEmail(localRole));
+                setPassword('password123');
+              }}
+              className={`flex-1 py-3 px-6 rounded-xl font-mono text-xs font-black uppercase tracking-widest text-center transition-all duration-200 cursor-pointer ${
+                mode === 'LOGIN'
+                  ? 'bg-[#008751] text-white shadow-md'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+              }`}
+            >
+              Sign In / Login
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('REGISTER');
+                setEmail('');
+                setPassword('');
+                setConfirmPassword('');
+              }}
+              className={`flex-1 py-3 px-6 rounded-xl font-mono text-xs font-black uppercase tracking-widest text-center transition-all duration-200 cursor-pointer ${
+                mode === 'REGISTER'
+                  ? 'bg-[#008751] text-white shadow-md'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+              }`}
+            >
+              Sign Up / Register
+            </button>
+          </div>
+
           <div className="flex items-center justify-between border-b border-slate-100 pb-5">
             <div>
               <h2 className="font-sans font-black text-xl sm:text-2xl text-slate-900 tracking-tight leading-none">
@@ -323,15 +391,10 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                 {mode === 'LOGIN' 
                   ? `Enter credentials to access your persistent journal dashboard.` 
                   : `Build a peer profile index associated with our multi-tenant database.`}
-                {activeRole === 'COORDINATOR' && mode === 'LOGIN' && (
-                  <span className="block text-black font-mono text-xs mt-1">
-                    Preset demo: <strong className="underline">coordinator-triage@jms-journal.org</strong> (any password)
-                  </span>
-                )}
               </p>
             </div>
             <span className="bg-[#f0fdf4] border border-[#bbf7d0] text-[#155e42] font-mono text-xs px-3.5 py-1.5 rounded-lg font-black uppercase tracking-widest shrink-0 self-start shadow-xs">
-              {activeRole}
+              {localRole}
             </span>
           </div>
 
@@ -350,6 +413,21 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
             </div>
           )}
 
+          {/* Dynamic Sandbox Assist Amber Box */}
+          {mode === 'LOGIN' && (
+            <div className="bg-[#fffbeb] border border-[#fef3c7] text-[#92400e] p-4 rounded-2xl text-xs flex items-start gap-3 shadow-xs font-semibold leading-relaxed">
+              <span className="text-lg leading-none mt-0.5 select-none">💡</span>
+              <div>
+                <span className="font-mono font-black uppercase tracking-wider text-[#b45309] block mb-1">
+                  Portal Sandbox Assist:
+                </span>
+                <span>
+                  Click login directly to simulate entering as <strong className="underline text-amber-950 font-black">{email || "specified role email"}</strong>. This provides access to pre-seeded manuscripts and logic gates!
+                </span>
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSimulateSubmit} className="space-y-4">
             
             {/* REGISTER PORTAL FORMS */}
@@ -357,7 +435,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 text-sm">
                 
                 {/* AUTHOR SPECIFIC REGISTRATION */}
-                {activeRole === 'AUTHOR' && (
+                {localRole === 'AUTHOR' && (
                   <>
                     <div>
                       <label className={labelStyle}>First Name</label>
@@ -458,7 +536,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                 )}
 
                 {/* REVIEWER SPECIFIC REGISTRATION */}
-                {activeRole === 'REVIEWER' && (
+                {localRole === 'REVIEWER' && (
                   <>
                     <div className="sm:col-span-2">
                       <label className={labelStyle}>Full Name (With Titles)</label>
@@ -577,7 +655,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                 )}
 
                 {/* EDITOR SPECIFIC REGISTRATION */}
-                {activeRole === 'EDITOR' && (
+                {localRole === 'EDITOR' && (
                   <>
                     <div className="sm:col-span-2">
                       <label className={labelStyle}>Full Name</label>
@@ -651,7 +729,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                 )}
 
                 {/* COORDINATOR SPECIFIC REGISTRATION */}
-                {activeRole === 'COORDINATOR' && (
+                {localRole === 'COORDINATOR' && (
                   <>
                     <div className="sm:col-span-2">
                       <label className={labelStyle}>Full Name</label>
@@ -699,7 +777,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                 )}
 
                 {/* PUBLISHER SPECIFIC REGISTRATION */}
-                {activeRole === 'PUBLISHER' && (
+                {localRole === 'PUBLISHER' && (
                   <>
                     <div className="sm:col-span-2">
                       <label className={labelStyle}>Publisher Company Name</label>
@@ -815,9 +893,49 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
               )}
             </div>
 
+            {/* SELECT ROLE TO LOGIN/REGISTER SECTION */}
+            <div className="space-y-3 pt-3.5 pb-2">
+              <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 font-black select-none">
+                Select Portal Access Gate
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                {[
+                  { role: 'AUTHOR' as Role, label: 'Author' },
+                  { role: 'REVIEWER' as Role, label: 'Reviewer' },
+                  { role: 'EDITOR' as Role, label: 'Editor' },
+                  { role: 'PUBLISHER' as Role, label: 'Publisher' },
+                  { role: 'COORDINATOR' as Role, label: 'Coordinator' }
+                ].map(({ role, label }) => {
+                  const isSelected = localRole === role;
+                  return (
+                    <button
+                      key={role}
+                      type="button"
+                      onClick={() => handleRoleSelect(role)}
+                      className={`flex flex-col items-center justify-center py-2.5 px-2 rounded-xl border transition-all duration-150 cursor-pointer text-center select-none ${
+                        isSelected
+                          ? 'bg-[#008751] border-[#008751] text-white shadow-md scale-[1.03]'
+                          : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="font-mono text-[10px] font-black uppercase tracking-wider">
+                        {role}
+                      </span>
+                      <span className={`text-[9px] mt-0.5 ${isSelected ? 'text-emerald-100' : 'text-slate-400 font-bold'}`}>
+                        {mode === 'LOGIN' ? 'login' : 'signup'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-slate-400 font-semibold text-center select-none pt-0.5">
+                💡 Click any button to instantly switch role and load standard sandbox inputs.
+              </p>
+            </div>
+
             {/* FORGOT PASSWORD GATES */}
             {mode === 'LOGIN' && (
-              <div className="flex items-center justify-between text-sm pt-2">
+              <div className="flex items-center justify-between text-sm pt-1">
                 <a
                   href="#"
                   onClick={(e) => { e.preventDefault(); alert("Dispatching simulated password reset mail guidelines to: " + (email || "your inbox")); }}
@@ -876,7 +994,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                 Continue with Google
               </button>
 
-              {activeRole !== 'PUBLISHER' ? (
+              {localRole !== 'PUBLISHER' ? (
                 <button
                   id="btn-oauth-orcid"
                   type="button"
@@ -895,27 +1013,38 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
           </div>
 
           {/* TOGGLE GATES SCREEN */}
-          <div className="text-center pt-5 text-sm">
+          <div className="text-center pt-5 text-sm border-t border-slate-100">
             {mode === 'LOGIN' ? (
-              <p className="text-slate-500 font-semibold">
+              <p className="text-slate-500 font-semibold text-xs">
                 Don't have a registered account?{' '}
                 <button
                   id="btn-toggle-auth-register"
-                  onClick={() => setMode('REGISTER')}
-                  className="font-bold underline text-[#008751] hover:text-[#007043] transition-colors"
+                  type="button"
+                  onClick={() => {
+                    setMode('REGISTER');
+                    setEmail('');
+                    setPassword('');
+                    setConfirmPassword('');
+                  }}
+                  className="font-black underline text-[#008751] hover:text-[#007043] transition-colors cursor-pointer"
                 >
-                  Register as {activeRole.charAt(0) + activeRole.slice(1).toLowerCase()}
+                  Create a new registration profile
                 </button>
               </p>
             ) : (
-              <p className="text-slate-500 font-semibold">
+              <p className="text-slate-500 font-semibold text-xs">
                 Already registered under JMS?{' '}
                 <button
                   id="btn-toggle-auth-login"
-                  onClick={() => setMode('LOGIN')}
-                  className="font-bold underline text-[#008751] hover:text-[#007043] transition-colors"
+                  type="button"
+                  onClick={() => {
+                    setMode('LOGIN');
+                    setEmail(getPresetEmail(localRole));
+                    setPassword('password123');
+                  }}
+                  className="font-black underline text-[#008751] hover:text-[#007043] transition-colors cursor-pointer"
                 >
-                  Login as {activeRole.charAt(0) + activeRole.slice(1).toLowerCase()}
+                  Login to your active profile
                 </button>
               </p>
             )}
