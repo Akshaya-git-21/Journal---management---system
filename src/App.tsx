@@ -134,7 +134,7 @@ export default function App() {
 
     if (hasSubmit) {
       setAuthRole('AUTHOR');
-      setAuthMode('LOGIN');
+      setAuthMode('REGISTER');
       setCurrentScreen('AUTH');
     } else if (hasAuth) {
       if (params.has('login') || params.get('action') === 'login' || pathname.includes('login')) {
@@ -321,10 +321,10 @@ export default function App() {
           </div>
 
           {/* Main Navigation Header */}
-          <header className="bg-white border-b border-[#e2e8f0] px-4 sm:px-6 py-4 shadow-xs sticky top-0 z-50">
+          <header className="bg-white border-b border-[#e2e8f0] px-4 sm:px-6 py-2.5 shadow-xs sticky top-0 z-50">
             <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <TuliticsLogo iconSize={32} showText={true} textColorClass="text-[#155e42]" subTitle="SPECIALIZED SUBMISSION PORTAL" usePng={true} />
+                <TuliticsLogo iconSize={32} showText={true} textColorClass="text-[#155e42]" subTitle="PORTAL" usePng={true} />
               </div>
 
               <div className="flex items-center gap-3">
@@ -522,13 +522,14 @@ export default function App() {
       )}
 
       {/* Static premium workspace info footer */}
-      <footer id="jms-platform-footer" className="bg-slate-900 text-slate-400 py-6 border-t border-slate-800 px-6 shrink-0 text-left">
+      {currentScreen !== 'AUTH' && (
+        <footer id="jms-platform-footer" className="bg-slate-900 text-slate-400 py-4 border-t border-slate-800 px-6 shrink-0 text-left">
           <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-[11px] font-mono">
             <div className="space-y-1">
               <p className="font-bold text-white uppercase tracking-wider text-xs">
                 Journal of Artificial Intelligence in Medicine & Public Health
               </p>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-1.5">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-1">
                 <p className="text-slate-400">
                   JMS™ Specialized OJS-Style Multi-Tenant Enterprise System
                 </p>
@@ -540,6 +541,7 @@ export default function App() {
             <p className="text-slate-500 text-right">© {new Date().getFullYear()} JMS. All rights reserved.</p>
           </div>
         </footer>
+      )}
 
     </div>
   );
