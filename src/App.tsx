@@ -14,8 +14,8 @@ import ReviewerWorkspace from './components/ReviewerWorkspace';
 import PublisherWorkspace from './components/PublisherWorkspace';
 import ArchitectWorkspace from './components/ArchitectWorkspace';
 import CoordinatorWorkspace from './components/CoordinatorWorkspace';
-import LandingPage from './components/LandingPage';
 import AuthPortals from './components/AuthPortals';
+import NewSubmissionFlow from './components/NewSubmissionFlow';
 import { CheckCircle2, LogOut, Info, Layers, BookOpen, User, AlertTriangle, Check, Copy } from 'lucide-react';
 import { 
   supabase, 
@@ -26,16 +26,18 @@ import {
 } from './lib/supabase';
 
 export default function App() {
-  // Screen routing state: 'LANDING' | 'AUTH' | 'WORKSPACE'
-  const [currentScreen, setCurrentScreen] = useState<'LANDING' | 'AUTH' | 'WORKSPACE'>(() => {
+  // Screen routing state: 'SUBMISSION' | 'AUTH' | 'WORKSPACE'
+  const [currentScreen, setCurrentScreen] = useState<'SUBMISSION' | 'AUTH' | 'WORKSPACE'>(() => {
     const saved = localStorage.getItem('jms_sim_current_screen');
-    return (saved as 'LANDING' | 'AUTH' | 'WORKSPACE') || 'LANDING';
+    const val = (saved as 'SUBMISSION' | 'AUTH' | 'WORKSPACE') || 'SUBMISSION';
+    return val;
   });
 
   // Authentication specific roles & modes
   const [authRole, setAuthRole] = useState<Role>(() => {
     const saved = localStorage.getItem('jms_sim_active_role');
-    return (saved as Role) || 'AUTHOR';
+    const val = (saved as Role) || 'AUTHOR';
+    return val === 'ARCHITECT' ? 'AUTHOR' : val;
   });
   const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER'>('LOGIN');
 
@@ -119,6 +121,25 @@ export default function App() {
     }
   }, [loggedInUser]);
 
+  // Check for external link routing to Login/Signup directly (e.g. from tulitics.vercel.app)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const hasSubmit = params.has('submit') || params.get('action') === 'submit' || params.get('action') === 'publish' || params.has('publish');
+    const hasAuth = params.has('auth') || params.has('login') || params.has('signup') || params.has('register') || params.get('action') === 'login' || params.get('action') === 'signup' || params.get('action') === 'register';
+
+    if (hasSubmit) {
+      setAuthRole('AUTHOR');
+      setCurrentScreen('SUBMISSION');
+    } else if (hasAuth) {
+      if (params.has('login') || params.get('action') === 'login') {
+        setAuthMode('LOGIN');
+      } else {
+        setAuthMode('REGISTER');
+      }
+      setCurrentScreen('AUTH');
+    }
+  }, []);
+
   const handleRoleChange = (role: Role) => {
     setActiveRole(role);
     setNotification(''); 
@@ -171,7 +192,7 @@ export default function App() {
 
   const handleSignOut = () => {
     setLoggedInUser(null);
-    setCurrentScreen('LANDING');
+    setCurrentScreen('SUBMISSION');
     setNotification('You have logged out successfully.');
     setTimeout(() => setNotification(''), 4000);
   };
@@ -254,27 +275,166 @@ export default function App() {
       )}
 
       {/* RENDER CONTROLLER */}
-      {currentScreen === 'LANDING' && (
-        <LandingPage
-          manuscripts={manuscripts}
-          onSubmitClick={() => {
-            setAuthRole('AUTHOR');
-            setAuthMode('REGISTER');
-            setCurrentScreen('AUTH');
-          }}
-          onLoginClick={(role, mode) => {
-            setAuthRole(role);
-            setAuthMode(mode);
-            setCurrentScreen('AUTH');
-          }}
-        />
+      {currentScreen === 'SUBMISSION' && (
+        <div className="flex-grow flex flex-col min-h-screen bg-slate-50">
+          {/* Top Editorial Ribbon */}
+          <div className="bg-[#0f172a] text-slate-300 py-2.5 px-4 sm:px-6 border-b border-slate-800 text-xs">
+            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-slate-400 font-mono">
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>SYSTEM STATUS: ONLINE</span>
+                <span className="text-slate-650">|</span>
+                <span>OJS v3.4 COMPATIBLE</span>
+              </div>
+              <div className="flex items-center gap-4 text-slate-400">
+                <button 
+                  onClick={() => {
+                    setAuthRole('EDITOR');
+                    setAuthMode('LOGIN');
+                    setCurrentScreen('AUTH');
+                  }}
+                  className="hover:text-white transition cursor-pointer font-bold font-mono text-[10px] uppercase"
+                >
+                  Editor Log In
+                </button>
+                <span>•</span>
+                <button 
+                  onClick={() => {
+                    setAuthRole('REVIEWER');
+                    setAuthMode('LOGIN');
+                    setCurrentScreen('AUTH');
+                  }}
+                  className="hover:text-white transition cursor-pointer font-bold font-mono text-[10px] uppercase"
+                >
+                  Reviewer Log In
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Navigation Header */}
+          <header className="bg-white border-b border-[#e2e8f0] px-4 sm:px-6 py-4 shadow-xs sticky top-0 z-50">
+            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <TuliticsLogo iconSize={32} showText={true} textColorClass="text-[#155e42]" subTitle="SPECIALIZED SUBMISSION PORTAL" usePng={true} />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  id="btn-nav-sign-in"
+                  onClick={() => {
+                    setAuthRole('AUTHOR');
+                    setAuthMode('LOGIN');
+                    setCurrentScreen('AUTH');
+                  }}
+                  className="px-4 py-2 border border-[#cbd8df] text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-bold transition cursor-pointer shadow-sm"
+                >
+                  Sign In to Tracker
+                </button>
+                <button
+                  id="btn-nav-register"
+                  onClick={() => {
+                    setAuthRole('AUTHOR');
+                    setAuthMode('REGISTER');
+                    setCurrentScreen('AUTH');
+                  }}
+                  className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-md shadow-emerald-50/85"
+                >
+                  Register Account
+                </button>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Wizard Area */}
+          <div className="flex-grow max-w-7xl mx-auto w-full px-4 sm:px-6 py-8">
+            <NewSubmissionFlow
+              currentUser={loggedInUser}
+              onCancel={() => {
+                if (loggedInUser) {
+                  setCurrentScreen('WORKSPACE');
+                } else {
+                  if (confirm("Reset current draft progress?")) {
+                    localStorage.removeItem('ojs_submission_cached_draft');
+                    window.location.reload();
+                  }
+                }
+              }}
+              onSubmit={(paperObj) => {
+                const primaryContact = paperObj.contributors?.find((c: any) => c.isPrincipalContact) || paperObj.contributors?.[0];
+                const authorName = primaryContact ? `${primaryContact.firstName} ${primaryContact.lastName}` : "Dr. Ada Lovelace";
+                const authorEmail = primaryContact ? primaryContact.email : "author@stanford.edu";
+
+                const parentManuscript: Manuscript = {
+                  id: `OJS-${paperObj.id}`,
+                  title: paperObj.title,
+                  abstract: paperObj.abstract,
+                  references: "",
+                  isDoubleBlind: true,
+                  coverLetter: paperObj.coverLetter || "Confidential Cover Letter.",
+                  fileName: paperObj.fileName || paperObj.uploadedFileNames?.[0] || 'manuscript_submission.pdf',
+                  fileSize: paperObj.fileSize || "2.4 MB",
+                  uploadedAt: new Date().toISOString(),
+                  storagePath: paperObj.storagePath || null,
+                  publicUrl: paperObj.publicUrl || null,
+                  contributors: (paperObj.contributors || []).map((c: any) => ({
+                    id: c.id,
+                    name: `${c.firstName} ${c.lastName}`,
+                    email: c.email,
+                    affiliation: c.affiliation,
+                    role: c.role
+                  })),
+                  status: 'SUBMITTED',
+                  submittedAt: new Date().toISOString(),
+                  reviewers: [],
+                  suggestedReviewers: (paperObj.reviewerSuggestions || []).map((r: any) => ({
+                    id: r.id,
+                    name: r.name,
+                    email: r.email,
+                    approved: false
+                  })),
+                  discussions: [],
+                  doi: null,
+                  volume: null,
+                  issue: null,
+                  publishedAt: null,
+                  authorId: loggedInUser ? "auth_ada" : `guest_${paperObj.id}`,
+                  authorName: authorName,
+                  authorEmail: authorEmail,
+                  submissionStep: 9,
+                  editorsNotes: ""
+                };
+
+                handleSaveDraftManuscript(parentManuscript);
+                
+                if (!loggedInUser) {
+                  const newUser = {
+                    name: authorName,
+                    email: authorEmail,
+                    role: 'AUTHOR' as Role
+                  };
+                  setLoggedInUser(newUser);
+                  setActiveRole('AUTHOR');
+                }
+
+                setNotification(`SUCCESS: Manuscript "${paperObj.title}" successfully dispatched to the peer review queue.`);
+                setTimeout(() => {
+                  setNotification('');
+                  setCurrentScreen('WORKSPACE');
+                }, 4000);
+              }}
+            />
+          </div>
+        </div>
       )}
 
       {currentScreen === 'AUTH' && (
         <AuthPortals
           activeRole={authRole}
           initialMode={authMode}
-          onBackToLanding={() => setCurrentScreen('LANDING')}
+          onBackToLanding={() => {
+            window.location.href = 'https://tulitics.vercel.app/';
+          }}
           onSuccessAuth={(user) => {
             setLoggedInUser(user);
             setActiveRole(user.role);
@@ -354,8 +514,7 @@ export default function App() {
       )}
 
       {/* Static premium workspace info footer */}
-      {currentScreen !== 'LANDING' && (
-        <footer id="jms-platform-footer" className="bg-slate-900 text-slate-400 py-6 border-t border-slate-800 px-6 shrink-0 text-left">
+      <footer id="jms-platform-footer" className="bg-slate-900 text-slate-400 py-6 border-t border-slate-800 px-6 shrink-0 text-left">
           <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-[11px] font-mono">
             <div className="space-y-1">
               <p className="font-bold text-white uppercase tracking-wider text-xs">
@@ -373,7 +532,6 @@ export default function App() {
             <p className="text-slate-500 text-right">© {new Date().getFullYear()} JMS. All rights reserved.</p>
           </div>
         </footer>
-      )}
 
     </div>
   );

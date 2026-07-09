@@ -55,6 +55,20 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
 
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  // Sync props to state dynamically when parent screen triggers
+  React.useEffect(() => {
+    setLocalRole(activeRole);
+    setMode(initialMode);
+    if (initialMode === 'LOGIN') {
+      setEmail(getPresetEmail(activeRole));
+      setPassword('password123');
+    } else {
+      setEmail('');
+      setPassword('');
+      setConfirmPassword('');
+    }
+  }, [activeRole, initialMode]);
+
   const handleRoleSelect = (role: Role) => {
     setLocalRole(role);
     if (mode === 'LOGIN') {
@@ -181,7 +195,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
 
   const colors = getRoleColors();
 
-  const labelStyle = "block text-emerald-950 font-sans font-extrabold mb-2 uppercase tracking-wide text-sm sm:text-base leading-tight";
+  const labelStyle = "block text-slate-700 font-sans font-normal mb-1.5 text-sm sm:text-base leading-tight";
   const inputStyle = `w-full bg-white text-slate-900 placeholder-slate-400 border border-emerald-100/80 rounded-xl pl-10 pr-4 py-3 focus:ring-2 focus:outline-none ${colors.focusBorder} font-sans font-semibold text-base transition-all duration-200 shadow-xs`;
   const textareaStyle = `w-full bg-white text-slate-900 placeholder-slate-400 border border-emerald-100/80 rounded-xl pl-10 pr-4 py-3 focus:ring-2 focus:outline-none ${colors.focusBorder} font-sans font-semibold text-base transition-all duration-200 shadow-xs`;
   const selectStyle = `w-full bg-white text-slate-900 border border-emerald-100/80 rounded-xl pl-10 pr-10 py-3 focus:ring-2 focus:outline-none ${colors.focusBorder} font-sans font-semibold text-base transition-all duration-200 shadow-xs appearance-none`;
@@ -302,53 +316,72 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
   };
 
   return (
-    <div id="auth-portal-screen" className="min-h-screen w-full bg-white px-4 sm:px-6 py-12 md:py-20 flex flex-col items-center justify-center relative">
-      <div className="absolute inset-0 bg-[radial-gradient(#10b981_0.7px,transparent_0.7px)] [background-size:24px_24px] opacity-[0.04] pointer-events-none" />
+    <div id="auth-portal-screen" className="min-h-screen w-full bg-[#1a4038] flex flex-col md:flex-row relative overflow-x-hidden animate-fade-in">
       
       <button
         id="btn-auth-back-to-landing"
         onClick={onBackToLanding}
-        className="self-start max-w-4xl mx-auto w-full flex items-center gap-2 text-xs text-[#008751] hover:text-[#007043] bg-white hover:bg-slate-50 border border-slate-100 px-4 py-2.5 rounded-xl transition-all duration-150 mb-6 font-bold cursor-pointer shadow-[0_4px_12px_rgba(4,120,87,0.02)]"
+        className="absolute top-6 left-6 z-20 flex items-center gap-2 text-xs text-white bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2.5 rounded-xl transition-all duration-150 font-bold cursor-pointer"
       >
         <ArrowLeft className="w-4 h-4" /> Back to Journal Homepage
       </button>
 
-      <div className="bg-white rounded-3xl border border-slate-100 shadow-[0_15px_50px_rgba(4,120,87,0.06)] overflow-hidden grid grid-cols-1 md:grid-cols-12 max-w-4xl w-full animate-fade-in relative z-10">
+      {/* Left Decorative Sidebar - Half Screen Green */}
+      <div id="auth-decorative-sidebar" className="w-full md:w-1/2 bg-[#1a4038] text-white p-8 sm:p-12 md:p-16 lg:p-24 flex flex-col justify-between relative overflow-y-auto min-h-[450px] md:min-h-screen">
+        <div className="absolute inset-0 bg-[radial-gradient(#10b981_0.7px,transparent_0.7px)] [background-size:24px_24px] opacity-10 pointer-events-none z-0" />
+        <div className="absolute -left-12 -top-12 w-64 h-64 bg-emerald-800/20 rounded-full blur-2xl pointer-events-none z-0" />
         
-        {/* Left Decorative Sidebar */}
-        <div id="auth-decorative-sidebar" className="md:col-span-4 bg-[#f0faf6] text-slate-800 border-r border-[#e2f4ea] p-8 sm:p-10 flex flex-col justify-between relative overflow-hidden select-none min-h-[320px] md:min-h-[500px]">
-          <div className="absolute inset-0 bg-[radial-gradient(#059669_0.7px,transparent_0.7px)] [background-size:24px_24px] opacity-10 pointer-events-none z-0" />
-          <div className="absolute -left-12 -top-12 w-64 h-64 bg-emerald-100/50 rounded-full blur-2xl pointer-events-none z-0" />
-          
-          <div className="relative z-10 space-y-6">
-            <TuliticsLogo iconSize={32} showText={true} textColorClass="text-[#155e42]" subTitle="ENTERPRISE SYSTEM" usePng={true} />
-            
-            <div className="pt-2">
-              <span className="bg-[#e6f4ea] border border-[#a3e635]/30 text-[#155e42] font-mono font-black tracking-widest uppercase text-xs px-3 py-1 rounded-lg inline-flex items-center gap-1.5">
-                ✦ {localRole} GATES ✦
-              </span>
-            </div>
-            <h3 className="font-sans font-black text-2xl tracking-tight text-slate-900 leading-tight">
-              {colors.label}
-            </h3>
-            <p className="text-sm text-slate-600 leading-relaxed font-semibold">
-              Review and record peer assessments, index DOIs, and dispatch manuscripts downstream on a secure decentralized pipeline.
+        <div className="relative z-10 space-y-8 my-auto max-w-lg">
+          <div className="space-y-4">
+            <h2 className="text-3xl lg:text-4xl font-sans font-extrabold tracking-tight text-white leading-tight">
+              Unlock your growth potential with our insights
+            </h2>
+            <p className="text-emerald-100/90 text-sm sm:text-base leading-relaxed font-semibold">
+              Sign up to get reports, industry news and resources for your business in your inbox—sourced from Euromonitor experts and our market research knowledge hub, Passport.
+            </p>
+            <p className="text-emerald-100/90 text-sm sm:text-base leading-relaxed font-semibold">
+              Each month, you can expect a curated roundup of market, consumer and economic insights. Our goal: to help you navigate challenges and explore new pathways to growth.
             </p>
           </div>
 
-          <div className="relative z-10 pt-12 text-xs text-slate-500 font-mono space-y-3 border-t border-[#e2f4ea] mt-8">
-            <div className="flex items-center gap-2 font-black text-[#155e42]">
-              <Shield className="w-4.5 h-4.5 text-emerald-600 stroke-[2px]" />
-              <span>Double-Blind Encryption</span>
-            </div>
-            <p className="leading-relaxed font-semibold">Your data is secure and protected under multi-tenant enterprise isolation algorithms.</p>
+          <div className="space-y-4 pt-6 border-t border-emerald-800/40">
+            <h3 className="text-xl lg:text-2xl font-sans font-extrabold tracking-tight text-white">
+              Why Tulitics?
+            </h3>
+            <ul className="space-y-3 text-sm sm:text-base text-emerald-100/90 list-none">
+              <li className="flex items-start gap-2.5">
+                <span className="text-emerald-400 shrink-0 mt-1">•</span>
+                <span>Stay updated on industry trends, consumer preferences and economic shifts</span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="text-emerald-400 shrink-0 mt-1">•</span>
+                <span>Access free reports and strategic resources from our research experts</span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="text-emerald-400 shrink-0 mt-1">•</span>
+                <span>Get insights and data to inspire your strategy</span>
+              </li>
+            </ul>
+            <p className="text-emerald-200/80 text-xs sm:text-sm italic pt-2">
+              Whatever stage you’re at in your organisation, we’ll help you stay in the know.
+            </p>
           </div>
         </div>
 
-        {/* Dynamic Form Side */}
-        <div className="md:col-span-8 p-8 sm:p-10 space-y-6 bg-white">
+        <div className="relative z-10 pt-12 text-xs text-emerald-200/80 font-mono space-y-3 border-t border-emerald-800/40 mt-12">
+          <div className="flex items-center gap-2 font-black text-emerald-300">
+            <Shield className="w-4.5 h-4.5 text-emerald-400 stroke-[2px]" />
+            <span>Double-Blind Encryption</span>
+          </div>
+          <p className="leading-relaxed font-semibold">Your data is secure and protected under multi-tenant enterprise isolation algorithms.</p>
+        </div>
+      </div>
+
+      {/* Right Form Side - Half Screen White */}
+      <div className="w-full md:w-1/2 bg-white p-8 sm:p-12 md:p-16 lg:p-24 flex flex-col justify-center relative overflow-y-auto min-h-screen">
+        <div className="max-w-xl mx-auto w-full space-y-6 py-12 md:py-16">
           {/* Top Segmented Tab Control */}
-          <div className="flex bg-slate-100/85 p-1 rounded-2xl w-full">
+          <div className="flex bg-slate-100/85 p-1 rounded-2xl w-full font-sans">
             <button
               type="button"
               onClick={() => {
@@ -356,7 +389,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                 setEmail(getPresetEmail(localRole));
                 setPassword('password123');
               }}
-              className={`flex-1 py-3 px-6 rounded-xl font-mono text-xs font-black uppercase tracking-widest text-center transition-all duration-200 cursor-pointer ${
+              className={`flex-1 py-3 px-6 rounded-xl text-sm font-normal text-center transition-all duration-200 cursor-pointer ${
                 mode === 'LOGIN'
                   ? 'bg-[#008751] text-white shadow-md'
                   : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
@@ -372,7 +405,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                 setPassword('');
                 setConfirmPassword('');
               }}
-              className={`flex-1 py-3 px-6 rounded-xl font-mono text-xs font-black uppercase tracking-widest text-center transition-all duration-200 cursor-pointer ${
+              className={`flex-1 py-3 px-6 rounded-xl text-sm font-normal text-center transition-all duration-200 cursor-pointer ${
                 mode === 'REGISTER'
                   ? 'bg-[#008751] text-white shadow-md'
                   : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
@@ -895,10 +928,10 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
 
             {/* SELECT ROLE TO LOGIN/REGISTER SECTION */}
             <div className="space-y-3 pt-3.5 pb-2">
-              <label className="block text-[10px] font-mono uppercase tracking-widest text-slate-400 font-black select-none">
+              <label className="block text-xs font-sans font-black uppercase tracking-wider text-slate-700 select-none">
                 Select Portal Access Gate
               </label>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 {[
                   { role: 'AUTHOR' as Role, label: 'Author' },
                   { role: 'REVIEWER' as Role, label: 'Reviewer' },
@@ -912,16 +945,16 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                       key={role}
                       type="button"
                       onClick={() => handleRoleSelect(role)}
-                      className={`flex flex-col items-center justify-center py-2.5 px-2 rounded-xl border transition-all duration-150 cursor-pointer text-center select-none ${
+                      className={`flex flex-col items-center justify-center py-4 px-3 rounded-2xl border-2 transition-all duration-150 cursor-pointer text-center select-none ${
                         isSelected
-                          ? 'bg-[#008751] border-[#008751] text-white shadow-md scale-[1.03]'
+                          ? 'bg-[#008751] border-[#008751] text-white shadow-lg scale-[1.05]'
                           : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700 hover:bg-slate-50'
                       }`}
                     >
-                      <span className="font-mono text-[10px] font-black uppercase tracking-wider">
+                      <span className="font-sans text-xs sm:text-sm font-black uppercase tracking-wider block">
                         {role}
                       </span>
-                      <span className={`text-[9px] mt-0.5 ${isSelected ? 'text-emerald-100' : 'text-slate-400 font-bold'}`}>
+                      <span className={`text-[10px] sm:text-xs uppercase tracking-widest mt-1 font-black ${isSelected ? 'text-emerald-100' : 'text-slate-400'}`}>
                         {mode === 'LOGIN' ? 'login' : 'signup'}
                       </span>
                     </button>
