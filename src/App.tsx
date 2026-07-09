@@ -124,14 +124,20 @@ export default function App() {
   // Check for external link routing to Login/Signup directly (e.g. from tulitics.vercel.app)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const hasSubmit = params.has('submit') || params.get('action') === 'submit' || params.get('action') === 'publish' || params.has('publish');
-    const hasAuth = params.has('auth') || params.has('login') || params.has('signup') || params.has('register') || params.get('action') === 'login' || params.get('action') === 'signup' || params.get('action') === 'register';
+    const pathname = window.location.pathname.toLowerCase();
+    
+    const isSubmitPath = pathname.includes('submit') || pathname.includes('publish');
+    const isAuthPath = pathname.includes('auth') || pathname.includes('login') || pathname.includes('signup') || pathname.includes('register');
+
+    const hasSubmit = isSubmitPath || params.has('submit') || params.get('action') === 'submit' || params.get('action') === 'publish' || params.has('publish');
+    const hasAuth = isAuthPath || params.has('auth') || params.has('login') || params.has('signup') || params.has('register') || params.get('action') === 'login' || params.get('action') === 'signup' || params.get('action') === 'register';
 
     if (hasSubmit) {
       setAuthRole('AUTHOR');
-      setCurrentScreen('SUBMISSION');
+      setAuthMode('LOGIN');
+      setCurrentScreen('AUTH');
     } else if (hasAuth) {
-      if (params.has('login') || params.get('action') === 'login') {
+      if (params.has('login') || params.get('action') === 'login' || pathname.includes('login')) {
         setAuthMode('LOGIN');
       } else {
         setAuthMode('REGISTER');
