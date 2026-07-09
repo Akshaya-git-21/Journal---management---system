@@ -370,8 +370,8 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
       </div>
 
       {/* Right Form Side - White */}
-      <div className="w-full md:w-[58%] bg-slate-50/50 p-4 md:p-8 lg:p-12 flex flex-col relative overflow-y-auto md:h-screen shrink-0">
-        <div className="max-w-lg w-full mx-auto my-auto space-y-3 py-4 px-5 sm:px-7 md:px-8 bg-white border border-slate-100 rounded-2xl shadow-xl md:shadow-[0_8px_30px_rgb(0,0,0,0.06)]">
+      <div className="w-full md:w-[58%] bg-slate-50/50 p-4 md:p-6 lg:p-8 flex flex-col justify-center items-center relative overflow-y-auto md:overflow-hidden md:h-screen shrink-0">
+        <div className="max-w-lg w-full mx-auto my-auto space-y-3 py-4 px-5 sm:px-7 md:px-8 bg-white border border-slate-100 rounded-2xl shadow-xl md:shadow-[0_8px_30px_rgb(0,0,0,0.06)] md:max-h-[calc(100vh-3rem)] overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200/80 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
           {/* Top Segmented Tab Control */}
           <div className="flex bg-slate-100/85 p-1 rounded-xl w-full font-sans">
             <button
