@@ -296,27 +296,11 @@ export default function RoleSelector({
                   </button>
                 </div>
               ) : (
-                /* Elegant Horizontal Segmented Controls to switch simulator roles */
-                <div className="flex flex-wrap items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 shadow-inner">
-                  {roles.map((r) => {
-                    const Icon = r.icon;
-                    const isActive = activeRole === r.val;
-                    return (
-                      <button
-                        id={`role-btn-${r.val.toLowerCase()}`}
-                        key={r.val}
-                        onClick={() => onRoleChange(r.val)}
-                        className={`flex items-center gap-1 px-2.5 py-1 rounded-md font-sans font-bold text-[11px] transition-all cursor-pointer select-none leading-none ${
-                          isActive
-                            ? 'bg-white text-[#198754] shadow-xs border border-slate-200/50'
-                            : 'text-slate-400 hover:text-slate-700'
-                        }`}
-                      >
-                        <Icon className={`w-3 h-3 ${isActive ? 'text-[#198754]' : 'text-slate-405'}`} />
-                        <span>{r.label}</span>
-                      </button>
-                    );
-                  })}
+                <div className="flex items-center gap-3">
+                  <button onClick={onSignOut} className="flex items-center gap-1 text-red-600 font-sans text-xs font-bold transition-colors p-1">
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span className="text-[11px] font-black">Log Out</span>
+                  </button>
                 </div>
               )}
             </div>

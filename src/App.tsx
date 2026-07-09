@@ -198,7 +198,9 @@ export default function App() {
 
   const handleSignOut = () => {
     setLoggedInUser(null);
-    setCurrentScreen('SUBMISSION');
+    setAuthRole('AUTHOR');
+    setAuthMode('LOGIN');
+    setCurrentScreen('AUTH');
     setNotification('You have logged out successfully.');
     setTimeout(() => setNotification(''), 4000);
   };

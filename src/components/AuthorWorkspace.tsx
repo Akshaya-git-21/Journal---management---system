@@ -418,32 +418,6 @@ export default function AuthorWorkspace({
                 </div>
                 <div className="py-1">
                   
-                  {/* Multi-role quick simulation helper to prevent getting stuck */}
-                  {onRoleChange && (
-                    <div className="px-3 py-1.5 border-b border-gray-100">
-                      <span className="text-[9px] font-mono font-bold text-slate-400 uppercase block mb-1">
-                        Developer Persona Switch
-                      </span>
-                      <select
-                        onChange={(e) => {
-                          if (e.target.value) {
-                            onRoleChange(e.target.value as any);
-                            setProfileOpen(false);
-                          }
-                        }}
-                        defaultValue=""
-                        className="w-full text-[11px] bg-slate-100 border rounded p-1 text-slate-700 outline-none"
-                      >
-                        <option value="" disabled>Switch portal perspective...</option>
-                        <option value="AUTHOR">Author Portal</option>
-                        <option value="EDITOR">Editor Portal</option>
-                        <option value="REVIEWER">Reviewer Portal</option>
-                        <option value="PUBLISHER">Publisher Portal</option>
-                        <option value="ARCHITECT">Architect Specs</option>
-                      </select>
-                    </div>
-                  )}
-
                   <button
                     onClick={() => {
                       setProfileOpen(false);
