@@ -39,7 +39,7 @@ export default function App() {
     const val = (saved as Role) || 'AUTHOR';
     return val === 'ARCHITECT' ? 'AUTHOR' : val;
   });
-  const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER'>('LOGIN');
+  const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER'>('REGISTER');
 
   const [loggedInUser, setLoggedInUser] = useState<{ name: string; email: string; role: Role } | null>(() => {
     const saved = localStorage.getItem('jms_sim_logged_in_user');

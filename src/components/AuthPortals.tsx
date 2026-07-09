@@ -323,7 +323,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
         onClick={onBackToLanding}
         className="absolute top-4 left-4 z-20 flex items-center gap-1.5 text-xs text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg transition-all duration-150 font-bold cursor-pointer shadow-xs"
       >
-        <ArrowLeft className="w-3.5 h-3.5" /> Home
+        <ArrowLeft className="w-3.5 h-3.5" /> Back to Journal Page
       </button>
 
       {/* Left Decorative Sidebar - Green */}
@@ -370,8 +370,8 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
       </div>
 
       {/* Right Form Side - White */}
-      <div className="w-full md:w-[58%] bg-white p-4 md:p-6 lg:p-8 flex flex-col relative overflow-y-auto md:overflow-y-hidden md:h-screen shrink-0">
-        <div className="max-w-lg w-full mx-auto my-auto space-y-3 py-2 md:py-4">
+      <div className="w-full md:w-[58%] bg-slate-50/50 p-4 md:p-8 lg:p-12 flex flex-col relative overflow-y-auto md:h-screen shrink-0">
+        <div className="max-w-lg w-full mx-auto my-auto space-y-3 py-4 px-5 sm:px-7 md:px-8 bg-white border border-slate-100 rounded-2xl shadow-xl md:shadow-[0_8px_30px_rgb(0,0,0,0.06)]">
           {/* Top Segmented Tab Control */}
           <div className="flex bg-slate-100/85 p-1 rounded-xl w-full font-sans">
             <button
@@ -964,7 +964,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                 </>
               ) : (
                 <>
-                  {mode === 'LOGIN' ? `Login with Email` : `Register with Email`}
+                  {mode === 'LOGIN' ? `Login` : `Sign Up`}
                 </>
               )}
             </button>
