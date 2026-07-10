@@ -239,6 +239,7 @@ export default function EditorWorkspace({
   const reviewsCompletedPercent = Math.round((reviewsCompletedCount / 2) * 100);
   
   const [editorOjsTab, setEditorOjsTab] = useState<'REVIEW' | 'SUBMISSION' | 'COPYEDITING' | 'PRODUCTION' | 'TITLE_ABSTRACT' | 'CONTRIBUTORS' | 'METADATA' | 'REFERENCES'>('REVIEW');
+  const [readingFile, setReadingFile] = useState<any | null>(null);
 
   // Localized edits for OJS and reference image compatibility
   const [ojsLanguage, setOjsLanguage] = useState('French (Canada)');
@@ -613,6 +614,8 @@ export default function EditorWorkspace({
 
     onUpdateManuscript(updated);
     setShowAssignModal(false);
+    
+    alert(`✉️ SUCCESS: Peer Referee Invitation Dispatched!\n\nAn email notification has been simulated and sent to ${reviewerObj.name} (${reviewerObj.email}).\n\nLogin authorization has been securely granted. Only this specific email is now authorized to access the Reviewer Assessment Hub for Manuscript ID: ${selectedPaper.id}.`);
   };
 
   const handleSimulateStatusCycle = (reviewerEmail: string, newStatus: ReviewStatus) => {
@@ -1983,304 +1986,350 @@ export default function EditorWorkspace({
               <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start text-sm">
                 
                 {/* MIDDLE PANELS SECTION (COLSPAN 9) */}
-                <div className="xl:col-span-9 space-y-4 text-sm">
-                    {editorOjsTab === 'REVIEW' && (
-                    <div className="space-y-4 font-sans text-sm">
-                      {/* Exact Replica Workflow Section Banner with white background and seal */}
-                      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-tiny flex items-center justify-between text-left">
-                        <div className="space-y-1">
-                          <h3 className="font-sans font-black text-slate-900 text-xs uppercase tracking-wider flex items-center gap-1.5 select-none">
-                            <span className="w-2.5 h-2.5 rounded-full bg-[#008751] inline-block shadow-xs"></span>
-                            WORKFLOW: REVIEW (ROUND 1)
-                          </h3>
-                          <p className="text-xs text-slate-500 font-sans font-bold">
-                            Current Submission Language: <span className="text-[#334155] font-black">{ojsLanguage === 'Portuguese (Brazil)' ? 'French (Canada)' : ojsLanguage}</span>
-                          </p>
+                <div className="xl:col-span-9">
+                  {editorOjsTab === 'REVIEW' && (
+                    <div className="space-y-5 text-left font-sans text-sm">
+                      
+                      {/* SECTION A: Evaluation & Consensus Status OR Intake Screening Phase */}
+                      {selectedPaper?.status === 'SUBMITTED' ? (
+                        <div className="bg-slate-900 text-white rounded-3xl shadow-lg p-6 border-b-4 border-emerald-600 mb-6 relative overflow-hidden">
+                          <div className="absolute inset-0 bg-gradient-to-r from-slate-900 to-slate-800 opacity-95 z-0"></div>
+                          <div className="relative z-10 space-y-4">
+                            <div className="flex items-center justify-between">
+                              <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono font-bold text-[10px] px-2.5 py-1 rounded-md uppercase tracking-wider flex items-center gap-1">
+                                <Clock className="w-3.5 h-3.5" />
+                                <span>Intake Screening Phase</span>
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">Ready for Desk Evaluation</span>
+                            </div>
+                            <div className="space-y-1">
+                              <h3 className="text-base font-bold font-sans tracking-tight text-white flex items-center gap-2">📥 Initial Desk Screening & Intake Decisions</h3>
+                              <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                                The manuscript is currently in the unassigned, unreviewed screening queue. Before inviting university consensus referees, you can read the submission files and make an intake decision:
+                              </p>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm("Bypass peer review and Accept this manuscript directly?")) {
+                                    const updated = {
+                                      ...selectedPaper,
+                                      status: 'ACCEPTED' as const,
+                                      editorsNotes: `${selectedPaper.editorsNotes}\n\n[Desk Acceptance - Editorial Oversight Rules]: Approved by Editor without external review on ${new Date().toISOString().split('T')[0]}.`
+                                    };
+                                    onUpdateManuscript(updated);
+                                    alert("SUCCESS: Manuscript accepted directly via editor desk oversight. Transitioned to Copyediting.");
+                                  }
+                                }}
+                                className="bg-[#008751] hover:bg-[#007043] text-white font-bold py-2.5 px-3.5 rounded-xl text-xs transition duration-150 text-center cursor-pointer shadow-sm"
+                              >
+                                Desk Accept Manuscript
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = {
+                                    ...selectedPaper,
+                                    status: 'UNDER_REVIEW' as const,
+                                    editorsNotes: `${selectedPaper.editorsNotes}\n\n[Intake Screening]: Manuscript approved for formal peer evaluation on ${new Date().toISOString().split('T')[0]}.`
+                                  };
+                                  onUpdateManuscript(updated);
+                                  alert("SUCCESS: Manuscript approved for peer evaluation. You can now invite peer referees below.");
+                                }}
+                                className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 font-bold py-2.5 px-3.5 rounded-xl text-xs transition duration-150 text-center cursor-pointer shadow-sm"
+                              >
+                                Send to Peer Review
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm("Are you sure you want to desk reject this manuscript?")) {
+                                    const updated = {
+                                      ...selectedPaper,
+                                      status: 'REJECTED' as const,
+                                      editorsNotes: `${selectedPaper.editorsNotes}\n\n[Desk Rejection - Intake Screening]: Declined as out of scope on ${new Date().toISOString().split('T')[0]}.`
+                                    };
+                                    onUpdateManuscript(updated);
+                                    alert("SUCCESS: Manuscript desk rejected and archived.");
+                                  }
+                                }}
+                                className="bg-rose-50 hover:bg-rose-100 border border-rose-100 text-rose-700 font-bold py-2.5 px-3.5 rounded-xl text-xs transition duration-150 text-center cursor-pointer"
+                              >
+                                Desk Reject Manuscript
+                              </button>
+                            </div>
+                          </div>
                         </div>
-                        {selectedPaper?.isDoubleBlind && (
-                          <span className="bg-[#008751] text-white font-mono font-black text-[9.5px] px-3.5 py-2.0 py-2 rounded-xl uppercase tracking-wider flex items-center gap-1.5 shadow-sm">
-                            <span>ANONYMITY SEAL ACTIVE</span>
-                            <ShieldAlert className="w-3.5 h-3.5" />
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Exact Replica Card 1: Round 1 Status */}
-                      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-tiny leading-relaxed space-y-5 text-left">
-                        <div className="border-b border-gray-100 pb-3 flex items-center justify-between">
-                          <strong className="text-[#004d2e] text-[11px] font-black uppercase tracking-widest font-mono">
-                            ROUND 1 STATUS
-                          </strong>
-                          <span className="text-[10px] font-mono bg-emerald-50 text-emerald-800 font-extrabold px-3 py-1 border border-emerald-200 rounded-lg select-none">
-                            Active Stage
-                          </span>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-                          <div className="md:col-span-12 lg:col-span-7 space-y-4">
-                            <p className="font-bold text-slate-700 text-xs text-left">
-                              Minimum number of confirmed reviews required: <strong className="font-sans font-black text-slate-900 border-b-2 border-emerald-500/70 pb-0.5 pointer-events-none">2</strong>
-                            </p>
+                      ) : (
+                        <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5 space-y-4 mb-6 text-left">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide flex items-center gap-2">
+                              <CheckSquare className="w-4 h-4 text-[#008751]" />
+                              Consensus & Progress Status
+                            </h3>
+                            {selectedPaper?.isDoubleBlind && (
+                              <span className="bg-emerald-50 text-[#008751] border border-emerald-100 font-mono font-bold text-[9.5px] px-2.5 py-1 rounded-md uppercase tracking-wider flex items-center gap-1">
+                                <ShieldAlert className="w-3.5 h-3.5" />
+                                <span>Anonymity Seal Active</span>
+                              </span>
+                            )}
+                          </div>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-center bg-slate-50/50 p-4 rounded-xl border border-slate-100 shadow-tiny">
+                            <div className="md:col-span-7 space-y-2">
+                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Evaluation Completion</p>
+                              <div className="space-y-2">
+                                <div className="flex justify-between items-center text-xs font-medium">
+                                  <span className="text-slate-600">Minimum reviews required: <strong className="text-slate-900 font-bold">2</strong></span>
+                                  <span className="font-bold text-slate-800">
+                                    {selectedPaper?.id === 'OJS-6241' ? '0' : selectedPaper?.reviewers.filter(r => r.status === 'SUBMITTED').length || 0} / 2 Completed
+                                  </span>
+                                </div>
+                                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                  <div 
+                                    className="bg-[#008751] h-full rounded-full transition-all duration-300"
+                                    style={{ width: `${selectedPaper?.id === 'OJS-6241' ? '0%' : Math.min(100, ((selectedPaper?.reviewers.filter(r => r.status === 'SUBMITTED').length || 0) / 2) * 100) + '%'}` }}
+                                  ></div>
+                                </div>
+                              </div>
+                            </div>
                             
-                            {/* Progress Bar Container matching screenshot layout exactly */}
-                            <div className="space-y-2 pt-1">
-                              <div className="flex justify-between items-center text-[10px] uppercase font-mono tracking-wider text-slate-400 font-black">
-                                <span>PROGRESS INDICATOR</span>
-                                <span className="text-slate-600 font-black">
-                                  {selectedPaper?.id === 'OJS-6241' ? '0' : selectedPaper?.reviewers.filter(r => r.status === 'SUBMITTED').length || 0} OF 2 REVIEWS COMPLETED ({selectedPaper?.id === 'OJS-6241' ? '0%' : Math.round(((selectedPaper?.reviewers.filter(r => r.status === 'SUBMITTED').length || 0) / 2) * 100) + '%'})
-                                </span>
-                              </div>
-                              <div className="w-full bg-[#f1f5f9] h-2.5 rounded-full overflow-hidden border border-slate-200 shadow-inner">
-                                <div 
-                                  className="bg-[#008751] h-full rounded-full transition-all duration-350"
-                                  style={{ width: `${selectedPaper?.id === 'OJS-6241' ? '0%' : Math.min(100, ((selectedPaper?.reviewers.filter(r => r.status === 'SUBMITTED').length || 0) / 2) * 100) + '%'}` }}
-                                ></div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="md:col-span-12 lg:col-span-5">
-                            {/* Soft pink warning alert with warning icon, matches attachment exactly */}
-                            <div className="text-xs font-sans text-[#cf222e] bg-[#fff5f5] border border-[#ffe3e3] p-4.5 p-4 rounded-xl flex items-center justify-center font-bold text-center select-none shadow-tiny w-full gap-2.5 leading-relaxed">
-                              <AlertCircle className="w-4.5 h-4.5 text-[#cf222e] shrink-0" />
-                              <span>A review is outstanding or overdue.</span>
+                            <div className="md:col-span-5">
+                              {((selectedPaper?.reviewers || []).filter(r => r.status === 'SUBMITTED').length >= 2) ? (
+                                <div className="text-xs text-[#0f5132] bg-[#d1e7dd] border border-[#badbcc] p-3 rounded-xl flex items-center justify-center font-medium gap-2 text-center">
+                                  <CheckSquare className="w-4.5 h-4.5 text-[#0f5132] shrink-0" />
+                                  <span>Safeguard metrics reached. Standard consensus achieved.</span>
+                                </div>
+                              ) : (
+                                <div className="text-xs text-[#cf222e] bg-[#fff5f5] border border-[#ffe3e3] p-3 rounded-xl flex items-center justify-center font-medium gap-2 text-center">
+                                  <AlertCircle className="w-4.5 h-4.5 text-[#cf222e] shrink-0" />
+                                  <span>A peer evaluation report is outstanding.</span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
-                      </div>
+                      )}
 
-                      {/* Card 2: Revisions Uploaded */}
-                      <div className="bg-white border border-gray-200 rounded-2xl shadow-tiny overflow-hidden text-sm">
-                        <div className="p-4.5 p-4 bg-slate-50 border-b border-gray-200 flex items-center justify-between font-sans">
-                          <strong className="text-[#004d2e] font-black tracking-widest uppercase text-[11px] font-mono">REVISIONS UPLOADED</strong>
+                      {/* SECTION B: Delegated Peer Referees (2nd pic) - Highlighted Section with Box Shadow */}
+                      <div className="bg-white border-2 border-emerald-100/80 rounded-3xl shadow-xl p-5 space-y-4 mb-6 border-l-8 border-l-[#008751]">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                              👥 Delegated Peer Referees
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-0.5">Invited university consensus referees assigned to evaluate this proposal.</p>
+                          </div>
                           <button 
-                            onClick={handleUploadRevisionFile}
-                            className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-1.5 rounded-xl font-bold text-xs cursor-pointer shadow-tiny transition"
+                            type="button"
+                            onClick={() => setShowAssignModal(true)}
+                            className="bg-[#008751] hover:bg-[#007043] text-white px-3.5 py-1.5 rounded-xl font-bold text-xs cursor-pointer shadow-md hover:shadow-lg transition duration-150"
                           >
-                            Upload
+                            + Invite Referee
                           </button>
                         </div>
-                        <div className="p-1">
-                          {ojsRevisions.length === 0 ? (
-                            <div className="p-12 flex flex-col items-center justify-center text-center space-y-3">
-                              <div className="w-12 h-12 rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400">
-                                <FileText className="w-6 h-6 stroke-[1.5]" />
-                              </div>
-                              <div>
-                                <h4 className="font-sans font-black text-slate-700 text-xs uppercase tracking-wider">No Revisions Uploaded</h4>
-                                <p className="text-[11px] text-slate-400 font-sans font-semibold mt-1">Upload revised files submitted by authors.</p>
-                              </div>
-                            </div>
-                          ) : (
-                            <table className="w-full text-left border-collapse text-sm">
-                              <thead>
-                                <tr className="border-b border-gray-100 text-gray-500 font-mono text-xs uppercase tracking-wider">
-                                  <th className="p-3 pl-4">No</th>
-                                  <th className="p-3">File Name</th>
-                                  <th className="p-3">Date Uploaded</th>
-                                  <th className="p-3 pr-4 text-right">Type</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-50">
-                                {ojsRevisions.map((rev) => (
-                                  <tr key={rev.no} className="hover:bg-emerald-50/20 transition-all">
-                                    <td className="p-3 pl-4 font-mono text-[#008751] font-black">{rev.no}</td>
-                                    <td className="p-3 font-extrabold text-[#004d2b]">{rev.name}</td>
-                                    <td className="p-3 text-slate-655 font-medium">{rev.date}</td>
-                                    <td className="p-3 pr-4 text-right">
-                                      <span className="bg-[#e6f4ea] text-[#137333] text-xs px-2.5 py-1 rounded font-black uppercase tracking-wide">{rev.type}</span>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          )}
-                        </div>
-                      </div>
 
-                      {/* Card 3: Files for Review */}
-                      <div className="bg-white border border-gray-250 rounded-2xl shadow-xs overflow-hidden text-sm">
-                        <div className="p-4 bg-slate-50 border-b border-gray-200 flex items-center justify-between font-sans">
-                          <strong className="text-[#004d2b] font-extrabold tracking-wide uppercase text-xs font-mono">Files for Review</strong>
-                          <button 
-                            onClick={handleUploadReviewFile}
-                            className="bg-white border border-emerald-100 hover:bg-emerald-50 text-[#008751] px-4 py-2 rounded-lg font-bold text-xs cursor-pointer shadow-xs transition"
-                          >
-                            Upload/Select Files
-                          </button>
-                        </div>
-                        <div className="p-1 font-sans">
-                          <table className="w-full text-left border-collapse text-sm">
+                        <div className="overflow-x-auto border border-slate-100 rounded-xl bg-slate-50/20">
+                          <table className="w-full text-left border-collapse text-xs">
                             <thead>
-                              <tr className="border-b border-gray-100 text-gray-550 font-mono text-xs uppercase tracking-wider">
-                                <th className="p-3 pl-4">No</th>
-                                <th className="p-3">File Name</th>
-                                <th className="p-3">Date Uploaded</th>
+                              <tr className="border-b border-slate-100 text-slate-400 font-mono text-[10px] uppercase tracking-wider bg-slate-50/50">
+                                <th className="p-3 pl-4">Referee</th>
+                                <th className="p-3">Status</th>
                                 <th className="p-3">Type</th>
-                                <th className="p-3 pr-4 text-right font-sans">Actions</th>
+                                <th className="p-3">Invited On</th>
+                                <th className="p-3">Due Date</th>
+                                <th className="p-3 pr-4 text-right">Actions</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100 font-mono text-sm text-slate-705 text-left">
+                            <tbody className="divide-y divide-slate-100 text-slate-700">
+                              {ojsReviewers.length === 0 ? (
+                                <tr>
+                                  <td colSpan={6} className="p-8 text-center text-slate-400 font-medium">
+                                    No peer referees delegated yet. Click "+ Invite Referee" to assign review tasks.
+                                  </td>
+                                </tr>
+                              ) : (
+                                ojsReviewers.map((r) => {
+                                  const isOverdue = r.status === 'Overdue';
+                                  const isDeclined = r.status === 'Declined' || r.status === 'Request Declined';
+                                  const isInvited = r.status === 'Invited';
+                                  const isReviewing = r.status === 'Reviewing';
+                                  const isCompleted = r.status === 'Completed';
+                                  const initials = r.name ? r.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : 'RV';
+
+                                  return (
+                                    <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
+                                      <td className="p-3 pl-4">
+                                        <div className="flex items-center gap-2.5">
+                                          <span className="w-7 h-7 rounded bg-emerald-50 text-[#008751] border border-emerald-100 flex items-center justify-center font-bold text-xs select-none">
+                                            {initials}
+                                          </span>
+                                          <div>
+                                            <span className="font-bold text-slate-800 block text-xs">{r.name}</span>
+                                            <span className="text-[10px] text-slate-400 block font-mono">{r.email}</span>
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td className="p-3">
+                                        {isOverdue ? (
+                                          <span className="bg-rose-50 border border-rose-100 text-rose-700 px-2.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1 shadow-xs">
+                                            Overdue
+                                          </span>
+                                        ) : isDeclined ? (
+                                          <span className="bg-slate-100 border border-slate-200 text-slate-500 px-2.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1">
+                                            Declined
+                                          </span>
+                                        ) : isInvited ? (
+                                          <span className="bg-emerald-50 border border-emerald-100 text-[#0f5132] px-2.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1 shadow-xs animate-pulse">
+                                            Invited
+                                          </span>
+                                        ) : isReviewing ? (
+                                          <span className="bg-amber-50 border border-amber-200 text-amber-850 px-2.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1 shadow-xs">
+                                            Reviewing
+                                          </span>
+                                        ) : isCompleted ? (
+                                          <span className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-2.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1 shadow-xs">
+                                            Completed
+                                          </span>
+                                        ) : (
+                                          <span className="bg-slate-50 border border-slate-200 text-slate-700 px-2.5 py-0.5 rounded text-[10px] font-semibold">
+                                            {r.status}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="p-3 text-slate-500 font-mono text-[11px]">{r.type || 'External'}</td>
+                                      <td className="p-3 text-slate-500 font-mono text-[11px]">{r.invitedOn}</td>
+                                      <td className="p-3 text-slate-500 font-mono text-[11px]">{r.dueDate}</td>
+                                      <td className="p-3 pr-4 text-right">
+                                        {(isOverdue || isReviewing) && (
+                                          <button 
+                                            type="button"
+                                            onClick={() => handleSendReminder(r.id)}
+                                            disabled={r.actionSent}
+                                            className={`font-mono font-bold uppercase text-[9px] tracking-wider px-2.5 py-1 rounded transition-all border ${
+                                              r.actionSent 
+                                                ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                                                : 'bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-850'
+                                            }`}
+                                          >
+                                            {r.actionSent ? 'Sent ✓' : 'Remind'}
+                                          </button>
+                                        )}
+                                        {isCompleted && (
+                                          <button 
+                                            type="button"
+                                            onClick={() => handleOpenEvaluation(r)}
+                                            className="bg-emerald-50 hover:bg-[#008751] hover:text-white border border-[#008751] text-[#008751] font-bold px-2.5 py-1 rounded transition-all cursor-pointer text-center"
+                                          >
+                                            Report
+                                          </button>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* SECTION C: Manuscript Files & Author Revisions */}
+                      <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-5 space-y-4 mb-6 text-left">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          
+                          {/* Evaluation Files Column */}
+                          <div className="space-y-3 text-left">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                              <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">Files for Review</span>
+                              <button 
+                                type="button"
+                                onClick={handleUploadReviewFile}
+                                className="text-[#008751] hover:underline font-bold text-xs"
+                              >
+                                + Add File
+                              </button>
+                            </div>
+                            
+                            <div className="border border-slate-100 rounded-xl divide-y divide-slate-100 bg-slate-50/20 overflow-hidden">
                               {ojsReviewFiles.map((file) => {
                                 const isArticle = file.type === "Article Text";
                                 return (
-                                  <tr key={file.no} className={isArticle ? "bg-emerald-50/10 hover:bg-emerald-50/20" : "hover:bg-slate-50"}>
-                                    <td className={`p-3.5 pl-4 font-black ${isArticle ? "text-[#008751] font-extrabold" : "text-slate-500"}`}>{file.no}</td>
-                                    <td className={`p-3.5 font-sans font-bold text-left ${isArticle ? "font-black text-[#004d2b] hover:underline cursor-pointer" : "text-slate-850 hover:underline cursor-pointer"}`}>
-                                      {isArticle && <span className="inline-block w-2 h-2 rounded-full bg-[#008751] mr-2 animate-pulse"></span>}
-                                      {file.name}
-                                    </td>
-                                    <td className="p-3.5 text-slate-650 font-sans font-medium">{file.date}</td>
-                                    <td className="p-3.5">
-                                      <span className={`text-[11px] px-2 py-1 rounded border font-sans font-black uppercase ${isArticle ? "bg-[#008751] border-[#008751] text-white" : "bg-slate-100 text-slate-700"}`}>
-                                        {file.type}
-                                      </span>
-                                    </td>
-                                    <td className="p-3.5 pr-4 text-right">
-                                      <button 
-                                        onClick={() => alert(`Review file ${file.name} opened inside native browser PDF controller.`)} 
-                                        className="text-[#008751] font-black hover:underline cursor-pointer text-sm"
-                                      >
-                                        View
-                                      </button>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-
-                      {/* Card 4: Reviewers */}
-                      <div className="bg-white border border-gray-250 rounded-2xl shadow-xs overflow-hidden text-sm">
-                        <div className="p-4 bg-slate-50 border-b border-gray-200 flex items-center justify-between font-sans">
-                          <strong className="text-[#004d2b] font-extrabold tracking-wide uppercase text-xs font-mono">Reviewers</strong>
-                          <button 
-                            onClick={() => setShowAssignModal(true)}
-                            className="bg-[#008751] hover:bg-[#007043] text-white px-4 py-2 rounded-lg font-black text-xs cursor-pointer shadow-xs transition"
-                          >
-                            + Add Reviewer
-                          </button>
-                        </div>
-                        <div className="p-1 font-sans overflow-x-auto">
-                          <table className="w-full text-left border-collapse text-sm min-w-[700px]">
-                            <thead>
-                              <tr className="border-b border-gray-150 text-gray-550 font-mono text-xs uppercase tracking-wider">
-                                <th className="p-3.5 pl-4">Reviewer</th>
-                                <th className="p-3.5">Status</th>
-                                <th className="p-3.5">Type</th>
-                                <th className="p-3.5">Invited On</th>
-                                <th className="p-3.5">Due Date</th>
-                                <th className="p-3.5 pr-4 text-right">Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100 text-sm text-slate-705 text-left">
-                              {ojsReviewers.map((r) => {
-                                const isOverdue = r.status === 'Overdue';
-                                const isDeclined = r.status === 'Declined' || r.status === 'Request Declined';
-                                const isInvited = r.status === 'Invited';
-                                const isReviewing = r.status === 'Reviewing';
-                                const isCompleted = r.status === 'Completed';
-
-                                // Initials for Avatar badge
-                                const initials = r.name
-                                  ? r.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()
-                                  : 'RV';
-
-                                return (
-                                  <tr key={r.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="p-3.5 pl-4">
-                                      <div className="flex items-center gap-2.5">
-                                        <div className={`w-8 h-8 rounded-sm flex items-center justify-center font-bold text-xs shrink-0 select-none ${
-                                          r.name === 'Dr. Tim Berners-Lee' ? 'bg-violet-600 text-white font-serif' :
-                                          r.name === 'Susy Decarlo' ? 'bg-[#ff7675] text-white font-serif' :
-                                          r.name === 'Claris Clevinger' ? 'bg-[#ffeaa7] text-[#2d3436]' : 'bg-[#74b9ff] text-white font-sans'
+                                  <div key={file.no} className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                                          isArticle ? 'bg-[#008751] text-white' : 'bg-slate-100 text-slate-600'
                                         }`}>
-                                          {initials}
-                                        </div>
-                                        <div>
-                                          <span className="font-bold text-slate-800 text-xs md:text-sm block leading-none">{r.name}</span>
-                                          <span className="font-mono text-[9px] text-slate-400 block mt-1">{r.email}</span>
-                                        </div>
+                                          {file.type}
+                                        </span>
+                                        <span className={`text-xs font-bold truncate ${isArticle ? 'text-[#004d2b]' : 'text-slate-700'}`}>
+                                          {file.name}
+                                        </span>
                                       </div>
-                                    </td>
-                                    <td className="p-3.5">
-                                      {isOverdue ? (
-                                        <span className="bg-rose-50 border border-rose-200 text-rose-700 px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-tiny">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
-                                          Overdue
-                                        </span>
-                                      ) : isDeclined ? (
-                                        <span className="bg-slate-100 border border-slate-200 text-slate-500 px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1 shadow-tiny">
-                                          Declined
-                                        </span>
-                                      ) : isInvited ? (
-                                        <span className="bg-[#e8f6f0] border border-emerald-100 text-[#0f5132] px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-tiny">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                                          Invited
-                                        </span>
-                                      ) : isReviewing ? (
-                                        <span className="bg-amber-50 border border-amber-200 text-amber-800 px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-tiny">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                                          Reviewing
-                                        </span>
-                                      ) : isCompleted ? (
-                                        <span className="bg-emerald-50 border border-emerald-250 text-emerald-800 px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-tiny">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
-                                          Completed
-                                        </span>
-                                      ) : (
-                                        <span className="bg-slate-100 border border-slate-200 text-slate-705 px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1">
-                                          {r.status}
-                                        </span>
-                                      )}
-                                    </td>
-                                    <td className="p-3.5 text-slate-500 font-mono text-[11px] font-bold">{r.type}</td>
-                                    <td className="p-3.5 text-slate-655 text-xs text-slate-500 font-medium">{r.invitedOn}</td>
-                                    <td className="p-3.5 text-slate-655 text-xs text-slate-500 font-medium">{r.dueDate}</td>
-                                    <td className="p-3.5 pr-4 text-right space-x-2">
-                                      {(isOverdue || isReviewing) && (
-                                        <button 
-                                          onClick={() => handleSendReminder(r.id)}
-                                          disabled={r.actionSent}
-                                          className={`font-mono font-black uppercase text-[10px] tracking-wider px-2.5 py-1.5 rounded-lg cursor-pointer transition-all border ${
-                                            r.actionSent 
-                                              ? 'bg-[#e6f4ea] border-emerald-250 text-[#137333]' 
-                                              : 'bg-amber-50 hover:bg-amber-100 border-amber-250 text-amber-800'
-                                          }`}
-                                        >
-                                          {r.actionSent ? 'Reminder Sent ✓' : 'Send Reminder'}
-                                        </button>
-                                      )}
-                                      {isCompleted && (
-                                        <button 
-                                          onClick={() => handleOpenEvaluation(r)}
-                                          className="bg-emerald-50 hover:bg-[#008751] hover:text-white border border-[#008751] text-[#008751] font-bold px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer"
-                                        >
-                                          View Evaluation
-                                        </button>
-                                      )}
-                                    </td>
-                                  </tr>
+                                      <span className="block text-[10px] text-slate-400 mt-1 font-mono">ID: {file.no} • Uploaded: {file.date}</span>
+                                    </div>
+                                    <button 
+                                      type="button"
+                                      onClick={() => setReadingFile({ name: file.name, type: file.type, no: file.no })}
+                                      className="bg-emerald-50 hover:bg-emerald-600 hover:text-white text-[#008751] border border-emerald-100 font-bold text-xs px-2.5 py-1 rounded transition-all shrink-0 ml-2"
+                                    >
+                                      View & Read
+                                    </button>
+                                  </div>
                                 );
                               })}
-                            </tbody>
-                          </table>
+                            </div>
+                          </div>
+
+                          {/* Author Revisions Column */}
+                          <div className="space-y-3 text-left">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                              <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">Author Revisions</span>
+                              <button 
+                                type="button"
+                                onClick={handleUploadRevisionFile}
+                                className="text-[#008751] hover:underline font-bold text-xs"
+                              >
+                                + Upload Revision
+                              </button>
+                            </div>
+
+                            {ojsRevisions.length === 0 ? (
+                              <div className="border border-dashed border-slate-200 rounded-xl p-5 flex flex-col items-center justify-center text-center h-full min-h-[140px] bg-slate-50/10">
+                                <FileText className="w-6 h-6 text-slate-300 stroke-[1.5] mb-2" />
+                                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Awaiting Revision</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5">Authors have not uploaded updated drafts yet.</p>
+                              </div>
+                            ) : (
+                              <div className="border border-slate-100 rounded-xl divide-y divide-slate-100 bg-slate-50/20 overflow-hidden">
+                                {ojsRevisions.map((rev) => (
+                                  <div key={rev.no} className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[9px] bg-emerald-50 text-emerald-850 border border-emerald-100 font-bold px-1.5 py-0.5 rounded uppercase">
+                                          Revision
+                                        </span>
+                                        <span className="text-xs font-semibold text-slate-700 truncate">{rev.name}</span>
+                                      </div>
+                                      <span className="block text-[10px] text-slate-400 mt-1 font-mono">Uploaded: {rev.date}</span>
+                                    </div>
+                                    <button 
+                                      type="button"
+                                      onClick={() => setReadingFile({ name: rev.name, type: 'Author Revision', no: rev.no })}
+                                      className="bg-emerald-50 hover:bg-emerald-600 hover:text-white text-[#008751] border border-emerald-100 font-bold text-xs px-2.5 py-1 rounded transition-all shrink-0 ml-2"
+                                    >
+                                      View & Read
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
                         </div>
                       </div>
-
-                      {/* Card 5: Review Discussions */}
-                      {selectedPaper && (
-                        <ManuscriptDiscussion
-                          manuscript={selectedPaper}
-                          onUpdateManuscript={onUpdateManuscript}
-                          currentUser={currentUser}
-                          currentRole="EDITOR"
-                          title="Review Discussions"
-                        />
-                      )}
-
                     </div>
                   )}
 
@@ -2556,35 +2605,39 @@ export default function EditorWorkspace({
 
                 </div>
 
-                {/* COLUMN 3: RIGHT SIDEBAR PANEL (ACTION ITEMS AND PARTICIPANTS) - Colspan 3 */}
-                <div className="xl:col-span-3 space-y-4 text-xs font-sans text-left">
+                {/* COLUMN 3: RIGHT SIDEBAR PANEL (ACTION ITEMS AND PARTICIPANTS) - Compact Professional Sidebar */}
+                <div className="xl:col-span-3 space-y-4 text-sm font-sans text-left">
                   
-                  {editorOjsTab === 'REVIEW' ? (
-                    <>
+                  <>
                       {/* OJS Action Buttons based on Design Specification */}
-                      <div className="bg-white border border-gray-255 rounded-2xl p-4 shadow-xs space-y-3 font-sans">
-                        <strong className="block text-slate-800 font-extrabold uppercase tracking-wider text-[10px] border-b pb-1.5 font-mono">
-                          Decision Desk
-                        </strong>
+                      <div className="bg-white border border-slate-200 rounded-2xl p-4.5 shadow-sm space-y-4 font-sans">
+                        <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
+                          <strong className="block text-slate-800 font-bold uppercase tracking-wider text-xs">
+                            Decision Desk
+                          </strong>
+                          <span className="text-[10px] font-mono text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded font-bold uppercase">
+                            ACTIVE
+                          </span>
+                        </div>
                         <button
                           onClick={() => {
                             if (window.confirm("Simulate Requesting Revisions? Notification template will be dispatched to authors.")) {
                               attemptRecordDecision('REVISE');
                             }
                           }}
-                          className="w-full bg-[#f8f9fa] hover:bg-slate-100 text-slate-705 border border-slate-300 font-bold py-2 px-2.5 rounded text-[11px] block transition-all"
+                          className="w-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold py-2 px-3 rounded-xl text-xs block transition-all text-center cursor-pointer shadow-tiny"
                         >
                           Request Revisions
                         </button>
                         <button
                           onClick={() => attemptRecordDecision('ACCEPT')}
-                          className="w-full bg-[#008751] hover:bg-[#007042] text-white font-extrabold py-2.5 px-2.5 rounded text-[11px] block transition-all shadow-xs"
+                          className="w-full bg-[#008751] hover:bg-[#007042] text-white font-extrabold py-2.5 px-3 rounded-xl text-xs block transition-all text-center cursor-pointer shadow-sm animate-pulse-slow"
                         >
                           Accept Submission
                         </button>
                         <button
                           onClick={() => alert("Creating a new Review Round. Re-transmitting requests to reviewers.")}
-                          className="w-full bg-[#f8f9fa] hover:bg-slate-100 text-slate-705 border border-slate-300 font-bold py-2 px-2.5 rounded text-[11px] block transition-all"
+                          className="w-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold py-2 px-3 rounded-xl text-xs block transition-all text-center cursor-pointer shadow-tiny"
                         >
                           Create New Review Round
                         </button>
@@ -2594,13 +2647,13 @@ export default function EditorWorkspace({
                               attemptRecordDecision('REJECT');
                             }
                           }}
-                          className="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-semibold py-2 px-2.5 rounded text-[11px] block transition-all"
+                          className="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-100 font-semibold py-2 px-3 rounded-xl text-xs block transition-all text-center cursor-pointer"
                         >
                           Decline Submission
                         </button>
 
-                        <div className="pt-2">
-                          <label className="block text-slate-500 font-mono text-[9px] uppercase tracking-wider mb-1">
+                        <div className="pt-1.5">
+                          <label className="block text-slate-400 font-mono text-[9px] uppercase tracking-wider mb-1">
                             Override notes:
                           </label>
                           <textarea
@@ -2608,182 +2661,95 @@ export default function EditorWorkspace({
                             value={editorsNotesTemp}
                             onChange={(e) => setEditorsNotesTemp(e.target.value)}
                             placeholder="e.g. Approved via editorial oversight rules"
-                            className="w-full border rounded p-2 text-[10px] focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-slate-800"
+                            className="w-full border border-slate-200 rounded-xl p-2 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-slate-800 bg-slate-50/50"
                           />
                         </div>
                       </div>
 
-                      {/* Participants Card modeled after index file specifications */}
-                      <div className="bg-white border border-gray-255 rounded-2xl p-4 shadow-xs space-y-3">
-                        <div className="flex items-center justify-between border-b pb-1.5">
-                          <strong className="text-slate-800 font-extrabold uppercase tracking-wider text-[10px] font-mono">
+                      {/* Dynamic Workflow Participants Card */}
+                      <div className="bg-white border border-slate-200 rounded-2xl p-4.5 shadow-sm space-y-4">
+                        <div className="border-b border-slate-100 pb-2.5 flex items-center justify-between">
+                          <strong className="text-slate-800 font-bold uppercase tracking-wide text-xs">
                             Participants
                           </strong>
-                          <button
-                            onClick={() => {
-                              const pName = prompt("Register and assign new Participant Name:");
-                              if (pName) alert(`Assigned ${pName} to active workflow participants database register.`);
-                            }}
-                            className="bg-slate-50 border border-slate-350 rounded px-1.5 py-0.5 hover:bg-slate-100 font-semibold text-[9px] font-sans transition-all cursor-pointer"
-                          >
-                            Assign
-                          </button>
+                          <span className="text-[10px] font-mono text-[#008751] bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded font-bold uppercase">
+                            Active
+                          </span>
                         </div>
 
-                        <div className="space-y-3.5">
-                          <div className="flex items-start gap-2.5 text-left">
-                            <span className="w-6.5 h-6.5 rounded bg-[#8e44ad] text-white flex items-center justify-center font-extrabold text-[10px] italic shrink-0">RD</span>
+                        <div className="space-y-4">
+                          {/* Chief Editor */}
+                          <div className="flex items-center gap-3 text-left">
+                            <span className="w-8 h-8 rounded-full bg-[#004d2b] text-white flex items-center justify-center font-bold text-xs shrink-0">
+                              {currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'CE'}
+                            </span>
                             <div className="leading-tight">
-                              <span className="font-bold text-slate-850 text-[11px] block hover:underline cursor-pointer">Dr. ROWELL AGLIONES DIAZ</span>
-                              <span className="text-[9px] text-slate-400 block mt-0.5">Journal editor</span>
+                              <span className="font-bold text-slate-800 text-xs block">{currentUser?.name || 'Dr. Rowell Diaz'}</span>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">Chief Editor</span>
                             </div>
                           </div>
 
-                          <div className="flex items-start gap-2.5 text-left">
-                            <span className="w-6.5 h-6.5 rounded bg-[#3498db] text-white flex items-center justify-center font-extrabold text-[10px] italic shrink-0">JO</span>
+                          {/* Section Editor */}
+                          <div className="flex items-center gap-3 text-left">
+                            <span className="w-8 h-8 rounded bg-emerald-50 text-[#008751] border border-emerald-100 flex items-center justify-center font-bold text-xs shrink-0">
+                              CJ
+                            </span>
                             <div className="leading-tight">
-                              <span className="font-bold text-slate-850 text-[11px] block hover:underline cursor-pointer">Manager</span>
-                              <span className="text-[9px] text-slate-400 block mt-0.5 font-sans">Journal editor</span>
+                              <span className="font-bold text-slate-800 text-xs block">Cha Jiwoo</span>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">Section Editor</span>
                             </div>
                           </div>
 
-                          <div className="flex items-start gap-2.5 text-left">
-                            <span className="w-6.5 h-6.5 rounded bg-[#1abc9c] text-white flex items-center justify-center font-extrabold text-[10px] italic shrink-0">C</span>
+                          {/* Corresponding Author */}
+                          <div className="flex items-center gap-3 text-left">
+                            <span className="w-8 h-8 rounded bg-amber-50 text-amber-800 border border-amber-100 flex items-center justify-center font-bold text-xs shrink-0">
+                              {selectedPaper?.authorName ? selectedPaper.authorName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'AU'}
+                            </span>
                             <div className="leading-tight">
-                              <span className="font-bold text-slate-850 text-[11px] block hover:underline cursor-pointer">Cha Jiwoo</span>
-                              <span className="text-[9px] text-slate-400 block mt-0.5">Section editor</span>
+                              <span className="font-bold text-slate-800 text-xs block">{selectedPaper?.authorName || 'John Willinsky'}</span>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">Corresponding Author</span>
                             </div>
                           </div>
 
-                          <div className="flex items-start gap-2.5 text-left">
-                            <span className="w-6.5 h-6.5 rounded bg-[#e67e22] text-white flex items-center justify-center font-extrabold text-[10px] italic shrink-0">JW</span>
-                            <div className="leading-tight">
-                              <span className="font-bold text-slate-850 text-[11px] block hover:underline cursor-pointer">John Willinksy</span>
-                              <span className="text-[9px] text-slate-400 block mt-0.5">Author</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      {/* Standard Decision Desk Card */}
-                      <div className="bg-white border border-gray-250 rounded-2xl p-4 shadow-xs space-y-3 font-sans">
-                        <strong className="block text-slate-800 font-extrabold uppercase tracking-wider text-[10px] border-b pb-1.5 font-mono">
-                          Decision Desk
-                        </strong>
-                        <div className="space-y-2">
-                          <button
-                            onClick={() => attemptRecordDecision('ACCEPT')}
-                            className="w-full bg-[#008751] hover:bg-[#007042] text-white font-bold py-2 px-2.5 rounded text-[11px] block transition-all text-center cursor-pointer font-sans"
-                          >
-                            Accept Submission
-                          </button>
-                          <button
-                            onClick={() => attemptRecordDecision('REVISE')}
-                            className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-2.5 rounded text-[11px] block transition-all text-center cursor-pointer font-sans"
-                          >
-                            Request Revisions
-                          </button>
-                          <button
-                            onClick={() => attemptRecordDecision('REJECT')}
-                            className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-2.5 rounded text-[11px] block transition-all text-center cursor-pointer font-sans"
-                          >
-                            Decline Submission
-                          </button>
-                        </div>
-                        <div className="pt-2">
-                          <label className="block text-slate-500 font-mono text-[9px] uppercase tracking-wider mb-1">
-                            Override notes:
-                          </label>
-                          <textarea
-                            rows={2}
-                            value={editorsNotesTemp}
-                            onChange={(e) => setEditorsNotesTemp(e.target.value)}
-                            placeholder="e.g. Approved via editorial oversight rules"
-                            className="w-full border rounded p-2 text-[10px] focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-slate-800"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Standard Referees Card */}
-                      <div className="bg-white border border-gray-250 rounded-2xl p-4 shadow-xs space-y-3 font-sans">
-                        <div className="flex items-center justify-between border-b pb-1.5">
-                          <strong className="text-slate-800 font-extrabold uppercase tracking-wider text-[10px] font-mono">
-                            Referees ({selectedPaper?.reviewers.length || 0})
-                          </strong>
-                          <button
-                            onClick={() => setShowAssignModal(true)}
-                            className="text-[#008751] hover:underline font-bold text-[9px] uppercase font-mono cursor-pointer"
-                          >
-                            + Invite
-                          </button>
-                        </div>
-                        {selectedPaper && selectedPaper.reviewers.length > 0 ? (
-                          <div className="space-y-3">
-                            {selectedPaper.reviewers.map(r => (
-                              <div key={r.id} className="border border-slate-100 rounded-lg p-2 bg-slate-50/50 space-y-1.5">
-                                <div className="flex items-center justify-between">
-                                  <span className="font-bold text-slate-850 truncate max-w-[90px]">{r.name}</span>
-                                  <div className="flex items-center gap-1.5">
-                                    <span className={`px-1.5 py-0.2 rounded-[3px] text-[8px] font-mono font-extrabold uppercase ${
-                                      r.status === 'INVITED' ? 'bg-yellow-100 text-yellow-850' :
-                                      r.status === 'ACCEPTED' ? 'bg-emerald-100 text-emerald-850' :
-                                      r.status === 'SUBMITTED' ? 'bg-[#e6f4ea] text-[#137333]' : 'bg-red-100 text-red-850'
-                                    }`}>
-                                      {r.status}
+                          {/* Active Peer Referees from selected paper */}
+                          {selectedPaper?.reviewers && selectedPaper.reviewers.length > 0 && (
+                            <div className="pt-3 border-t border-slate-100 space-y-3">
+                              <span className="block text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">Delegated Peer Referees</span>
+                              {selectedPaper.reviewers.map((rev) => {
+                                const initials = rev.name ? rev.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : 'RV';
+                                return (
+                                  <div key={rev.id} className="flex items-center gap-3 text-left">
+                                    <span className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0">
+                                      {initials}
                                     </span>
-                                    <button
-                                      onClick={() => handleOpenEvaluation(r)}
-                                      className="text-slate-400 hover:text-emerald-700 font-black px-1 cursor-pointer"
-                                      title="Open detailed evaluator criteria"
-                                    >
-                                      ...
-                                    </button>
+                                    <div className="leading-tight">
+                                      <span className="font-bold text-slate-800 text-xs block">{rev.name}</span>
+                                      <span className="text-[9px] font-mono text-emerald-600 uppercase mt-0.5 block font-bold">{rev.status}</span>
+                                    </div>
                                   </div>
-                                </div>
-                                <div className="flex items-center justify-between bg-white border border-dashed rounded p-1 text-[8px] leading-none font-mono">
-                                  <span className="text-gray-400 font-sans">Step:</span>
-                                  {r.status === 'INVITED' && (
-                                    <button
-                                      onClick={() => handleSimulateStatusCycle(r.email, 'ACCEPTED')}
-                                      className="text-[#008751] hover:underline font-bold"
-                                    >
-                                      Accept
-                                    </button>
-                                  )}
-                                  {r.status === 'ACCEPTED' && (
-                                    <button
-                                      onClick={() => handleSimulateStatusCycle(r.email, 'SUBMITTED')}
-                                      className="text-[#008751] hover:underline font-bold"
-                                    >
-                                      Submit Report
-                                    </button>
-                                  )}
-                                  {r.status === 'SUBMITTED' && (
-                                    <span className="text-[#008751] font-bold uppercase">Report In</span>
-                                  )}
-                                </div>
-
-                                {r.status === 'SUBMITTED' && (
-                                  <div className="bg-white border rounded p-1.5 text-[9px] leading-snug space-y-0.5 text-left font-sans">
-                                    <strong>Recommend: <span className="text-[#008751]">{r.recommendation}</span></strong>
-                                    <p className="text-gray-400 italic">"{r.commentsToAuthor}"</p>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-center py-4 text-[10px] text-gray-400 italic font-sans animate-pulse">No reviewers delegated yet</p>
-                        )}
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </>
-                  )}
-
                 </div>
 
               </div>
+
+              {/* SECTION D: Wide, Full-Width Integrated Discussion Thread */}
+              {selectedPaper && (
+                <div className="mt-8 border-t border-slate-150 pt-8 w-full text-left">
+                  <ManuscriptDiscussion
+                    manuscript={selectedPaper}
+                    onUpdateManuscript={onUpdateManuscript}
+                    currentUser={currentUser}
+                    currentRole="EDITOR"
+                    title="Review Discussions & Logged Threads"
+                  />
+                </div>
+              )}
 
             </div>
 
@@ -2818,6 +2784,107 @@ export default function EditorWorkspace({
 
             <div className="flex justify-end pt-4 border-t mt-4">
               <button onClick={() => setShowAssignModal(false)} className="border text-gray-600 font-semibold px-4 py-2 rounded-xl">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* IMMERSIVE DOCUMENT READING WORKSPACE */}
+      {readingFile && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[32px] shadow-2xl border border-slate-200 max-w-5xl w-full h-[85vh] flex flex-col relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-left">
+            {/* Header */}
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
+              <div className="space-y-1 text-left">
+                <span className="bg-emerald-50 text-[#008751] border border-emerald-100 font-mono font-bold text-[9px] px-2.5 py-1 rounded uppercase tracking-wider">
+                  {readingFile.type || "Article File"} • Document Review
+                </span>
+                <h3 className="font-sans font-black text-slate-900 text-sm sm:text-base flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-emerald-600 shrink-0" />
+                  {readingFile.name}
+                </h3>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setReadingFile(null)}
+                className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Immersive Reading Workspace */}
+            <div className="flex-grow flex overflow-hidden">
+              {/* Left Outline Sidebar */}
+              <div className="w-52 bg-slate-50/50 border-r border-slate-100 p-5 hidden md:block text-left overflow-y-auto shrink-0">
+                <span className="block text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-3">Document Outline</span>
+                <nav className="space-y-2.5 font-medium text-xs text-slate-500">
+                  <a href="#title" className="block text-[#008751] font-bold border-l-2 border-[#008751] pl-2">1. Title & Abstract</a>
+                  <span className="block hover:text-slate-900 pl-2 cursor-pointer">2. Introduction</span>
+                  <span className="block hover:text-slate-900 pl-2 cursor-pointer">3. Methodology</span>
+                  <span className="block hover:text-slate-900 pl-2 cursor-pointer">4. Analysis & Results</span>
+                  <span className="block hover:text-slate-900 pl-2 cursor-pointer">5. Discussion</span>
+                  <span className="block hover:text-slate-900 pl-2 cursor-pointer">6. Bibliography</span>
+                </nav>
+                <div className="mt-8 pt-6 border-t border-slate-100 space-y-2.5">
+                  <span className="block text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">Anonymity Seal</span>
+                  <div className="text-[10px] text-slate-500 space-y-1 leading-normal font-medium">
+                    <div>Blind Parity: <span className="font-bold text-slate-700">Verified</span></div>
+                    <div>Anonymized: <span className="font-bold text-[#008751]">Yes (Standard)</span></div>
+                    <div className="text-slate-400 break-all">ID: {readingFile.no}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Serif Body Text Page Container */}
+              <div className="flex-grow overflow-y-auto p-6 sm:p-10 bg-white flex flex-col items-center">
+                <div className="max-w-2xl w-full text-left space-y-6 text-slate-800 leading-relaxed text-sm sm:text-base">
+                  <h1 className="text-xl sm:text-2xl font-black font-sans text-slate-900 leading-tight">
+                    {selectedPaper?.title || "Manuscript Title Proposal"}
+                  </h1>
+                  <div className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider">
+                    JMS Open Access Registry • ID: {selectedPaper?.id || 'OJS-6241'}
+                  </div>
+                  
+                  <hr className="border-slate-100" />
+                  
+                  <h2 className="text-sm font-black font-sans text-slate-900 uppercase tracking-wider">Abstract</h2>
+                  <p className="italic text-slate-600 bg-slate-50 border p-4 rounded-xl leading-relaxed text-xs sm:text-sm font-medium">
+                    {selectedPaper?.abstract || "Abstract goes here..."}
+                  </p>
+
+                  <h2 className="text-sm font-black font-sans text-slate-900 uppercase tracking-wider pt-4">1. Background & Introduction</h2>
+                  <p className="text-slate-700 leading-relaxed font-sans text-sm">
+                    In modern medical imaging and bioinformatics, processing clinical scans with lock-free algorithms requires high reliability and minimal resource overhead. Typical decentralized architectures guarantee transactional integrity but fail to address double-blind anonymity constraints during peer evaluations. This paper introduces an optimized, multi-tenant consensus ledger framework tailored specifically for peer-reviewed healthcare publications.
+                  </p>
+                  <p className="text-slate-700 leading-relaxed font-sans text-sm">
+                    The principal challenge in peer review platforms lies in decoupling researcher credentials from evaluation sheets. By maintaining an active, cryptographic anonymity seal during initial editorial intake phases, our proposed system completely eliminates citation leakage risk.
+                  </p>
+
+                  <h2 className="text-sm font-black font-sans text-slate-900 uppercase tracking-wider pt-4">2. Methodology & Design Patterns</h2>
+                  <p className="text-slate-700 leading-relaxed font-sans text-sm">
+                    We propose a formal state machine containing explicit nodes for unassigned screening, invitation cycles, and consensus metrics check. During screening, editors can trigger desk acceptances or rejections without incurring secondary review overheads. Upon invitation, assigned peer referees receive access tokens valid for exactly fifteen days.
+                  </p>
+
+                  <h2 className="text-sm font-black font-sans text-slate-900 uppercase tracking-wider pt-4">3. Preliminary Results</h2>
+                  <p className="text-slate-700 leading-relaxed font-sans text-sm">
+                    The experimental simulation shows that implementing a centralized intake dashboard allows editors to bypass unnecessary coordination delays. Decision latency dropped by 42% under concurrent submission workloads.
+                  </p>
+                  
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-150 font-mono text-[11px] leading-normal text-slate-600 space-y-1">
+                    <span className="font-bold text-slate-800 block mb-1">Table 1. Consensus latency benchmarks</span>
+                    <div>• Intake Decision (Desk): 2.4 hrs</div>
+                    <div>• Standard Peer Review: 14.2 days</div>
+                    <div>• Override Exceptions: 1.1 hrs</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer with reading metrics */}
+            <div className="p-4 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400 bg-slate-50 font-mono shrink-0">
+              <span>Status: Secure Sandbox Reading Mode</span>
+              <span>JMS v3.4 Compliant Web Reader</span>
             </div>
           </div>
         </div>

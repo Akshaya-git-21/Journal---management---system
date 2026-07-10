@@ -13,4 +13,31 @@ body {
   color: #1e293b; /* slate-800 */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-size: 16px; /* Increased base font size for the whole screen */
+}
+
+/* Custom proportional text scaling overrides to make font large for the whole screen */
+.text-[10px], .text-[9.5px], .text-[9px] {
+  font-size: 11px !important;
+}
+.text-xs {
+  font-size: 13.5px !important; /* scale up from 12px */
+}
+.text-sm {
+  font-size: 15.5px !important; /* scale up from 14px */
+}
+.text-base {
+  font-size: 17.5px !important; /* scale up from 16px */
+}
+.text-lg {
+  font-size: 20px !important; /* scale up from 18px */
+}
+.text-xl {
+  font-size: 24px !important; /* scale up from 20px */
+}
+.text-2xl {
+  font-size: 28px !important; /* scale up from 24px */
+}
+.text-3xl {
+  font-size: 34px !important; /* scale up from 30px */
 }

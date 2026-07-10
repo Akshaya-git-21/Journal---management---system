@@ -440,6 +440,7 @@ export default function App() {
         <AuthPortals
           activeRole={authRole}
           initialMode={authMode}
+          manuscripts={manuscripts}
           onBackToLanding={() => {
             window.location.href = 'https://tulitics.vercel.app/';
           }}

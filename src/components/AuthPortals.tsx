@@ -26,9 +26,10 @@ interface AuthPortalsProps {
   initialMode: 'LOGIN' | 'REGISTER';
   onBackToLanding: () => void;
   onSuccessAuth: (user: { name: string; email: string; role: Role }) => void;
+  manuscripts?: any[];
 }
 
-export default function AuthPortals({ activeRole, initialMode, onBackToLanding, onSuccessAuth }: AuthPortalsProps) {
+export default function AuthPortals({ activeRole, initialMode, onBackToLanding, onSuccessAuth, manuscripts }: AuthPortalsProps) {
   const [localRole, setLocalRole] = useState<Role>(activeRole);
   const [mode, setMode] = useState<'LOGIN' | 'REGISTER'>(initialMode);
 
@@ -271,6 +272,19 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
           });
         }, 1500);
       } else {
+        if (localRole === 'REVIEWER') {
+          const isInvited = (manuscripts || []).some(m => 
+            (m.reviewers || []).some((r: any) => r.email.toLowerCase() === email.toLowerCase())
+          );
+          const isDefaultPreset = email.toLowerCase() === 'reviewer@stanford.edu' || email.toLowerCase() === 'reviewer@jms-referee.com';
+          
+          if (!isInvited && !isDefaultPreset) {
+            setErrorMsg("ACCESS DENIED: Only invited peer reviewers assigned to an active manuscript are authorized to login. Please contact the Editor-in-Chief if you believe this is an error.");
+            setLoading(false);
+            return;
+          }
+        }
+
         const authUser = await loginSupabaseUser(email, password);
         setSuccessMsg(`SUCCESS: Authenticated via Supabase Auth! Redirecting...`);
         setTimeout(() => {
