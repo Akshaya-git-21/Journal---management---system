@@ -201,12 +201,14 @@ function getReviewerEvaluation(reviewer: any) {
 interface EditorWorkspaceProps {
   manuscripts: Manuscript[];
   onUpdateManuscript: (manuscript: Manuscript) => void;
+  onDeleteManuscript: (manuscriptId: string) => void;
   currentUser?: { name: string; email: string } | null;
 }
 
 export default function EditorWorkspace({
   manuscripts,
   onUpdateManuscript,
+  onDeleteManuscript,
   currentUser
 }: EditorWorkspaceProps) {
   // Navigation tabs matching separate OJS author requirements
@@ -1598,7 +1600,17 @@ export default function EditorWorkspace({
                             )}
                           </div>
 
-                          <div className="flex justify-end pt-2">
+                          <div className="flex justify-end items-center gap-3 pt-2">
+                            <button
+                              onClick={() => {
+                                if (confirm("Do you want to delete?")) {
+                                  onDeleteManuscript(m.id);
+                                }
+                              }}
+                              className="border border-red-200 hover:border-red-500 hover:bg-red-50 text-red-650 text-red-600 font-sans font-extrabold text-[11px] px-4 py-3 rounded-xl transition-all cursor-pointer uppercase tracking-wider shadow-2xs"
+                            >
+                              Delete Submission
+                            </button>
                             <button
                               onClick={() => handleSelectPaper(m)}
                               className="bg-[#004d2e] hover:bg-[#003820] text-white font-sans font-extrabold text-[11px] px-5 py-3 rounded-xl transition-all inline-flex items-center gap-2 cursor-pointer uppercase tracking-wider shadow-sm hover:scale-[1.02] active:scale-95"

@@ -22,6 +22,7 @@ import {
   checkSupabaseConnection, 
   getManuscriptsFromDb, 
   upsertManuscriptToDb, 
+  deleteManuscriptFromDb,
   getSupabaseSQLScript 
 } from './lib/supabase';
 
@@ -160,6 +161,19 @@ export default function App() {
     } catch (err) {
       console.warn("Could not upsert manuscript update to Supabase, local cache preserved:", err);
     }
+  };
+
+  const handleDeleteManuscript = async (manuscriptId: string) => {
+    setManuscripts((prev) => prev.filter((m) => m.id !== manuscriptId));
+    try {
+      await deleteManuscriptFromDb(manuscriptId);
+    } catch (err) {
+      console.warn("Could not delete manuscript from Supabase, local cache updated:", err);
+    }
+    setNotification(`SUCCESS: Manuscript ${manuscriptId} deleted successfully.`);
+    setTimeout(() => {
+      setNotification('');
+    }, 4000);
   };
 
   const handleSaveDraftManuscript = async (draft: Manuscript) => {
@@ -478,6 +492,7 @@ export default function App() {
                   manuscripts={manuscripts}
                   onSaveManuscript={handleSaveDraftManuscript}
                   onSubmitManuscript={handleSubmitManuscript}
+                  onDeleteManuscript={handleDeleteManuscript}
                   currentUser={loggedInUser}
                   onSignOut={handleSignOut}
                   onRoleChange={handleRoleChange}
@@ -488,6 +503,7 @@ export default function App() {
                 <EditorWorkspace
                   manuscripts={manuscripts}
                   onUpdateManuscript={handleUpdateManuscript}
+                  onDeleteManuscript={handleDeleteManuscript}
                   currentUser={loggedInUser}
                 />
               )}

@@ -35,6 +35,7 @@ interface AuthorWorkspaceProps {
   manuscripts: Manuscript[];
   onSaveManuscript: (manuscript: Manuscript) => void;
   onSubmitManuscript: (manuscriptId: string) => void;
+  onDeleteManuscript?: (manuscriptId: string) => void;
   currentUser?: { name: string; email: string; role: Role } | null;
   onSignOut?: () => void;
   onRoleChange?: (role: Role) => void;
@@ -78,6 +79,7 @@ export default function AuthorWorkspace({
   manuscripts,
   onSaveManuscript,
   onSubmitManuscript,
+  onDeleteManuscript,
   currentUser,
   onSignOut,
   onRoleChange
@@ -273,6 +275,32 @@ export default function AuthorWorkspace({
 
     onSaveManuscript(parentManuscript);
     onSubmitManuscript(`OJS-${paperObj.id}`);
+  };
+
+  const handleDeletePaper = (paperId: string) => {
+    if (confirm("Do you want to delete?")) {
+      setPapers((prev) => prev.filter((p) => p.id !== paperId));
+      const saved = localStorage.getItem('ojs_author_papers_state');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          const filtered = parsed.filter((p: any) => p.id !== paperId);
+          localStorage.setItem('ojs_author_papers_state', JSON.stringify(filtered));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      const parentMatch = manuscripts.find(m => {
+        const cleanId = m.id.replace('JMS-', '').replace('OJS-', '');
+        return cleanId === paperId || m.id === paperId;
+      });
+      if (onDeleteManuscript) {
+        const targetId = parentMatch ? parentMatch.id : (paperId.startsWith('OJS-') || paperId.startsWith('JMS-') ? paperId : `OJS-${paperId}`);
+        onDeleteManuscript(targetId);
+      } else {
+        alert("Submission deleted successfully from local cache.");
+      }
+    }
   };
 
   // Switch tabs helper
@@ -951,12 +979,21 @@ export default function AuthorWorkspace({
 
                             {/* Actions */}
                             <td className="px-4 py-3.5 text-center whitespace-nowrap font-bold text-sm">
-                              <button
-                                onClick={() => setSelectedPaper(paper)}
-                                className="text-[#008751] underline hover:text-[#007043] transition cursor-pointer"
-                              >
-                                View
-                              </button>
+                              <div className="flex items-center justify-center gap-3">
+                                <button
+                                  onClick={() => setSelectedPaper(paper)}
+                                  className="text-[#008751] underline hover:text-[#007043] transition cursor-pointer"
+                                >
+                                  View
+                                </button>
+                                <span className="text-slate-300">|</span>
+                                <button
+                                  onClick={() => handleDeletePaper(paper.id)}
+                                  className="text-red-650 text-red-600 underline hover:text-red-800 transition cursor-pointer"
+                                >
+                                  Delete
+                                </button>
+                              </div>
                             </td>
 
                           </tr>
