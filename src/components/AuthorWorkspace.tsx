@@ -25,7 +25,16 @@ import {
   Circle,
   Globe,
   PlusCircle,
-  Filter
+  Filter,
+  Inbox,
+  Eye,
+  RefreshCw,
+  FileCheck,
+  Send,
+  Check,
+  HelpCircle,
+  Mail,
+  X
 } from 'lucide-react';
 
 import NewSubmissionFlow from './NewSubmissionFlow';
@@ -219,13 +228,20 @@ export default function AuthorWorkspace({
   const authorEmail = currentUser?.email || "ada@computing.org";
 
   // Counts tracking
-  const countActive = papers.filter(p => p.stage === 'Submission').length;
-  const countRevisionsReq = papers.filter(p => p.stage === 'Revisions Requested').length;
-  const countRevisionsSub = papers.filter(p => p.stage === 'Revisions Submitted').length;
+  const countSubmitted = papers.filter(p => p.stage === 'Submission' && (!p.raw?.status || p.raw?.status === 'SUBMITTED')).length;
+  const countUnderReview = papers.filter(p => p.raw?.status === 'UNDER_REVIEW' && p.stage !== 'Revisions Requested' && p.stage !== 'Revisions Submitted').length;
+  const countRevisionRequired = papers.filter(p => p.stage === 'Revisions Requested').length;
+  const countRevisionProcessing = papers.filter(p => p.stage === 'Revisions Submitted').length;
+  const countAcceptedProduction = papers.filter(p => p.raw?.status === 'ACCEPTED' || p.stage === 'Scheduled').length;
+  const countPublished = papers.filter(p => p.raw?.status === 'PUBLISHED' || p.stage === 'Published').length;
+  const countRejected = papers.filter(p => p.raw?.status === 'REJECTED' || p.stage === 'Declined').length;
+
+  const countActive = countSubmitted + countUnderReview;
+  const countRevisionsReq = countRevisionRequired;
+  const countRevisionsSub = countRevisionProcessing;
   const countIncomplete = papers.filter(p => p.stage === 'Incomplete').length;
-  const countScheduled = papers.filter(p => p.stage === 'Scheduled').length;
-  const countPublished = papers.filter(p => p.stage === 'Published').length;
-  const countDeclined = papers.filter(p => p.stage === 'Declined').length;
+  const countScheduled = countAcceptedProduction;
+  const countDeclined = countRejected;
 
   // Handle new submission creation from the premium NewSubmissionFlow wizard
   const handleCreateSubmissionFromWizard = (paperObj: any) => {
@@ -303,44 +319,439 @@ export default function AuthorWorkspace({
     }
   };
 
-  // Switch tabs helper
+  // Premium Interactive Queue tracking states
+  const [selectedQueue, setSelectedQueue] = useState<string>('SUBMITTED');
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+
+  // Modal interaction states (Contact & Respond to Decision)
+  const [isContactModalOpen, setIsContactModalOpen] = useState<boolean>(false);
+  const [contactPaper, setContactPaper] = useState<any | null>(null);
+  const [contactSubject, setContactSubject] = useState<string>('');
+  const [contactMessage, setContactMessage] = useState<string>('');
+
+  const [isRespondModalOpen, setIsRespondModalOpen] = useState<boolean>(false);
+  const [respondPaper, setRespondPaper] = useState<any | null>(null);
+  const [respondLetter, setRespondLetter] = useState<string>('');
+  const [respondFileName, setRespondFileName] = useState<string>('reconciled_manuscript.docx');
+
+  // Interface for detailed tracking steps
+  interface WorkflowStageDetail {
+    id: string;
+    label: string;
+    status: 'completed' | 'active' | 'upcoming' | 'skipped';
+    description: string;
+    dateCompleted?: string | null;
+  }
+
+  // Generates complete 12-stage progress mapping automatically based on manuscript state
+  const getDetailedWorkflowState = (paper: any): WorkflowStageDetail[] => {
+    const m = paper.raw || {};
+    const status = m.status || 'SUBMITTED';
+    const hasReviewers = m.reviewers && m.reviewers.length > 0;
+    
+    // Core state flags computed dynamically
+    const isSubmitted = true; 
+    const isEditorAssigned = status !== 'SUBMITTED' && status !== 'DRAFT' || hasReviewers || m.editorsNotes;
+    const isReviewerInvitationSent = hasReviewers;
+    
+    const reviewersAccepted = m.reviewers && m.reviewers.some((r: any) => r.status === 'ACCEPTED' || r.status === 'SUBMITTED');
+    const isUnderReview = status === 'UNDER_REVIEW' && reviewersAccepted;
+    
+    const reviewersCompleted = m.reviewers && m.reviewers.some((r: any) => r.status === 'SUBMITTED');
+    const isReviewsReceived = reviewersCompleted;
+    
+    const isEditorDecisionPending = status === 'AWAITING_DECISION';
+    
+    const isRevisionRequired = (m.editorsNotes || '').includes('REVISE') || 
+                               (m.editorsNotes || '').includes('MINOR_REVISIONS') || 
+                               (m.editorsNotes || '').includes('MAJOR_REVISIONS') ||
+                               paper.stage === 'Revisions Requested' || 
+                               paper.stage === 'Revisions Submitted';
+                               
+    const isRevisedSubmitted = isRevisionRequired && (paper.stage === 'Revisions Submitted' || (m.editorsNotes || '').includes('revision uploaded'));
+    const isFinalReview = isRevisedSubmitted && status === 'UNDER_REVIEW';
+    
+    const isAccepted = status === 'ACCEPTED' || status === 'PUBLISHED';
+    const isProduction = status === 'ACCEPTED';
+    const isPublished = status === 'PUBLISHED';
+    const isRejected = status === 'REJECTED';
+
+    const stages: WorkflowStageDetail[] = [];
+
+    // 1. Submitted
+    stages.push({
+      id: 'submitted',
+      label: 'Submitted',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview || isReviewerInvitationSent || isEditorAssigned ? 'completed' : 'active',
+      description: 'Manuscript successfully registered and files uploaded to the journal database.',
+      dateCompleted: paper.receivedAt
+    });
+
+    // 2. Editor Assigned
+    stages.push({
+      id: 'editor_assigned',
+      label: 'Editor Assigned',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview || isReviewerInvitationSent ? 'completed' : (isEditorAssigned ? 'active' : 'upcoming'),
+      description: 'An editorial board member has been assigned to coordinate peer evaluation.',
+      dateCompleted: isEditorAssigned ? paper.receivedAt : null
+    });
+
+    // 3. Reviewer Invitation Sent
+    stages.push({
+      id: 'reviewer_invited',
+      label: 'Reviewer Invitation Sent',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview ? 'completed' : (isReviewerInvitationSent ? 'active' : 'upcoming'),
+      description: 'Formal double-blind peer referee requests dispatched to corresponding university experts.',
+      dateCompleted: isReviewerInvitationSent ? paper.receivedAt : null
+    });
+
+    // 4. Under Review
+    stages.push({
+      id: 'under_review',
+      label: 'Under Review',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived ? 'completed' : (isUnderReview ? 'active' : 'upcoming'),
+      description: 'Assigned peer reviewers are currently evaluating methodology, scientific merit, and ethical compliance.',
+      dateCompleted: isUnderReview ? paper.receivedAt : null
+    });
+
+    // 5. Reviews Received
+    stages.push({
+      id: 'reviews_received',
+      label: 'Reviews Received',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending ? 'completed' : (isReviewsReceived ? 'active' : 'upcoming'),
+      description: 'Completed evaluation reports received and logged. Minimum consensus thresholds achieved.',
+      dateCompleted: isReviewsReceived ? paper.receivedAt : null
+    });
+
+    // 6. Editor Decision Pending
+    stages.push({
+      id: 'decision_pending',
+      label: 'Editor Decision Pending',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired ? 'completed' : (isEditorDecisionPending ? 'active' : 'upcoming'),
+      description: 'Editorial board is weighing recommendations to finalize the manuscript decision.',
+      dateCompleted: isEditorDecisionPending ? paper.receivedAt : null
+    });
+
+    // 7. Minor / Major Revision
+    let revisionLabel = 'Minor Revision';
+    if ((m.editorsNotes || '').toLowerCase().includes('major') || (paper.title || '').toLowerCase().includes('major')) {
+      revisionLabel = 'Major Revision';
+    }
+    const revisionStatus = isAccepted || isPublished ? 'completed' : (isRevisedSubmitted ? 'completed' : (isRevisionRequired ? 'active' : 'skipped'));
+    stages.push({
+      id: 'revision_required',
+      label: revisionLabel,
+      status: revisionStatus,
+      description: 'Revisions required to address referee and editor feedback before publication clearance.',
+      dateCompleted: isRevisionRequired ? paper.receivedAt : null
+    });
+
+    // 8. Revised Manuscript Submitted
+    const revSubmittedStatus = isAccepted || isPublished ? 'completed' : (isRevisedSubmitted ? 'active' : (isRevisionRequired ? 'upcoming' : 'skipped'));
+    stages.push({
+      id: 'revised_submitted',
+      label: 'Revised Manuscript Submitted',
+      status: revSubmittedStatus,
+      description: 'Revised files and author reconciliation statement received by the editorial desk.',
+      dateCompleted: isRevisedSubmitted ? paper.receivedAt : null
+    });
+
+    // 9. Final Review
+    const finalReviewStatus = isAccepted || isPublished ? 'completed' : (isFinalReview ? 'active' : (isRevisedSubmitted ? 'upcoming' : 'skipped'));
+    stages.push({
+      id: 'final_review',
+      label: 'Final Review',
+      status: finalReviewStatus,
+      description: 'Editor-in-chief executing final validation checks on the revised manuscript.',
+      dateCompleted: isFinalReview ? paper.receivedAt : null
+    });
+
+    // 10. Accepted
+    stages.push({
+      id: 'accepted',
+      label: 'Accepted',
+      status: isPublished ? 'completed' : (isAccepted ? 'active' : 'upcoming'),
+      description: 'Manuscript approved for publication! Transitioning to typesetting and copyediting.',
+      dateCompleted: isAccepted ? paper.receivedAt : null
+    });
+
+    // 11. Production
+    stages.push({
+      id: 'production',
+      label: 'Production',
+      status: isPublished ? 'completed' : (isProduction ? 'active' : 'upcoming'),
+      description: 'Copyediting, XML tagging (JATS standard), and Galley proof creation in progress.',
+      dateCompleted: isProduction ? paper.receivedAt : null
+    });
+
+    // 12. Published
+    stages.push({
+      id: 'published',
+      label: 'Published',
+      status: isPublished ? 'active' : 'upcoming',
+      description: 'Galley release launched. Digital Object Identifier (DOI) registered with Crossref.',
+      dateCompleted: isPublished ? paper.receivedAt : null
+    });
+
+    if (isRejected) {
+      stages.forEach(st => {
+        if (['revision_required', 'revised_submitted', 'final_review', 'accepted', 'production', 'published'].includes(st.id)) {
+          st.status = 'skipped';
+        }
+      });
+      stages.push({
+        id: 'rejected',
+        label: 'Rejected',
+        status: 'active',
+        description: 'The manuscript was declined for publication by the editorial board.',
+        dateCompleted: paper.receivedAt
+      });
+    }
+
+    return stages;
+  };
+
+  // Maps the 12 detailed stages to 5 compact milestones for space-efficient grid rendering in table row
+  const getCompactMilestones = (detailedStages: WorkflowStageDetail[], isRejected: boolean) => {
+    const milestones = [
+      { name: 'Intake', stages: ['submitted', 'editor_assigned'] },
+      { name: 'Evaluation', stages: ['reviewer_invited', 'under_review', 'reviews_received'] },
+      { name: 'Revision', stages: ['decision_pending', 'revision_required', 'revised_submitted', 'final_review'] },
+      { name: 'Production', stages: ['accepted', 'production'] },
+      { name: 'Published', stages: ['published'] }
+    ];
+
+    return milestones.map(m => {
+      const groupStages = detailedStages.filter(st => m.stages.includes(st.id));
+      const hasActive = groupStages.some(st => st.status === 'active');
+      const allCompleted = groupStages.length > 0 && groupStages.every(st => st.status === 'completed' || st.status === 'skipped');
+      const allSkipped = groupStages.length > 0 && groupStages.every(st => st.status === 'skipped');
+
+      let status: 'completed' | 'active' | 'upcoming' | 'skipped' | 'rejected' = 'upcoming';
+      
+      if (isRejected && m.name === 'Revision') {
+        const rejectedStage = detailedStages.find(st => st.id === 'rejected');
+        if (rejectedStage) {
+          status = 'rejected';
+        }
+      } else if (hasActive) {
+        status = 'active';
+      } else if (allSkipped) {
+        status = 'skipped';
+      } else if (allCompleted) {
+        status = 'completed';
+      }
+
+      return {
+        name: m.name,
+        status
+      };
+    });
+  };
+
+  // Switch tabs helper (synchronizes sidebar navigation tabs with interactive queues)
   const handleSelectTab = (tabId: string) => {
     setActiveTab(tabId);
     setIsCreatingSubmission(false);
     setSelectedPaper(null);
+    if (tabId === 'ACTIVE_SUBMISSIONS') {
+      setSelectedQueue('SUBMITTED');
+    } else if (tabId === 'REVISIONS_REQUESTED') {
+      setSelectedQueue('REVISION_REQUIRED');
+    } else if (tabId === 'REVISIONS_SUBMITTED') {
+      setSelectedQueue('REVISION_PROCESSING');
+    } else if (tabId === 'SCHEDULED') {
+      setSelectedQueue('ACCEPTED');
+    } else if (tabId === 'PUBLISHED') {
+      setSelectedQueue('PUBLISHED');
+    } else if (tabId === 'DECLINED') {
+      setSelectedQueue('REJECTED');
+    }
   };
 
-  // Filter papers for active tab
-  const getFilteredPapers = () => {
-    let targetStage = 'Submission';
-    switch (activeTab) {
-      case 'ACTIVE_SUBMISSIONS':
-        targetStage = 'Submission';
-        break;
-      case 'REVISIONS_REQUESTED':
-        targetStage = 'Revisions Requested';
-        break;
-      case 'REVISIONS_SUBMITTED':
-        targetStage = 'Revisions Submitted';
-        break;
-      case 'INCOMPLETE_SUBMISSIONS':
-        targetStage = 'Incomplete';
-        break;
-      case 'SCHEDULED':
-        targetStage = 'Scheduled';
-        break;
-      case 'PUBLISHED':
-        targetStage = 'Published';
-        break;
-      case 'DECLINED':
-        targetStage = 'Declined';
-        break;
-      default:
-        return [];
+  // Clickable queue card selection helper (synchronizes interactive queues with sidebar tabs)
+  const handleSelectQueue = (queueId: string) => {
+    setSelectedQueue(queueId);
+    setIsCreatingSubmission(false);
+    setSelectedPaper(null);
+    if (queueId === 'SUBMITTED') {
+      setActiveTab('ACTIVE_SUBMISSIONS');
+    } else if (queueId === 'UNDER_REVIEW') {
+      setActiveTab('ACTIVE_SUBMISSIONS');
+    } else if (queueId === 'REVISION_REQUIRED') {
+      setActiveTab('REVISIONS_REQUESTED');
+    } else if (queueId === 'REVISION_PROCESSING') {
+      setActiveTab('REVISIONS_SUBMITTED');
+    } else if (queueId === 'ACCEPTED') {
+      setActiveTab('SCHEDULED');
+    } else if (queueId === 'PUBLISHED') {
+      setActiveTab('PUBLISHED');
+    } else if (queueId === 'REJECTED') {
+      setActiveTab('DECLINED');
+    }
+  };
+
+  // Contact Journal handler: adds an author discussion message in local & full-stack memory
+  const handleAddDiscussionMessage = (paperId: string, subject: string, messageText: string) => {
+    const paper = papers.find(p => p.id === paperId);
+    if (!paper) return;
+
+    const newMessageId = "msg-" + Math.random().toString(36).substr(2, 9);
+    const newMsg = {
+      id: newMessageId,
+      sender: authorName,
+      senderRole: 'Author',
+      text: messageText,
+      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      files: []
+    };
+
+    let updatedDiscussions = [...(paper.discussions || [])];
+    const existingThread = updatedDiscussions.find(t => t.subject === subject);
+
+    if (existingThread) {
+      existingThread.messages = [...existingThread.messages, newMsg];
+    } else {
+      updatedDiscussions.push({
+        id: "thread-" + Math.random().toString(36).substr(2, 9),
+        subject: subject,
+        initiator: authorName,
+        participants: [authorName, "Kellye Milhorn (Editor)"],
+        messages: [newMsg],
+        createdAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        isClosed: false
+      });
     }
 
+    const updatedPapers = papers.map(p =>
+      p.id === paperId ? { ...p, discussions: updatedDiscussions } : p
+    );
+    setPapers(updatedPapers);
+
+    const matchManuscript = manuscripts.find(m => 
+      m.id === paperId || 
+      m.id === `OJS-${paperId}` || 
+      m.id === `JMS-${paperId}` || 
+      m.id.replace('JMS-', '').replace('OJS-', '') === paperId
+    );
+    if (matchManuscript) {
+      const mappedMsgs = updatedDiscussions.flatMap(t =>
+        t.messages.map((msg: any) => ({
+          id: msg.id,
+          senderName: msg.sender,
+          senderEmail: msg.sender === authorName ? authorEmail : 'editor@jms.org',
+          senderRole: (msg.senderRole === 'Author' ? 'AUTHOR' : 'EDITOR') as any,
+          text: msg.text,
+          timestamp: msg.timestamp,
+          fileName: msg.files?.[0]?.name || null,
+          fileSize: msg.files?.[0]?.size || null
+        }))
+      );
+
+      onSaveManuscript({
+        ...matchManuscript,
+        discussions: mappedMsgs
+      });
+    }
+  };
+
+  // Respond to Editorial Decision handler: transitions paper to revision processing
+  const handleRespondToDecision = (paperId: string, letter: string, fileName: string) => {
+    const paper = papers.find(p => p.id === paperId);
+    if (!paper) return;
+
+    const newMessageId = "msg-" + Math.random().toString(36).substr(2, 9);
+    const newMsg = {
+      id: newMessageId,
+      sender: authorName,
+      senderRole: 'Author',
+      text: `RECONCILIATION STATEMENT / AUTHOR RESPONSE:\n\n${letter}`,
+      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      files: fileName ? [{ name: fileName, size: "1.8 MB" }] : []
+    };
+
+    let updatedDiscussions = [...(paper.discussions || [])];
+    updatedDiscussions.push({
+      id: "thread-" + Math.random().toString(36).substr(2, 9),
+      subject: "Author Revision Submitted",
+      initiator: authorName,
+      participants: [authorName, "Kellye Milhorn (Editor)"],
+      messages: [newMsg],
+      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      isClosed: false
+    });
+
+    const updatedPapers = papers.map(p =>
+      p.id === paperId ? { 
+        ...p, 
+        stage: 'Revisions Submitted',
+        fileName: fileName || p.fileName,
+        discussions: updatedDiscussions 
+      } : p
+    );
+    setPapers(updatedPapers);
+
+    const matchManuscript = manuscripts.find(m => 
+      m.id === paperId || 
+      m.id === `OJS-${paperId}` || 
+      m.id === `JMS-${paperId}` || 
+      m.id.replace('JMS-', '').replace('OJS-', '') === paperId
+    );
+    if (matchManuscript) {
+      const mappedMsgs = updatedDiscussions.flatMap(t =>
+        t.messages.map((msg: any) => ({
+          id: msg.id,
+          senderName: msg.sender,
+          senderEmail: msg.sender === authorName ? authorEmail : 'editor@jms.org',
+          senderRole: (msg.senderRole === 'Author' ? 'AUTHOR' : 'EDITOR') as any,
+          text: msg.text,
+          timestamp: msg.timestamp,
+          fileName: msg.files?.[0]?.name || null,
+          fileSize: msg.files?.[0]?.size || null
+        }))
+      );
+
+      let updatedNotes = matchManuscript.editorsNotes || '';
+      if (!updatedNotes.includes('[revision uploaded]')) {
+        updatedNotes = updatedNotes ? `${updatedNotes}\n[revision uploaded]` : '[revision uploaded]';
+      }
+
+      onSaveManuscript({
+        ...matchManuscript,
+        discussions: mappedMsgs,
+        fileName: fileName || matchManuscript.fileName,
+        editorsNotes: updatedNotes
+      });
+    }
+  };
+
+  // Filters papers depending on selected queue card
+  const getFilteredPapers = () => {
+    let matchesQueue = (p: any) => {
+      const status = p.raw?.status;
+      switch (selectedQueue) {
+        case 'SUBMITTED':
+          return p.stage === 'Submission' && (!status || status === 'SUBMITTED');
+        case 'UNDER_REVIEW':
+          return status === 'UNDER_REVIEW' && p.stage !== 'Revisions Requested' && p.stage !== 'Revisions Submitted';
+        case 'REVISION_REQUIRED':
+          return p.stage === 'Revisions Requested';
+        case 'REVISION_PROCESSING':
+          return p.stage === 'Revisions Submitted';
+        case 'ACCEPTED':
+          return status === 'ACCEPTED' || p.stage === 'Scheduled';
+        case 'PUBLISHED':
+          return status === 'PUBLISHED' || p.stage === 'Published';
+        case 'REJECTED':
+          return status === 'REJECTED' || p.stage === 'Declined';
+        default:
+          return true;
+      }
+    };
+
     return papers.filter(p => {
-      if (p.stage !== targetStage) return false;
+      if (!matchesQueue(p)) return false;
+      
       if (searchQuery.trim() === '') return true;
       const term = searchQuery.toLowerCase();
       return (
@@ -870,8 +1281,60 @@ export default function AuthorWorkspace({
               </div>
             ) : (
             /* ======================= CASE C: OJS LIST OF SUBMISSIONS ======================= */
-            <div className="w-full text-left font-sans space-y-5">
+            <div className="w-full text-left font-sans space-y-6">
               
+              {/* Premium Interactive Queue Metrics Row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                {[
+                  { id: 'SUBMITTED', label: 'Submitted', count: countSubmitted, color: 'emerald', icon: Inbox },
+                  { id: 'UNDER_REVIEW', label: 'Under Review', count: countUnderReview, color: 'blue', icon: Eye },
+                  { id: 'REVISION_REQUIRED', label: 'Revision Required', count: countRevisionRequired, color: 'amber', icon: AlertCircle },
+                  { id: 'REVISION_PROCESSING', label: 'Revision Processing', count: countRevisionProcessing, color: 'indigo', icon: RefreshCw },
+                  { id: 'ACCEPTED', label: 'Accepted/Production', count: countAcceptedProduction, color: 'teal', icon: FileCheck },
+                  { id: 'PUBLISHED', label: 'Published', count: countPublished, color: 'sky', icon: CheckCircle2 },
+                  { id: 'REJECTED', label: 'Rejected', count: countRejected, color: 'rose', icon: XCircle }
+                ].map((q) => {
+                  const IconComponent = q.icon;
+                  const isSelected = selectedQueue === q.id;
+                  
+                  // Color styling mapping
+                  let borderClass = 'border-slate-200 hover:border-slate-300';
+                  let bgClass = 'bg-white';
+                  let textClass = 'text-slate-800';
+                  let countBadgeClass = 'bg-slate-100 text-slate-700';
+                  
+                  if (isSelected) {
+                    if (q.color === 'emerald') { borderClass = 'border-[#008751]'; bgClass = 'bg-emerald-50/40'; textClass = 'text-[#008751] font-bold'; countBadgeClass = 'bg-[#008751] text-white'; }
+                    else if (q.color === 'blue') { borderClass = 'border-blue-500'; bgClass = 'bg-blue-50/40'; textClass = 'text-blue-700 font-bold'; countBadgeClass = 'bg-blue-500 text-white'; }
+                    else if (q.color === 'amber') { borderClass = 'border-amber-500'; bgClass = 'bg-amber-50/40'; textClass = 'text-amber-700 font-bold'; countBadgeClass = 'bg-amber-500 text-white'; }
+                    else if (q.color === 'indigo') { borderClass = 'border-indigo-500'; bgClass = 'bg-indigo-50/40'; textClass = 'text-indigo-700 font-bold'; countBadgeClass = 'bg-indigo-500 text-white'; }
+                    else if (q.color === 'teal') { borderClass = 'border-teal-500'; bgClass = 'bg-teal-50/40'; textClass = 'text-teal-700 font-bold'; countBadgeClass = 'bg-teal-500 text-white'; }
+                    else if (q.color === 'sky') { borderClass = 'border-sky-500'; bgClass = 'bg-sky-50/40'; textClass = 'text-sky-700 font-bold'; countBadgeClass = 'bg-sky-500 text-white'; }
+                    else if (q.color === 'rose') { borderClass = 'border-rose-500'; bgClass = 'bg-rose-50/40'; textClass = 'text-rose-700 font-bold'; countBadgeClass = 'bg-rose-500 text-white'; }
+                  }
+                  
+                  return (
+                    <button
+                      key={q.id}
+                      onClick={() => handleSelectQueue(q.id)}
+                      className={`flex flex-col items-start p-3 rounded-2xl border text-left cursor-pointer transition duration-150 relative overflow-hidden group shadow-xs ${borderClass} ${bgClass}`}
+                    >
+                      <div className="flex items-center justify-between w-full mb-2">
+                        <span className={`p-1.5 rounded-lg ${isSelected ? 'bg-white shadow-tiny border border-slate-100' : 'bg-slate-50'}`}>
+                          <IconComponent className={`w-4 h-4 ${isSelected ? textClass : 'text-slate-450'}`} />
+                        </span>
+                        <span className={`text-xs font-bold font-mono px-2 py-0.5 rounded-full ${countBadgeClass}`}>
+                          {q.count}
+                        </span>
+                      </div>
+                      <span className={`text-[11px] font-bold leading-tight tracking-tight uppercase ${isSelected ? textClass : 'text-slate-500'}`}>
+                        {q.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
               {/* OJS Action Header bar */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 
@@ -886,8 +1349,8 @@ export default function AuthorWorkspace({
                   </button>
                   
                   {/* Category description labels info */}
-                  <span className="text-emerald-800/80 text-sm pl-2 font-mono">
-                    /{activeTab.toLowerCase().replace('_', ' ')}
+                  <span className="text-emerald-800/80 text-sm pl-2 font-mono font-bold">
+                    /queue/{selectedQueue.toLowerCase()}
                   </span>
                 </div>
 
@@ -901,10 +1364,10 @@ export default function AuthorWorkspace({
                     </span>
                     <input
                       type="text"
-                      placeholder="Search submissions, ID, authors, k"
+                      placeholder="Search papers, authors..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full sm:w-64 bg-white border border-[#cfdde5] rounded pl-9 pr-3 py-1.5 text-sm focus:ring-1 focus:ring-[#008751] focus:border-[#008751] focus:outline-none placeholder:text-gray-400 text-slate-800 font-semibold"
+                      className="w-full sm:w-64 bg-white border border-[#cfdde5] rounded pl-9 pr-3 py-1.5 text-sm focus:ring-1 focus:ring-[#008751] focus:border-[#008751] focus:outline-none placeholder:text-gray-400 text-slate-850 font-semibold text-slate-800"
                     />
                   </div>
 
@@ -930,73 +1393,309 @@ export default function AuthorWorkspace({
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-[#f5f8fa] border-b border-[#cfdde5] text-[#002b3d] text-xs font-extrabold uppercase tracking-wide">
-                      <th className="px-4 py-3 w-16 font-mono">ID ↑↓</th>
-                      <th className="px-4 py-3">Submissions</th>
-                      <th className="px-4 py-3 w-36">Stage</th>
-                      <th className="px-4 py-3 w-40">Editorial Activity</th>
-                      <th className="px-4 py-3 w-20 text-center">Actions</th>
+                      <th className="px-4 py-3 w-40 font-mono">Manuscript ID</th>
+                      <th className="px-4 py-3">Title</th>
+                      <th className="px-4 py-3 w-36">Date Submitted</th>
+                      <th className="px-4 py-3 w-44">Current Status</th>
+                      <th className="px-4 py-3 w-72">Progress Timeline</th>
+                      <th className="px-4 py-3 w-48 text-center">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#efefef] text-sm">
                     {filteredList.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-4 py-12 text-center text-slate-400 italic">
-                          No papers recorded in this category that match your search filters.
+                        <td colSpan={6} className="px-4 py-16 text-center text-slate-400 italic font-medium bg-slate-50/10">
+                          No manuscripts found in the selected queue matching your criteria.
                         </td>
                       </tr>
                     ) : (
                       filteredList.map((paper) => {
+                        const isExpanded = expandedRowId === paper.id;
                         return (
-                          <tr key={paper.id} className="hover:bg-slate-50/80 transition duration-100">
-                            
-                            {/* ID */}
-                            <td className="px-4 py-3.5 text-slate-500 font-mono font-medium">
-                              {paper.id}
-                            </td>
+                          <React.Fragment key={paper.id}>
+                            <tr className={`hover:bg-slate-50/50 transition duration-100 ${isExpanded ? 'bg-slate-50/30' : ''}`}>
+                              
+                              {/* Manuscript ID */}
+                              <td className="px-4 py-4 text-slate-500 font-mono font-semibold text-xs whitespace-nowrap">
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => setExpandedRowId(isExpanded ? null : paper.id)}
+                                    className="p-1 text-slate-400 hover:text-[#008751] hover:bg-emerald-50 rounded-lg transition cursor-pointer"
+                                    title={isExpanded ? "Hide detailed tracking roadmap" : "Expand Amazon-style tracking roadmap"}
+                                  >
+                                    {isExpanded ? <ChevronUp className="w-4 h-4 text-[#008751]" /> : <ChevronDown className="w-4 h-4" />}
+                                  </button>
+                                  <span className="bg-slate-50 border border-slate-200 px-2 py-0.5 rounded shadow-tiny">
+                                    {paper.id.startsWith('OJS-') || paper.id.startsWith('JMS-') ? paper.id : `OJS-${paper.id}`}
+                                  </span>
+                                </div>
+                              </td>
 
-                            {/* Author - Title */}
-                            <td className="px-4 py-3.5">
-                              <span className="font-bold text-slate-900 block">
-                                {paper.author} <span className="font-normal text-slate-400 mx-1">—</span> <span className="font-semibold text-slate-700 hover:text-[#008751] transition cursor-pointer" onClick={() => setSelectedPaper(paper)}>{paper.title}</span>
-                              </span>
-                              <span className="text-xs text-gray-400 font-mono mt-0.5 block">
-                                Received {paper.receivedAt} • Lang: {paper.language} • {paper.section}
-                              </span>
-                            </td>
+                              {/* Title */}
+                              <td className="px-4 py-4">
+                                <div className="flex flex-col gap-0.5 text-left">
+                                  <span className="font-bold text-[#002b3d] hover:text-[#008751] transition cursor-pointer text-sm leading-snug" onClick={() => setSelectedPaper(paper)}>
+                                    {paper.title}
+                                  </span>
+                                  <span className="text-xs text-slate-500 font-medium">
+                                    By <strong className="text-slate-700 font-bold">{paper.author}</strong> • Section: {paper.section || 'Articles'} • Doc: {paper.fileName}
+                                  </span>
+                                </div>
+                              </td>
 
-                            {/* Stage */}
-                            <td className="px-4 py-3.5 whitespace-nowrap">
-                              <span className="inline-flex items-center gap-1.5 font-semibold text-slate-800">
-                                <span className="w-2 h-2 rounded-full bg-[#008751] animate-pulse"></span>
-                                {paper.stage}
-                              </span>
-                            </td>
+                              {/* Date Submitted */}
+                              <td className="px-4 py-4 text-xs font-mono font-semibold text-slate-500 whitespace-nowrap">
+                                {paper.receivedAt}
+                              </td>
 
-                            {/* Editorial Activity */}
-                            <td className="px-4 py-3.5 text-gray-400">
-                              {/* Empty per screenshots */}
-                            </td>
+                              {/* Current Status */}
+                              <td className="px-4 py-4 whitespace-nowrap">
+                                {(() => {
+                                  const rawStatus = paper.raw?.status || 'SUBMITTED';
+                                  const isRejected = rawStatus === 'REJECTED';
+                                  let label = paper.stage;
+                                  let badgeClass = 'bg-emerald-50 text-[#008751] border-emerald-100';
+                                  if (rawStatus === 'UNDER_REVIEW') {
+                                    if (paper.stage === 'Revisions Requested') {
+                                      label = 'Revision Required';
+                                      badgeClass = 'bg-amber-50 text-amber-700 border-amber-100';
+                                    } else if (paper.stage === 'Revisions Submitted') {
+                                      label = 'Revision Processing';
+                                      badgeClass = 'bg-indigo-50 text-indigo-700 border-indigo-100';
+                                    } else {
+                                      label = 'Under Review';
+                                      badgeClass = 'bg-blue-50 text-blue-700 border-blue-100';
+                                    }
+                                  } else if (rawStatus === 'AWAITING_DECISION') {
+                                    label = 'Decision Pending';
+                                    badgeClass = 'bg-purple-50 text-purple-700 border-purple-100';
+                                  } else if (rawStatus === 'ACCEPTED') {
+                                    label = 'Accepted / In Production';
+                                    badgeClass = 'bg-teal-50 text-teal-700 border-teal-100';
+                                  } else if (rawStatus === 'PUBLISHED') {
+                                    label = 'Published';
+                                    badgeClass = 'bg-emerald-50 text-[#008751] border-emerald-150';
+                                  } else if (isRejected) {
+                                    label = 'Rejected';
+                                    badgeClass = 'bg-rose-50 text-rose-750 text-rose-700 border-rose-100';
+                                  }
+                                  
+                                  return (
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-extrabold border ${badgeClass}`}>
+                                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>
+                                      {label}
+                                    </span>
+                                  );
+                                })()}
+                              </td>
 
-                            {/* Actions */}
-                            <td className="px-4 py-3.5 text-center whitespace-nowrap font-bold text-sm">
-                              <div className="flex items-center justify-center gap-3">
-                                <button
-                                  onClick={() => setSelectedPaper(paper)}
-                                  className="text-[#008751] underline hover:text-[#007043] transition cursor-pointer"
-                                >
-                                  View
-                                </button>
-                                <span className="text-slate-300">|</span>
-                                <button
-                                  onClick={() => handleDeletePaper(paper.id)}
-                                  className="text-red-650 text-red-600 underline hover:text-red-800 transition cursor-pointer"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
+                              {/* Progress Timeline (Compact Milestones) */}
+                              <td className="px-4 py-4">
+                                {(() => {
+                                  const detailed = getDetailedWorkflowState(paper);
+                                  const isRejected = paper.raw?.status === 'REJECTED';
+                                  const milestones = getCompactMilestones(detailed, isRejected);
+                                  
+                                  return (
+                                    <div className="flex flex-col gap-1 w-64">
+                                      {/* Progress Bar Line */}
+                                      <div className="flex items-center justify-between relative px-1 mt-1">
+                                        {/* Connecting line */}
+                                        <div className="absolute left-2 right-2 top-2 h-0.5 bg-slate-100 -z-10 w-full max-w-[96%]"></div>
+                                        {/* Active colored line segment */}
+                                        <div 
+                                          className="absolute left-2 top-2 h-0.5 bg-[#008751] -z-10 transition-all duration-300"
+                                          style={{ 
+                                            width: `${
+                                              milestones.filter(m => m.status === 'completed').length === 5 ? '100%' :
+                                              milestones.filter(m => m.status === 'completed').length === 4 ? '75%' :
+                                              milestones.filter(m => m.status === 'completed').length === 3 ? '50%' :
+                                              milestones.filter(m => m.status === 'completed').length === 2 ? '25%' : '0%'
+                                            }`
+                                          }}
+                                        ></div>
+                                        
+                                        {milestones.map((mil) => {
+                                          let dotClass = 'bg-slate-200 border-slate-300 text-slate-400';
+                                          if (mil.status === 'completed') dotClass = 'bg-[#008751] border-[#008751] text-white';
+                                          else if (mil.status === 'active') dotClass = 'bg-white border-blue-500 ring-4 ring-blue-50 text-blue-500 animate-pulse';
+                                          else if (mil.status === 'rejected') dotClass = 'bg-rose-500 border-rose-500 text-white';
+                                          else if (mil.status === 'skipped') dotClass = 'bg-slate-150 border-dashed border-slate-300 text-slate-300';
+                                          
+                                          return (
+                                            <div key={mil.name} className="flex flex-col items-center relative group/mil">
+                                              <div className={`w-4.5 h-4.5 rounded-full border flex items-center justify-center text-[9px] font-bold z-10 shadow-tiny ${dotClass}`}>
+                                                {mil.status === 'completed' && <Check className="w-2.5 h-2.5 text-white stroke-[3.5]" />}
+                                                {mil.status === 'rejected' && <X className="w-2.5 h-2.5 text-white" />}
+                                                {mil.status === 'active' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>}
+                                              </div>
+                                              <span className="text-[8px] font-bold tracking-wider uppercase text-slate-400 mt-1 font-mono group-hover/mil:text-slate-600 transition">
+                                                {mil.name}
+                                              </span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              </td>
 
-                          </tr>
+                              {/* Actions */}
+                              <td className="px-4 py-4 text-center whitespace-nowrap font-bold text-xs">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    onClick={() => setSelectedPaper(paper)}
+                                    className="px-2 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-md shadow-tiny transition flex items-center gap-1 cursor-pointer font-bold"
+                                    title="View Details"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    View
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setContactPaper(paper);
+                                      setContactSubject(`Inquiry regarding Manuscript: ${paper.title.slice(0, 30)}...`);
+                                      setIsContactModalOpen(true);
+                                    }}
+                                    className="px-2 py-1 bg-white hover:bg-emerald-50 hover:text-[#008751] border border-slate-200 text-slate-700 rounded-md shadow-tiny transition flex items-center gap-1 cursor-pointer font-bold"
+                                    title="Contact Journal"
+                                  >
+                                    <Mail className="w-3.5 h-3.5" />
+                                    Contact
+                                  </button>
+                                  {paper.stage === 'Revisions Requested' ? (
+                                    <button
+                                      onClick={() => {
+                                        setRespondPaper(paper);
+                                        setRespondLetter('');
+                                        setIsRespondModalOpen(true);
+                                      }}
+                                      className="px-2 py-1 bg-[#008751] hover:bg-[#007043] text-white rounded-md shadow-xs transition flex items-center gap-1 cursor-pointer font-bold animate-pulse"
+                                      title="Respond to Decision"
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                      Respond
+                                    </button>
+                                  ) : (
+                                    <button
+                                      disabled
+                                      className="px-2 py-1 bg-slate-100 text-slate-450 border border-slate-200 text-slate-400 rounded-md cursor-not-allowed flex items-center gap-1 font-bold"
+                                      title="No decision pending response"
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                      Respond
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+
+                            </tr>
+
+                            {/* EXPANSE AREA FOR AMAZON TIMELINE */}
+                            {isExpanded && (
+                              <tr key={`${paper.id}-expanded`}>
+                                <td colSpan={6} className="bg-slate-50/50 px-6 py-4 border-b border-slate-200">
+                                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4 max-w-4xl mx-auto">
+                                    <div className="border-b pb-2.5 flex items-center justify-between">
+                                      <div className="flex flex-col text-left">
+                                        <span className="text-[10px] uppercase font-extrabold tracking-wider text-slate-400 font-mono">
+                                          Manuscript Progress Tracking Map
+                                        </span>
+                                        <h4 className="font-sans font-bold text-slate-850 text-sm">
+                                          Amazon-Style Execution Milestones
+                                        </h4>
+                                      </div>
+                                      <span className="text-[11px] font-mono bg-emerald-50 text-[#008751] px-2.5 py-1 rounded-full border border-emerald-100 font-bold flex items-center gap-1.5">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-[#008751] animate-pulse"></span>
+                                        Stage: {paper.stage}
+                                      </span>
+                                    </div>
+
+                                    {/* Vertical Step Stepper (Classic Amazon style) */}
+                                    <div className="relative pl-6 space-y-5 text-left">
+                                      {/* Vertical Track line */}
+                                      <div className="absolute left-2.5 top-2 bottom-2 w-0.5 bg-slate-100"></div>
+
+                                      {getDetailedWorkflowState(paper).map((st) => {
+                                        const isCompleted = st.status === 'completed';
+                                        const isActive = st.status === 'active';
+                                        const isSkipped = st.status === 'skipped';
+                                        const isUpcoming = st.status === 'upcoming';
+
+                                        let indicatorBg = 'bg-slate-100 ring-slate-100 border-slate-300';
+                                        let textTitleColor = 'text-slate-500 font-medium';
+                                        let textDescColor = 'text-slate-400';
+
+                                        if (isCompleted) {
+                                          indicatorBg = 'bg-[#008751] border-[#008751] ring-4 ring-emerald-50 text-white';
+                                          textTitleColor = 'text-[#002b3d] font-bold';
+                                          textDescColor = 'text-slate-600 font-medium';
+                                        } else if (isActive) {
+                                          if (st.id === 'rejected') {
+                                            indicatorBg = 'bg-rose-500 border-rose-500 ring-4 ring-rose-50 text-white';
+                                            textTitleColor = 'text-rose-700 font-extrabold';
+                                            textDescColor = 'text-rose-600 font-medium';
+                                          } else {
+                                            indicatorBg = 'bg-blue-500 border-blue-500 ring-4 ring-blue-50 text-white';
+                                            textTitleColor = 'text-blue-700 font-extrabold';
+                                            textDescColor = 'text-slate-700 font-semibold';
+                                          }
+                                        } else if (isSkipped) {
+                                          indicatorBg = 'bg-slate-50 border-dashed border-slate-250';
+                                          textTitleColor = 'text-slate-400 font-medium line-through decoration-slate-200';
+                                          textDescColor = 'text-slate-300 italic';
+                                        }
+
+                                        return (
+                                          <div key={st.id} className={`relative flex items-start gap-3 transition duration-150 ${isSkipped ? 'opacity-55' : ''}`}>
+                                            {/* Bullet */}
+                                            <div className={`absolute -left-[19px] w-4.5 h-4.5 rounded-full border flex items-center justify-center text-[10px] z-10 ${indicatorBg}`}>
+                                              {isCompleted && <Check className="w-2.5 h-2.5 text-white stroke-[3.5]" />}
+                                              {isActive && (st.id === 'rejected' ? <X className="w-2.5 h-2.5 text-white" /> : <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>)}
+                                              {isSkipped && <span className="text-[8px] font-bold text-slate-400 font-mono">/</span>}
+                                              {isUpcoming && <span className="w-1.5 h-1.5 rounded-full bg-slate-350 bg-slate-300"></span>}
+                                            </div>
+
+                                            <div className="flex flex-col text-left">
+                                              <div className="flex items-center gap-2">
+                                                <span className={`text-xs ${textTitleColor}`}>
+                                                  {st.label}
+                                                </span>
+                                                {isActive && (
+                                                  <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider ${st.id === 'rejected' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700 animate-pulse'}`}>
+                                                    {st.id === 'rejected' ? 'Declined' : 'Active Stage'}
+                                                  </span>
+                                                )}
+                                                {isCompleted && (
+                                                  <span className="text-[8px] font-mono font-bold bg-emerald-100 text-[#008751] px-1.5 py-0.5 rounded-full uppercase">
+                                                    Completed
+                                                  </span>
+                                                )}
+                                                {isSkipped && (
+                                                  <span className="text-[8px] font-mono font-semibold bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded-full uppercase">
+                                                    Not Applicable
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <p className={`text-[11px] leading-normal ${textDescColor} mt-0.5`}>
+                                                {st.description}
+                                              </p>
+                                              {st.dateCompleted && isCompleted && (
+                                                <span className="text-[9px] font-mono text-slate-400 mt-0.5 font-semibold">
+                                                  Date Completed: {st.dateCompleted}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })
                     )}
@@ -1004,8 +1703,9 @@ export default function AuthorWorkspace({
                 </table>
 
                 {/* Grid list Table footer */}
-                <div className="bg-[#f5f8fa] border-t border-[#cfdde5] px-4 py-3 text-xs text-slate-600 font-mono">
-                  Showing <strong>{filteredList.length}</strong> to <strong>{filteredList.length}</strong> of <strong>{filteredList.length}</strong>
+                <div className="bg-[#f5f8fa] border-t border-[#cfdde5] px-4 py-3 text-xs text-slate-600 font-mono flex items-center justify-between">
+                  <span>Showing <strong>{filteredList.length}</strong> to <strong>{filteredList.length}</strong> of <strong>{filteredList.length}</strong> manuscripts</span>
+                  <span className="text-slate-400">Queue: {selectedQueue}</span>
                 </div>
 
               </div>
@@ -1164,6 +1864,190 @@ export default function AuthorWorkspace({
        )}
 
       </div>
+
+      {/* ----------------- D. CONTACT JOURNAL MODAL ----------------- */}
+      {isContactModalOpen && contactPaper && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg shadow-2xl p-6 space-y-4 animate-scale-up text-left">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 bg-emerald-50 text-[#008751] rounded-lg border border-emerald-100">
+                  <Mail className="w-4 h-4" />
+                </span>
+                <div>
+                  <h3 className="font-sans font-bold text-slate-900 text-sm">
+                    Contact Journal Office
+                  </h3>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    Manuscript ID: {contactPaper.id}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsContactModalOpen(false)}
+                className="p-1 hover:bg-slate-50 rounded-lg text-slate-400 hover:text-slate-600 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-xs">
+                <label className="block text-slate-500 font-semibold mb-1">
+                  Subject Thread
+                </label>
+                <input
+                  type="text"
+                  value={contactSubject}
+                  onChange={(e) => setContactSubject(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs focus:ring-1 focus:ring-[#008751] focus:outline-none font-semibold text-slate-800"
+                  placeholder="Subject of message thread"
+                />
+              </div>
+
+              <div className="text-xs">
+                <label className="block text-slate-500 font-semibold mb-1">
+                  Message Body
+                </label>
+                <textarea
+                  value={contactMessage}
+                  onChange={(e) => setContactMessage(e.target.value)}
+                  rows={5}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs focus:ring-1 focus:ring-[#008751] focus:outline-none text-slate-800 leading-relaxed"
+                  placeholder="Write your query to the journal managing editor here..."
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 border-t pt-3">
+              <button
+                onClick={() => setIsContactModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (!contactMessage.trim()) {
+                    alert("Please write a message before sending.");
+                    return;
+                  }
+                  handleAddDiscussionMessage(contactPaper.id, contactSubject, contactMessage);
+                  setIsContactModalOpen(false);
+                  setContactMessage('');
+                  alert(`Message successfully dispatched under thread: "${contactSubject}"`);
+                }}
+                className="px-4.5 py-2 bg-[#008751] hover:bg-[#007043] text-white rounded-xl text-xs font-bold cursor-pointer transition flex items-center gap-1.5 shadow-sm"
+              >
+                <Send className="w-3.5 h-3.5" />
+                Dispatch Message
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- E. RESPOND TO DECISION MODAL ----------------- */}
+      {isRespondModalOpen && respondPaper && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl shadow-2xl p-6 space-y-4 animate-scale-up text-left">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 bg-amber-50 text-amber-700 rounded-lg border border-amber-100">
+                  <RefreshCw className="w-4 h-4" />
+                </span>
+                <div>
+                  <h3 className="font-sans font-bold text-slate-900 text-sm">
+                    Respond to Editorial Decision
+                  </h3>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    Manuscript: {respondPaper.title.slice(0, 50)}...
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsRespondModalOpen(false)}
+                className="p-1 hover:bg-slate-50 rounded-lg text-slate-400 hover:text-slate-600 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-amber-50/50 border border-amber-100 rounded-2xl p-4 text-xs text-amber-900 leading-relaxed space-y-1.5">
+              <strong className="block text-amber-850 font-bold uppercase tracking-wide text-[10px]">
+                Editorial Assessment Notes:
+              </strong>
+              <p className="font-medium text-amber-800">
+                {respondPaper.raw?.editorsNotes || "Revisions requested. Please upload your revised manuscript files and provide a point-by-point reconciliation statement explaining the modifications made according to referee feedback."}
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-xs">
+                <label className="block text-slate-500 font-semibold mb-1">
+                  Point-by-Point Reconciliation Letter
+                </label>
+                <textarea
+                  value={respondLetter}
+                  onChange={(e) => setRespondLetter(e.target.value)}
+                  rows={6}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs focus:ring-1 focus:ring-[#008751] focus:outline-none text-slate-800 leading-relaxed font-mono"
+                  placeholder="Dear Editor, in response to reviewer comments, we have addressed all issues as follows..."
+                />
+              </div>
+
+              <div className="text-xs">
+                <label className="block text-slate-500 font-semibold mb-1">
+                  Upload Revised Manuscript Document
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={respondFileName}
+                    onChange={(e) => setRespondFileName(e.target.value)}
+                    className="flex-grow bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs focus:ring-1 focus:ring-[#008751] focus:outline-none font-semibold text-slate-800"
+                    placeholder="reconciled_manuscript.docx"
+                  />
+                  <button 
+                    onClick={() => {
+                      const name = prompt("Enter revised manuscript filename:", respondFileName);
+                      if (name) setRespondFileName(name);
+                    }}
+                    className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
+                  >
+                    Select File
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 border-t pt-3">
+              <button
+                onClick={() => setIsRespondModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (!respondLetter.trim()) {
+                    alert("Please write a point-by-point reconciliation letter before submitting.");
+                    return;
+                  }
+                  handleRespondToDecision(respondPaper.id, respondLetter, respondFileName);
+                  setIsRespondModalOpen(false);
+                  setRespondLetter('');
+                  alert(`Success! Revision files and reconciliation letter successfully logged. Status updated to 'Revision Processing'.`);
+                }}
+                className="px-4.5 py-2 bg-[#008751] hover:bg-[#007043] text-white rounded-xl text-xs font-bold cursor-pointer transition flex items-center gap-1.5 shadow-sm"
+              >
+                <Check className="w-3.5 h-3.5" />
+                Transmit Revision
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -36,7 +36,11 @@ import {
   SquarePen,
   Eye,
   BookOpen,
-  FolderOpen
+  FolderOpen,
+  RefreshCw,
+  Send,
+  Inbox,
+  Mail
 } from 'lucide-react';
 
 interface OjsSubmissionDetailProps {
@@ -76,6 +80,290 @@ export default function OjsSubmissionDetail({
   const [activeFileDropdown, setActiveFileDropdown] = useState<boolean>(false);
   const [editingFileName, setEditingFileName] = useState<string>(paper.fileName || `${paper.title || 'test'}-publication.pdf`);
   const [showFileEditModal, setShowFileEditModal] = useState<boolean>(false);
+  const [showDetailedRoadmap, setShowDetailedRoadmap] = useState<boolean>(false);
+
+  // Interface for detailed tracking steps
+  interface WorkflowStageDetail {
+    id: string;
+    label: string;
+    status: 'completed' | 'active' | 'upcoming' | 'skipped';
+    description: string;
+    dateCompleted?: string | null;
+  }
+
+  // Generates complete 12-stage progress mapping automatically based on manuscript state
+  const getDetailedWorkflowState = (paper: any): WorkflowStageDetail[] => {
+    const m = paper.raw || {};
+    const status = m.status || 'SUBMITTED';
+    const hasReviewers = m.reviewers && m.reviewers.length > 0;
+    
+    // Core state flags computed dynamically
+    const isSubmitted = true; 
+    const isEditorAssigned = status !== 'SUBMITTED' && status !== 'DRAFT' || hasReviewers || m.editorsNotes;
+    const isReviewerInvitationSent = hasReviewers;
+    
+    const reviewersAccepted = m.reviewers && m.reviewers.some((r: any) => r.status === 'ACCEPTED' || r.status === 'SUBMITTED');
+    const isUnderReview = status === 'UNDER_REVIEW' && reviewersAccepted;
+    
+    const reviewersCompleted = m.reviewers && m.reviewers.some((r: any) => r.status === 'SUBMITTED');
+    const isReviewsReceived = reviewersCompleted;
+    
+    const isEditorDecisionPending = status === 'AWAITING_DECISION';
+    
+    const isRevisionRequired = (m.editorsNotes || '').includes('REVISE') || 
+                               (m.editorsNotes || '').includes('MINOR_REVISIONS') || 
+                               (m.editorsNotes || '').includes('MAJOR_REVISIONS') ||
+                               paper.stage === 'Revisions Requested' || 
+                               paper.stage === 'Revisions Submitted';
+                               
+    const isRevisedSubmitted = isRevisionRequired && (paper.stage === 'Revisions Submitted' || (m.editorsNotes || '').includes('revision uploaded'));
+    const isFinalReview = isRevisedSubmitted && status === 'UNDER_REVIEW';
+    
+    const isAccepted = status === 'ACCEPTED' || status === 'PUBLISHED';
+    const isProduction = status === 'ACCEPTED';
+    const isPublished = status === 'PUBLISHED';
+    const isRejected = status === 'REJECTED';
+
+    const stages: WorkflowStageDetail[] = [];
+
+    // 1. Submitted
+    stages.push({
+      id: 'submitted',
+      label: 'Submitted',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview || isReviewerInvitationSent || isEditorAssigned ? 'completed' : 'active',
+      description: 'Manuscript successfully registered and files uploaded to the journal database.',
+      dateCompleted: paper.receivedAt
+    });
+
+    // 2. Editor Assigned
+    stages.push({
+      id: 'editor_assigned',
+      label: 'Editor Assigned',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview || isReviewerInvitationSent ? 'completed' : (isEditorAssigned ? 'active' : 'upcoming'),
+      description: 'An editorial board member has been assigned to coordinate peer evaluation.',
+      dateCompleted: isEditorAssigned ? paper.receivedAt : null
+    });
+
+    // 3. Reviewer Invitation Sent
+    stages.push({
+      id: 'reviewer_invited',
+      label: 'Reviewer Invitation Sent',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview ? 'completed' : (isReviewerInvitationSent ? 'active' : 'upcoming'),
+      description: 'Formal double-blind peer referee requests dispatched to corresponding university experts.',
+      dateCompleted: isReviewerInvitationSent ? paper.receivedAt : null
+    });
+
+    // 4. Under Review
+    stages.push({
+      id: 'under_review',
+      label: 'Under Review',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived ? 'completed' : (isUnderReview ? 'active' : 'upcoming'),
+      description: 'Assigned peer reviewers are currently evaluating methodology, scientific merit, and ethical compliance.',
+      dateCompleted: isUnderReview ? paper.receivedAt : null
+    });
+
+    // 5. Reviews Received
+    stages.push({
+      id: 'reviews_received',
+      label: 'Reviews Received',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending ? 'completed' : (isReviewsReceived ? 'active' : 'upcoming'),
+      description: 'Completed evaluation reports received and logged. Minimum consensus thresholds achieved.',
+      dateCompleted: isReviewsReceived ? paper.receivedAt : null
+    });
+
+    // 6. Editor Decision Pending
+    stages.push({
+      id: 'decision_pending',
+      label: 'Editor Decision Pending',
+      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired ? 'completed' : (isEditorDecisionPending ? 'active' : 'upcoming'),
+      description: 'Editorial board is weighing recommendations to finalize the manuscript decision.',
+      dateCompleted: isEditorDecisionPending ? paper.receivedAt : null
+    });
+
+    // 7. Minor / Major Revision
+    let revisionLabel = 'Minor Revision';
+    if ((m.editorsNotes || '').toLowerCase().includes('major') || (paper.title || '').toLowerCase().includes('major')) {
+      revisionLabel = 'Major Revision';
+    }
+    const revisionStatus = isAccepted || isPublished ? 'completed' : (isRevisedSubmitted ? 'completed' : (isRevisionRequired ? 'active' : 'skipped'));
+    stages.push({
+      id: 'revision_required',
+      label: revisionLabel,
+      status: revisionStatus,
+      description: 'Revisions required to address referee and editor feedback before publication clearance.',
+      dateCompleted: isRevisionRequired ? paper.receivedAt : null
+    });
+
+    // 8. Revised Manuscript Submitted
+    const revSubmittedStatus = isAccepted || isPublished ? 'completed' : (isRevisedSubmitted ? 'active' : (isRevisionRequired ? 'upcoming' : 'skipped'));
+    stages.push({
+      id: 'revised_submitted',
+      label: 'Revised Manuscript Submitted',
+      status: revSubmittedStatus,
+      description: 'Revised files and author reconciliation statement received by the editorial desk.',
+      dateCompleted: isRevisedSubmitted ? paper.receivedAt : null
+    });
+
+    // 9. Final Review
+    const finalReviewStatus = isAccepted || isPublished ? 'completed' : (isFinalReview ? 'active' : (isRevisedSubmitted ? 'upcoming' : 'skipped'));
+    stages.push({
+      id: 'final_review',
+      label: 'Final Review',
+      status: finalReviewStatus,
+      description: 'Editor-in-chief executing final validation checks on the revised manuscript.',
+      dateCompleted: isFinalReview ? paper.receivedAt : null
+    });
+
+    // 10. Accepted
+    stages.push({
+      id: 'accepted',
+      label: 'Accepted',
+      status: isPublished ? 'completed' : (isAccepted ? 'active' : 'upcoming'),
+      description: 'Manuscript approved for publication! Transitioning to typesetting and copyediting.',
+      dateCompleted: isAccepted ? paper.receivedAt : null
+    });
+
+    // 11. Production
+    stages.push({
+      id: 'production',
+      label: 'Production',
+      status: isPublished ? 'completed' : (isProduction ? 'active' : 'upcoming'),
+      description: 'Copyediting, XML tagging (JATS standard), and Galley proof creation in progress.',
+      dateCompleted: isProduction ? paper.receivedAt : null
+    });
+
+    // 12. Published
+    stages.push({
+      id: 'published',
+      label: 'Published',
+      status: isPublished ? 'active' : 'upcoming',
+      description: 'Galley release launched. Digital Object Identifier (DOI) registered with Crossref.',
+      dateCompleted: isPublished ? paper.receivedAt : null
+    });
+
+    if (isRejected) {
+      stages.forEach(st => {
+        if (['revision_required', 'revised_submitted', 'final_review', 'accepted', 'production', 'published'].includes(st.id)) {
+          st.status = 'skipped';
+        }
+      });
+      stages.push({
+        id: 'rejected',
+        label: 'Rejected',
+        status: 'active',
+        description: 'The manuscript was declined for publication by the editorial board.',
+        dateCompleted: paper.receivedAt
+      });
+    }
+
+    return stages;
+  };
+
+  const getDynamicProgress = () => {
+    const rawStatus = paper.raw?.status || 'SUBMITTED';
+    const paperStage = paper.stage || 'Submission';
+
+    const isRejected = rawStatus === 'REJECTED' || paperStage === 'Declined';
+
+    // 1. Submission Step
+    const isSubmissionDone = true; 
+    let submissionStatus = 'Completed';
+
+    // 2. Review Step
+    let isReviewDone = false;
+    let reviewStatus = 'Pending';
+    if (
+      rawStatus === 'AWAITING_DECISION' ||
+      rawStatus === 'ACCEPTED' ||
+      rawStatus === 'PUBLISHED' ||
+      rawStatus === 'REJECTED' ||
+      paperStage === 'Revisions Requested' ||
+      paperStage === 'Revisions Submitted' ||
+      paperStage === 'Scheduled' ||
+      paperStage === 'Published' ||
+      paperStage === 'Declined'
+    ) {
+      isReviewDone = true;
+      reviewStatus = 'Completed';
+    } else if (rawStatus === 'UNDER_REVIEW') {
+      reviewStatus = 'In Progress';
+    }
+
+    // 3. Copyediting Step
+    let isCopyeditingDone = false;
+    let copyeditingStatus = 'Pending';
+    if (
+      rawStatus === 'ACCEPTED' ||
+      rawStatus === 'PUBLISHED' ||
+      rawStatus === 'REJECTED' ||
+      paperStage === 'Scheduled' ||
+      paperStage === 'Published' ||
+      paperStage === 'Declined'
+    ) {
+      isCopyeditingDone = true;
+      copyeditingStatus = 'Completed';
+    } else if (
+      paperStage === 'Revisions Requested' ||
+      paperStage === 'Revisions Submitted' ||
+      rawStatus === 'AWAITING_DECISION'
+    ) {
+      copyeditingStatus = 'In Progress';
+    }
+
+    // 4. Production Step
+    let isProductionDone = false;
+    let productionStatus = 'Pending';
+    if (rawStatus === 'PUBLISHED' || paperStage === 'Published') {
+      isProductionDone = true;
+      productionStatus = 'Completed';
+    } else if (rawStatus === 'ACCEPTED' || paperStage === 'Scheduled') {
+      productionStatus = 'In Progress';
+    }
+
+    // 5. Publication Step
+    let isPublicationDone = false;
+    let publicationStatus = 'Pending';
+    if (rawStatus === 'PUBLISHED' || paperStage === 'Published') {
+      isPublicationDone = true;
+      publicationStatus = 'Completed';
+    } else if (isRejected) {
+      publicationStatus = 'Declined';
+    }
+
+    // Adjust for rejection
+    if (isRejected) {
+      if (!isReviewDone && rawStatus === 'REJECTED') {
+        reviewStatus = 'Declined';
+      }
+      if (!isCopyeditingDone) copyeditingStatus = 'Skipped';
+      if (!isProductionDone) productionStatus = 'Skipped';
+      publicationStatus = 'Declined';
+    }
+
+    // Calculate percentage
+    let percentage = 20; 
+    if (isPublicationDone) {
+      percentage = 100;
+    } else if (isProductionDone) {
+      percentage = 80;
+    } else if (isCopyeditingDone) {
+      percentage = 60 + (productionStatus === 'In Progress' ? 10 : 0);
+    } else if (isReviewDone) {
+      percentage = 40 + (copyeditingStatus === 'In Progress' ? 10 : 0);
+    } else if (reviewStatus === 'In Progress') {
+      percentage = 20 + 10;
+    }
+
+    const steps = [
+      { id: 'submission', label: 'Submission', status: submissionStatus, isDone: isSubmissionDone, isActive: false },
+      { id: 'review', label: 'Review', status: reviewStatus, isDone: isReviewDone, isActive: reviewStatus === 'In Progress' },
+      { id: 'copyediting', label: 'Copyediting', status: copyeditingStatus, isDone: isCopyeditingDone, isActive: copyeditingStatus === 'In Progress' },
+      { id: 'production', label: 'Production', status: productionStatus, isDone: isProductionDone, isActive: productionStatus === 'In Progress' },
+      { id: 'publication', label: 'Publication', status: publicationStatus, isDone: isPublicationDone, isActive: publicationStatus === 'In Progress' || (rawStatus === 'PUBLISHED' && !isPublicationDone) }
+    ];
+
+    return { percentage, steps, isRejected };
+  };
 
   // Discussion thread states
   const [discussionThreads, setDiscussionThreads] = useState<any[]>(() => {
@@ -1242,72 +1530,84 @@ export default function OjsSubmissionDetail({
           </div>
 
           {/* ======= COLUMN 3: RIGHT DETAILS SIDEBAR ======= */}
-          <aside id="ojs-column-right-details" className="w-full lg:w-80 shrink-0 space-y-6 text-left leading-normal">
-            
-            {/* AREA A: Submission Progress Radial gauge widget */}
-            <div id="ojs-progress-widget" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-5">
-              
-              <h3 className="text-sm font-extrabold text-slate-800 font-sans tracking-tight">
-                Submission Progress
-              </h3>
-
-              {/* High fidelity radial/circular gauge in SVG */}
-              <div className="flex justify-center py-2 relative">
-                <div className="relative w-36 h-36 flex items-center justify-center">
-                  <svg className="w-full h-full transform -rotate-90">
-                    <circle
-                      cx="72"
-                      cy="72"
-                      r="54"
-                      stroke="#f1f5f3"
-                      strokeWidth="9"
-                      fill="transparent"
-                    />
-                    <circle
-                      cx="72"
-                      cy="72"
-                      r="54"
-                      stroke="#008751"
-                      strokeWidth="9"
-                      fill="transparent"
-                      strokeDasharray={2 * Math.PI * 54}
-                      strokeDashoffset={2 * Math.PI * 54 * (1 - 0.20)}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className="absolute flex flex-col items-center">
-                    <span className="text-2xl font-black text-slate-800 tracking-tight leading-none">20%</span>
-                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest mt-1">Completed</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Checklist list representation layout matching screen */}
-              <div id="ojs-checklist-stack" className="space-y-3.5 pt-2 border-t border-slate-50">
-                {[
-                  { id: 'submission', label: 'Submission', status: 'Completed', isDone: true },
-                  { id: 'review', label: 'Review', status: 'Pending', isDone: false },
-                  { id: 'copyediting', label: 'Copyediting', status: 'Pending', isDone: false },
-                  { id: 'production', label: 'Production', status: 'Pending', isDone: false },
-                  { id: 'publication', label: 'Publication', status: 'Pending', isDone: false }
-                ].map((step) => (
-                  <div key={step.id} className="flex items-center justify-between text-xs py-0.5">
-                    <div className="flex items-center gap-2.5">
-                      {step.isDone ? (
-                        <div className="w-4.5 h-4.5 rounded-full bg-[#008751] flex items-center justify-center text-white scale-[0.85] shrink-0">
-                          <Check className="w-3.5 h-3.5 stroke-[3.5]" />
-                        </div>
-                      ) : (
-                        <div className="w-4.5 h-4.5 rounded-full border-2 border-slate-300 bg-white scale-[0.85] shrink-0" />
-                      )}
-                      <span className={`font-semibold ${step.isDone ? 'text-slate-800 font-extrabold' : 'text-slate-500 font-medium'}`}>{step.label}</span>
+          {(() => {
+            const { isRejected } = getDynamicProgress();
+            return (
+              <aside id="ojs-column-right-details" className="w-full lg:w-80 shrink-0 space-y-6 text-left leading-normal">
+                
+                {/* AREA A: Submission Progress detailed vertical timeline widget */}
+                <div id="ojs-progress-widget" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-5">
+                  
+                  <div className="flex items-center justify-between border-b pb-3 border-slate-100">
+                    <div>
+                      <h3 className="text-sm font-extrabold text-slate-800 font-sans tracking-tight">
+                        Submission Status
+                      </h3>
+                      <p className="text-[10px] text-slate-400 mt-0.5 font-sans">Workflow tracking lifecycle</p>
                     </div>
-                    <span className={`font-mono text-[10px] uppercase font-bold tracking-wide ${step.isDone ? 'text-[#008751]' : 'text-slate-400'}`}>{step.status}</span>
+                    {isRejected && (
+                      <span className="px-2 py-0.5 bg-rose-50 text-rose-700 text-[10px] font-bold rounded-md border border-rose-100 font-mono">
+                        DECLINED
+                      </span>
+                    )}
                   </div>
-                ))}
-              </div>
 
-            </div>
+                  {/* Detailed 12-stage academic tracker timeline */}
+                  <div className="space-y-4 text-left">
+                    <div className="relative pl-5 border-l border-slate-200 ml-2.5 space-y-5 text-xs">
+                      {getDetailedWorkflowState(paper).map((stage) => {
+                        const isDone = stage.status === 'completed';
+                        const isActive = stage.status === 'active';
+                        const isUpcoming = stage.status === 'upcoming';
+                        const isSkipped = stage.status === 'skipped';
+
+                        let bulletColor = "bg-white border-slate-200 text-slate-350";
+                        let textColor = "text-slate-400";
+                        let iconElem: React.ReactNode = null;
+
+                        if (isDone) {
+                          bulletColor = "bg-[#008751] border-[#008751] text-white";
+                          textColor = "text-slate-800 font-extrabold";
+                          iconElem = <Check className="w-2.5 h-2.5 stroke-[3.5]" />;
+                        } else if (isActive) {
+                          bulletColor = "bg-emerald-50 border-2 border-[#008751] text-[#008751] animate-pulse ring-2 ring-[#008751]/10";
+                          textColor = "text-[#008751] font-black";
+                          iconElem = <span className="w-1.5 h-1.5 bg-[#008751] rounded-full animate-ping" />;
+                        } else if (isSkipped) {
+                          bulletColor = "bg-slate-100 border-slate-200 text-slate-400";
+                          textColor = "text-slate-450 line-through";
+                          iconElem = <span className="text-[8px]">-</span>;
+                        }
+
+                        return (
+                          <div key={stage.id} className="relative">
+                            {/* Circle dot marker */}
+                            <div className={`absolute -left-[30.5px] top-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center ${bulletColor} z-10 transition`}>
+                              {iconElem}
+                            </div>
+
+                            <div className="space-y-0.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`text-[11px] leading-tight ${textColor}`}>
+                                  {stage.label}
+                                </span>
+                                {stage.dateCompleted && (
+                                  <span className="text-[9px] font-mono font-bold text-[#008751] whitespace-nowrap bg-emerald-50 px-1.5 py-0.5 rounded">
+                                    {stage.dateCompleted}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10.5px] text-slate-500 leading-relaxed font-sans select-none">
+                                {stage.description}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
 
             {/* AREA B: Submission Details table listing */}
             <div id="ojs-details-widget" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
@@ -1343,6 +1643,8 @@ export default function OjsSubmissionDetail({
             </div>
 
           </aside>
+          );
+          })()}
 
         </div>
 
