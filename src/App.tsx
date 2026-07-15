@@ -122,6 +122,13 @@ export default function App() {
     }
   }, [loggedInUser]);
 
+  // Safeguard: Do not allow direct access to Workspace (profile) unless authenticated
+  useEffect(() => {
+    if (currentScreen === 'WORKSPACE' && !loggedInUser) {
+      setCurrentScreen('AUTH');
+    }
+  }, [currentScreen, loggedInUser]);
+
   // Check for external link routing to Login/Signup directly (e.g. from tulitics.vercel.app)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -342,28 +349,54 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-3">
-                <button
-                  id="btn-nav-sign-in"
-                  onClick={() => {
-                    setAuthRole('AUTHOR');
-                    setAuthMode('LOGIN');
-                    setCurrentScreen('AUTH');
-                  }}
-                  className="px-4 py-2 border border-[#cbd8df] text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-bold transition cursor-pointer shadow-sm"
-                >
-                  Sign In to Tracker
-                </button>
-                <button
-                  id="btn-nav-register"
-                  onClick={() => {
-                    setAuthRole('AUTHOR');
-                    setAuthMode('REGISTER');
-                    setCurrentScreen('AUTH');
-                  }}
-                  className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-md shadow-emerald-50/85"
-                >
-                  Register Account
-                </button>
+                {loggedInUser ? (
+                  <>
+                    <button
+                      id="btn-nav-my-profile"
+                      onClick={() => {
+                        setActiveRole(loggedInUser.role);
+                        setCurrentScreen('WORKSPACE');
+                      }}
+                      className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-md flex items-center gap-1"
+                    >
+                      <User className="w-3.5 h-3.5" />
+                      My Profile
+                    </button>
+                    <button
+                      id="btn-nav-sign-out"
+                      onClick={handleSignOut}
+                      className="px-4 py-2 border border-[#cbd8df] text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-bold transition cursor-pointer shadow-sm flex items-center gap-1"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      Sign Out
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      id="btn-nav-sign-in"
+                      onClick={() => {
+                        setAuthRole('AUTHOR');
+                        setAuthMode('LOGIN');
+                        setCurrentScreen('AUTH');
+                      }}
+                      className="px-4 py-2 border border-[#cbd8df] text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-bold transition cursor-pointer shadow-sm"
+                    >
+                      Sign In / Login
+                    </button>
+                    <button
+                      id="btn-nav-register"
+                      onClick={() => {
+                        setAuthRole('AUTHOR');
+                        setAuthMode('REGISTER');
+                        setCurrentScreen('AUTH');
+                      }}
+                      className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-md shadow-emerald-50/85"
+                    >
+                      Sign Up / Register
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </header>
@@ -430,20 +463,20 @@ export default function App() {
                 handleSaveDraftManuscript(parentManuscript);
                 
                 if (!loggedInUser) {
-                  const newUser = {
-                    name: authorName,
-                    email: authorEmail,
-                    role: 'AUTHOR' as Role
-                  };
-                  setLoggedInUser(newUser);
-                  setActiveRole('AUTHOR');
+                  setNotification(`SUCCESS: Manuscript "${paperObj.title}" received! Please Sign Up / Register or Log In to open your profile and track submission status.`);
+                  setTimeout(() => {
+                    setNotification('');
+                    setAuthRole('AUTHOR');
+                    setAuthMode('REGISTER');
+                    setCurrentScreen('AUTH');
+                  }, 4000);
+                } else {
+                  setNotification(`SUCCESS: Manuscript "${paperObj.title}" successfully dispatched to the peer review queue.`);
+                  setTimeout(() => {
+                    setNotification('');
+                    setCurrentScreen('WORKSPACE');
+                  }, 4000);
                 }
-
-                setNotification(`SUCCESS: Manuscript "${paperObj.title}" successfully dispatched to the peer review queue.`);
-                setTimeout(() => {
-                  setNotification('');
-                  setCurrentScreen('WORKSPACE');
-                }, 4000);
               }}
             />
           </div>
@@ -456,7 +489,7 @@ export default function App() {
           initialMode={authMode}
           manuscripts={manuscripts}
           onBackToLanding={() => {
-            window.location.href = 'https://tulitics.vercel.app/';
+            window.location.href = 'https://www.tulitics.com';
           }}
           onSuccessAuth={(user) => {
             setLoggedInUser(user);

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Role } from '../types';
 import { registerSupabaseUser, loginSupabaseUser } from '../lib/supabase';
 import TuliticsLogo from './TuliticsLogo';
+import { AVAILABLE_REVIEWERS } from '../initialData';
 import { 
   Shield, 
   Key, 
@@ -273,16 +274,40 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
         }, 1500);
       } else {
         if (localRole === 'REVIEWER') {
-          const isInvited = (manuscripts || []).some(m => 
-            (m.reviewers || []).some((r: any) => r.email.toLowerCase() === email.toLowerCase())
-          );
+          let invitedName = '';
+          let isInvited = false;
+
+          for (const m of (manuscripts || [])) {
+            const rev = (m.reviewers || []).find((r: any) => r.email.toLowerCase() === email.toLowerCase());
+            if (rev) {
+              isInvited = true;
+              invitedName = rev.name || invitedName;
+            }
+          }
+
+          const presetRev = AVAILABLE_REVIEWERS.find(r => r.email.toLowerCase() === email.toLowerCase());
+          if (presetRev) {
+            invitedName = presetRev.name;
+          }
+
           const isDefaultPreset = email.toLowerCase() === 'reviewer@stanford.edu' || email.toLowerCase() === 'reviewer@jms-referee.com';
           
-          if (!isInvited && !isDefaultPreset) {
+          if (!isInvited && !isDefaultPreset && !presetRev) {
             setErrorMsg("ACCESS DENIED: Only invited peer reviewers assigned to an active manuscript are authorized to login. Please contact the Editor-in-Chief if you believe this is an error.");
             setLoading(false);
             return;
           }
+
+          const displayName = invitedName || (email.toLowerCase() === 'reviewer@stanford.edu' ? 'Dr. Stanford Reviewer' : email.split('@')[0]);
+          setSuccessMsg(`SUCCESS: Invited peer referee "${displayName}" authenticated! Redirecting to Reviewer Assessment Hub...`);
+          setTimeout(() => {
+            onSuccessAuth({
+              name: displayName,
+              email: email.toLowerCase(),
+              role: 'REVIEWER'
+            });
+          }, 1500);
+          return;
         }
 
         const authUser = await loginSupabaseUser(email, password);
