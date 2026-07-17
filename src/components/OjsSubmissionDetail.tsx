@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import FilePreviewModal from './FilePreviewModal';
 import {
   ChevronLeft,
   FileText,
@@ -40,7 +41,14 @@ import {
   RefreshCw,
   Send,
   Inbox,
-  Mail
+  Mail,
+  Bell,
+  Calendar,
+  User,
+  Info,
+  Pin,
+  Lock,
+  Filter
 } from 'lucide-react';
 
 interface OjsSubmissionDetailProps {
@@ -81,6 +89,165 @@ export default function OjsSubmissionDetail({
   const [editingFileName, setEditingFileName] = useState<string>(paper.fileName || `${paper.title || 'test'}-publication.pdf`);
   const [showFileEditModal, setShowFileEditModal] = useState<boolean>(false);
   const [showDetailedRoadmap, setShowDetailedRoadmap] = useState<boolean>(false);
+  const [uploadedFiles, setUploadedFiles] = useState<any[]>([
+    { name: "Manuscript.pdf", type: "Manuscript", size: "1.2 MB", date: "08 Jun 2026" },
+    { name: "Figures.docx", type: "Figures", size: "850 KB", date: "08 Jun 2026" },
+    { name: "Supplementary.zip", type: "Supplementary File", size: "2.4 MB", date: "08 Jun 2026" }
+  ]);
+
+  // File Preview States
+  const [previewModalOpen, setPreviewModalOpen] = useState<boolean>(false);
+  const [previewFileName, setPreviewFileName] = useState<string>("");
+  const [previewFileType, setPreviewFileType] = useState<string>("");
+  const [previewFileSize, setPreviewFileSize] = useState<string>("");
+
+  // WhatsApp Messages States
+  const [whatsappMessages, setWhatsappMessages] = useState<any[]>([
+    {
+      id: "wa-1",
+      sender: "Dr. John Smith",
+      senderRole: "Editor",
+      avatar: "JS",
+      avatarBg: "bg-sky-600",
+      text: "Dear Author, Please confirm that the manuscript complies with the journal guidelines.",
+      timestamp: "10:30 AM",
+      isMe: false
+    },
+    {
+      id: "wa-2",
+      sender: "Akshaya G",
+      senderRole: "Author",
+      avatar: "AG",
+      avatarBg: "bg-emerald-600",
+      text: "Thank you for your message. Yes, the manuscript follows all the guidelines.",
+      timestamp: "11:02 AM",
+      isMe: true
+    }
+  ]);
+  const [whatsappInput, setWhatsappInput] = useState("");
+
+  // Discussion forum list and filter states
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [activeDiscussionTab, setActiveDiscussionTab] = useState<'ALL' | 'OFFICIAL' | 'DIRECT'>('ALL');
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
+
+  // Technical Check thread messages
+  const [techCheckMessages, setTechCheckMessages] = useState<any[]>([
+    {
+      id: "tc-1",
+      sender: "System",
+      senderRole: "System",
+      text: "Your file \"Manuscript.pdf\" has been successfully checked.",
+      timestamp: "Yesterday, 3:15 PM",
+      isMe: false
+    },
+    {
+      id: "tc-2",
+      sender: "System",
+      senderRole: "System",
+      text: "PDF formatting matches the LaTeX templates perfectly. DOI link generation initialized.",
+      timestamp: "Yesterday, 3:16 PM",
+      isMe: false
+    }
+  ]);
+  const [techCheckInput, setTechCheckInput] = useState("");
+
+  // Formatting & Style thread messages
+  const [formattingMessages, setFormattingMessages] = useState<any[]>([
+    {
+      id: "fm-1",
+      sender: "Editor",
+      senderRole: "Editor",
+      text: "Please ensure all references follow the journal format.",
+      timestamp: "02 Jun 2026, 11:20 AM",
+      isMe: false
+    }
+  ]);
+  const [formattingInput, setFormattingInput] = useState("");
+
+  const handleSendWhatsappMessage = () => {
+    if (!whatsappInput.trim()) return;
+    
+    const userMsg = {
+      id: "wa-user-" + Date.now(),
+      sender: currentUser?.name || "Akshaya G",
+      senderRole: "Author",
+      avatar: "AG",
+      avatarBg: "bg-emerald-600",
+      text: whatsappInput.trim(),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isMe: true
+    };
+    
+    setWhatsappMessages(prev => [...prev, userMsg]);
+    setWhatsappInput("");
+    
+    // Auto reply after 1.5 seconds from Editor
+    setTimeout(() => {
+      const editorMsg = {
+        id: "wa-editor-reply-" + Date.now(),
+        sender: "Dr. John Smith",
+        senderRole: "Editor",
+        avatar: "JS",
+        avatarBg: "bg-sky-600",
+        text: "Excellent confirmation. I have recorded your acknowledgment. Your manuscript files will now undergo formal reviewer assignment.",
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isMe: false
+      };
+      setWhatsappMessages(prev => [...prev, editorMsg]);
+    }, 1500);
+  };
+
+  const handleSendTechCheckMessage = () => {
+    if (!techCheckInput.trim()) return;
+    const userMsg = {
+      id: "tc-user-" + Date.now(),
+      sender: currentUser?.name || "Akshaya G",
+      senderRole: "Author",
+      text: techCheckInput.trim(),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isMe: true
+    };
+    setTechCheckMessages(prev => [...prev, userMsg]);
+    setTechCheckInput("");
+    setTimeout(() => {
+      const autoMsg = {
+        id: "tc-sys-reply-" + Date.now(),
+        sender: "System",
+        senderRole: "System",
+        text: "Technical analysis completed. All structural guidelines are verified as compliant.",
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isMe: false
+      };
+      setTechCheckMessages(prev => [...prev, autoMsg]);
+    }, 1500);
+  };
+
+  const handleSendFormattingMessage = () => {
+    if (!formattingInput.trim()) return;
+    const userMsg = {
+      id: "fm-user-" + Date.now(),
+      sender: currentUser?.name || "Akshaya G",
+      senderRole: "Author",
+      text: formattingInput.trim(),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isMe: true
+    };
+    setFormattingMessages(prev => [...prev, userMsg]);
+    setFormattingInput("");
+    setTimeout(() => {
+      const autoMsg = {
+        id: "fm-editor-reply-" + Date.now(),
+        sender: "Editor",
+        senderRole: "Editor",
+        text: "Thank you for the formatting update. We will review the reference formatting in the copyediting phase.",
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isMe: false
+      };
+      setFormattingMessages(prev => [...prev, autoMsg]);
+    }, 1500);
+  };
 
   // Interface for detailed tracking steps
   interface WorkflowStageDetail {
@@ -489,22 +656,33 @@ export default function OjsSubmissionDetail({
   };
 
   // Simulation upload file helper
-  const handleSimulateUpload = (forReply = false) => {
+  const handleSimulateUpload = (forReply = false, forMainList = false) => {
     const mockFiles = [
-      { name: "supplementary_charts_v2.pdf", size: "1.4 MB" },
-      { name: "response_to_reviewers.docx", size: "625 KB" },
-      { name: "experimental_dataset.xlsx", size: "3.1 MB" },
-      { name: "high_res_methodology_flow.png", size: "900 KB" }
+      { name: "supplementary_charts_v2.pdf", size: "1.4 MB", type: "Supplementary File" },
+      { name: "response_to_reviewers.docx", size: "625 KB", type: "Manuscript" },
+      { name: "experimental_dataset.xlsx", size: "3.1 MB", type: "Supplementary File" },
+      { name: "high_res_methodology_flow.png", size: "900 KB", type: "Figures" }
     ];
     const picked = mockFiles[Math.floor(Math.random() * mockFiles.length)];
-    picked.name = `${Date.now().toString().slice(-4)}_${picked.name}`;
+    const filename = `${Date.now().toString().slice(-4)}_${picked.name}`;
 
     if (forReply) {
-      setThreadReplyAttached([...threadReplyAttached, picked]);
+      setThreadReplyAttached([...threadReplyAttached, { name: filename, size: picked.size }]);
+    } else if (forMainList) {
+      const newFile = {
+        name: filename,
+        type: picked.type,
+        size: picked.size,
+        date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      };
+      setUploadedFiles(prev => [...prev, newFile]);
+      alert(`Successfully uploaded "${filename}" into active files database.`);
     } else {
-      setAttachedFiles([...attachedFiles, picked]);
+      setAttachedFiles([...attachedFiles, { name: filename, size: picked.size }]);
     }
   };
+
+  const isSubmissionDashboard = activeTab === 'SUBMISSION' && viewState === 'DASHBOARD';
 
   return (
     <div id="ojs-submission-detail-container" className="w-full bg-[#f4f7f6] min-h-screen text-slate-800 flex flex-col md:flex-row items-stretch border-t border-slate-200">
@@ -629,7 +807,1182 @@ export default function OjsSubmissionDetail({
       {/* ======= MAIN VIEWPORTS: HERO HEADER CONTAINER + DOUBLE COLUMN STACKS ======= */}
       <div id="ojs-main-panel-content" className="flex-grow flex flex-col p-6 space-y-6 overflow-y-auto w-full">
         
-        {/* ======================= TOP GREEN HERO PANEL BANNER ======================= */}
+        {isSubmissionDashboard ? (
+          /* ======================= PREMIUM IMAGE-MATCHING DASHBOARD ======================= */
+          <div className="space-y-6 w-full animate-in fade-in duration-200">
+            {/* Top Header Row with dynamic/stat values matching screenshot */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-slate-100 gap-4">
+              <div className="text-left">
+                <h1 className="text-2xl font-black text-slate-800 tracking-tight">Submission</h1>
+                <p className="text-xs text-[#008751] mt-1 font-bold">Track and manage your manuscript submission.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                {/* + New Submission Button */}
+                <button
+                  onClick={() => alert("Simulating launching a new academic manuscript submission workflow in TULITICS Author Workspace.")}
+                  className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-full flex items-center gap-1.5 transition duration-150 shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5 text-white font-bold" />
+                  <span>New Submission</span>
+                </button>
+                {/* Notification Bell */}
+                <div className="relative p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition cursor-pointer">
+                  <div className="absolute right-1 top-1 w-1.5 h-1.5 bg-red-500 rounded-full border border-white" />
+                  <Bell className="w-4 h-4 text-slate-600" />
+                </div>
+                {/* Profile Avatar Block */}
+                <div className="flex items-center gap-2 cursor-pointer hover:opacity-90 select-none pl-2 border-l border-slate-200">
+                  <div className="w-8 h-8 rounded-full bg-[#008751] text-white font-black text-xs flex items-center justify-center font-mono">
+                    AG
+                  </div>
+                  <span className="text-xs font-black text-slate-800 font-sans hidden sm:inline">Akshaya G</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </div>
+              </div>
+            </div>
+
+            {/* TWO-COLUMN STACK (Center Column + Right Details Sidebar) */}
+            <div className="w-full flex flex-col lg:flex-row items-start gap-6">
+
+              {/* CENTER CORE COLUMN (COLUMN 2) */}
+              <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full lg:max-w-[70%]">
+                
+                {/* Manuscript Detail Banner */}
+                <div className="bg-gradient-to-br from-[#f5fbf7] to-[#eef9f2] border border-[#d1f2e1]/70 rounded-2xl p-6 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-2xs">
+                  <div className="space-y-2 text-left relative z-10 flex-grow">
+                    <span className="text-[#008751] text-xs font-extrabold uppercase tracking-widest block font-mono">
+                      Manuscript ID: #{paper.id || "990"}
+                    </span>
+                    <h2 className="text-slate-800 text-lg md:text-xl font-extrabold font-sans tracking-tight leading-snug">
+                      {paper.title || "Artificial Intelligence in Healthcare: Opportunities and Challenges"}
+                    </h2>
+                    
+                    {/* Metadata line */}
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-2 text-[11px] text-slate-500 font-medium">
+                      <div className="flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Submitted On <strong className="text-slate-800 font-extrabold ml-0.5">{paper.receivedAt || "08 June 2026"}</strong></span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <BookOpen className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Journal <strong className="text-slate-800 font-extrabold ml-0.5">Journal of AI in Medicine</strong></span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Author <strong className="text-slate-800 font-extrabold ml-0.5">{paper.author || "Akshaya G"}</strong></span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Corresponding Author <strong className="text-slate-800 font-extrabold ml-0.5">{paper.author || "Akshaya G"}</strong></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Current Status sub-card on the right */}
+                  <div className="shrink-0 flex items-center gap-4 relative z-10 bg-white/70 border border-white/60 p-4 rounded-xl shadow-3xs self-stretch md:self-auto flex-row justify-between md:justify-start">
+                    <div className="space-y-1 text-left">
+                      <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest block">Current Status</span>
+                      <span className="bg-[#e6f7ef] text-[#008751] border border-emerald-200 px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-[#008751]" />
+                        Submitted
+                      </span>
+                    </div>
+                    
+                    {/* Cute document sheet with green check overlay */}
+                    <div className="relative">
+                      <div className="w-12 h-14 bg-slate-100 border border-slate-200 rounded-lg flex items-center justify-center shadow-3xs relative">
+                        <FileText className="w-6 h-6 text-slate-400" />
+                        <div className="absolute -bottom-1 -right-1 bg-[#008751] text-white rounded-full p-0.5 border-2 border-white shadow-2xs">
+                          <Check className="w-2.5 h-2.5 stroke-[3.5]" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4-Metric Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Card 1: Files */}
+                  <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs flex items-center gap-4 hover:border-emerald-200 transition duration-150">
+                    <div className="w-11 h-11 rounded-full bg-[#eefcf5] flex items-center justify-center text-[#008751] shrink-0">
+                      <FolderOpen className="w-5.5 h-5.5" />
+                    </div>
+                    <div className="text-left space-y-0.5">
+                      <span className="text-slate-400 text-xs font-bold block">Files</span>
+                      <div className="text-2xl font-black text-slate-800 leading-none">{uploadedFiles.length}</div>
+                      <span className="text-slate-400 text-[10.5px] block font-medium">Files Uploaded</span>
+                      <button 
+                        onClick={() => document.getElementById("uploaded-files-card")?.scrollIntoView({ behavior: 'smooth' })}
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-[10.5px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <span>View Files</span>
+                        <span>→</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Card 2: Discussions */}
+                  <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs flex items-center gap-4 hover:border-emerald-200 transition duration-150">
+                    <div className="w-11 h-11 rounded-full bg-[#eefcf5] flex items-center justify-center text-[#008751] shrink-0">
+                      <MessageSquare className="w-5.5 h-5.5" />
+                    </div>
+                    <div className="text-left space-y-0.5">
+                      <span className="text-slate-400 text-xs font-bold block">Discussions</span>
+                      <div className="text-2xl font-black text-slate-800 leading-none">2</div>
+                      <span className="text-slate-400 text-[10.5px] block font-medium">New Messages</span>
+                      <button 
+                        onClick={() => document.getElementById("discussions-card")?.scrollIntoView({ behavior: 'smooth' })}
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-[10.5px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <span>Open</span>
+                        <span>→</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Card 3: Editorial Team */}
+                  <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs flex items-center gap-4 hover:border-emerald-200 transition duration-150">
+                    <div className="w-11 h-11 rounded-full bg-[#eefcf5] flex items-center justify-center text-[#008751] shrink-0">
+                      <User className="w-5.5 h-5.5" />
+                    </div>
+                    <div className="text-left space-y-0.5 overflow-hidden">
+                      <span className="text-slate-400 text-xs font-bold block">Editorial Team</span>
+                      <div className="text-sm font-black text-slate-800 leading-none truncate" title="Dr. John Smith">Dr. John Smith</div>
+                      <span className="text-slate-400 text-[10.5px] block font-medium">Editor Assigned</span>
+                      <button 
+                        onClick={() => alert("Assigned Editorial Contact Panel:\nDr. John Smith (Lead Managing Editor)\nJournal of AI in Medicine.")}
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-[10.5px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <span>View Details</span>
+                        <span>→</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Card 4: Important Dates */}
+                  <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs flex items-center gap-4 hover:border-emerald-200 transition duration-150">
+                    <div className="w-11 h-11 rounded-full bg-[#eefcf5] flex items-center justify-center text-[#008751] shrink-0">
+                      <Calendar className="w-5.5 h-5.5" />
+                    </div>
+                    <div className="text-left space-y-0.5">
+                      <span className="text-slate-400 text-xs font-bold block">Important Dates</span>
+                      <div className="text-[10px] font-medium text-slate-500 leading-tight">
+                        <div>Submitted <strong className="text-slate-700 font-extrabold">08 June 2026</strong></div>
+                        <div className="mt-0.5">Expected <strong className="text-slate-700 font-extrabold">22 June 2026</strong></div>
+                      </div>
+                      <button 
+                        onClick={() => alert("Opening manuscript editorial milestones tracking calendar.")}
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-[10.5px] block mt-1 flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <span>View Calendar</span>
+                        <span>→</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Submission Workflow horizontal stepper */}
+                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-2xs text-left">
+                  <h3 className="text-slate-800 text-sm font-extrabold tracking-tight mb-6">Submission Workflow</h3>
+                  
+                  <div className="relative flex items-center justify-between">
+                    {/* Background connecting line */}
+                    <div className="absolute top-4 left-4 right-4 h-0.5 bg-slate-150 z-0">
+                      {/* Completed progress fill */}
+                      <div className="absolute top-0 left-0 w-[20%] h-full bg-[#008751]" />
+                    </div>
+                    
+                    {[
+                      { label: "Submitted", sub: "08 Jun 2026", status: "completed" },
+                      { label: "Editor Assigned", sub: "In Progress", status: "active" },
+                      { label: "Reviewer Invited", sub: "Pending", status: "pending" },
+                      { label: "Under Review", sub: "Pending", status: "pending" },
+                      { label: "Decision", sub: "Pending", status: "pending" },
+                      { label: "Production", sub: "Pending", status: "pending" }
+                    ].map((step, idx) => {
+                      let circleStyle = "bg-white border-slate-200 text-slate-350";
+                      let labelStyle = "text-slate-400 font-medium";
+                      let subStyle = "text-slate-400";
+                      
+                      if (step.status === "completed") {
+                        circleStyle = "bg-[#008751] border-[#008751] text-white";
+                        labelStyle = "text-slate-800 font-extrabold";
+                        subStyle = "text-slate-500 font-medium";
+                      } else if (step.status === "active") {
+                        circleStyle = "border-2 border-[#008751] bg-[#eefcf5] text-[#008751]";
+                        labelStyle = "text-[#008751] font-extrabold";
+                        subStyle = "text-emerald-700 font-semibold";
+                      }
+                      
+                      return (
+                        <div key={idx} className="relative z-10 flex flex-col items-center flex-1 text-center">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 text-xs transition duration-150 ${circleStyle}`}>
+                            {step.status === "completed" ? (
+                              <Check className="w-4 h-4 stroke-[3]" />
+                            ) : step.status === "active" ? (
+                              <span className="w-2 h-2 rounded-full bg-[#008751]" />
+                            ) : (
+                              <span className="w-1.5 h-1.5 bg-slate-200 rounded-full" />
+                            )}
+                          </div>
+                          <span className={`text-[10px] sm:text-[11px] mt-2 block tracking-tight ${labelStyle}`}>{step.label}</span>
+                          <span className={`text-[9px] sm:text-[10px] mt-0.5 block ${subStyle}`}>{step.sub}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Uploaded Files and Pre-Review Discussions Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Uploaded Files Panel */}
+                  <div id="uploaded-files-card" className="bg-white border border-slate-100 rounded-2xl p-5 shadow-2xs text-left flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between border-b pb-3 border-slate-100">
+                        <h3 className="text-slate-800 text-sm font-extrabold tracking-tight">Uploaded Files</h3>
+                        <button
+                          onClick={() => handleSimulateUpload(false, true)}
+                          className="border border-slate-200 hover:bg-slate-50 text-slate-700 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3 text-slate-500 stroke-[3]" />
+                          <span>Upload New File</span>
+                        </button>
+                      </div>
+                      
+                      <div className="mt-4 overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="text-[10px] uppercase font-mono tracking-wider text-slate-400 border-b border-slate-100">
+                              <th className="pb-2 font-bold">File Name</th>
+                              <th className="pb-2 font-bold">Type</th>
+                              <th className="pb-2 font-bold">Size</th>
+                              <th className="pb-2 font-bold">Uploaded On</th>
+                              <th className="pb-2 text-center font-bold">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {uploadedFiles.map((file, i) => {
+                              // Icon coloring depending on file type extension
+                              let fileIconColor = "text-rose-500";
+                              if (file.name.endsWith(".docx")) fileIconColor = "text-blue-500";
+                              else if (file.name.endsWith(".zip")) fileIconColor = "text-amber-500";
+                              
+                              return (
+                                <tr key={i} className="hover:bg-slate-50/40 transition">
+                                  <td className="py-3.5 pr-2">
+                                    <button 
+                                      onClick={() => {
+                                        setPreviewFileName(file.name);
+                                        setPreviewFileType(file.type || 'Document');
+                                        setPreviewFileSize(file.size || '1.2 MB');
+                                        setPreviewModalOpen(true);
+                                      }}
+                                      className="flex items-center gap-2 max-w-[150px] sm:max-w-none text-left hover:underline cursor-pointer"
+                                    >
+                                      <FileText className={`w-4 h-4 ${fileIconColor} shrink-0`} />
+                                      <span className="font-extrabold text-slate-800 truncate" title={file.name}>{file.name}</span>
+                                    </button>
+                                  </td>
+                                  <td className="py-3.5 text-slate-500 font-medium">{file.type}</td>
+                                  <td className="py-3.5 text-slate-400 font-mono text-[10.5px]">{file.size}</td>
+                                  <td className="py-3.5 text-slate-400 font-mono text-[10.5px]">{file.date}</td>
+                                  <td className="py-3.5">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <button 
+                                        onClick={() => {
+                                          setPreviewFileName(file.name);
+                                          setPreviewFileType(file.type || 'Document');
+                                          setPreviewFileSize(file.size || '1.2 MB');
+                                          setPreviewModalOpen(true);
+                                        }}
+                                        className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-[#008751] transition"
+                                        title="View file"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button 
+                                        onClick={() => alert(`Simulating file download: ${file.name}`)}
+                                        className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-[#008751] transition"
+                                        title="Download file"
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="border-t pt-3 border-slate-100 mt-4">
+                      <button
+                        onClick={() => alert("Downloading all matching document publication files recursively as a single zip file.")}
+                        className="inline-flex items-center gap-2 text-[11px] font-black text-[#008751] hover:text-[#007043] cursor-pointer"
+                      >
+                        <Download className="w-4 h-4 text-[#008751]" />
+                        <span>Download All Files</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Discussions Column */}
+                  <div className="flex flex-col gap-3.5">
+                    
+                    {activeThreadId === null ? (
+                      /* ========== DISCUSSION FORUM THREAD LIST (SECOND IMAGE) ========== */
+                      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs text-left p-5 flex flex-col justify-between h-[540px] relative">
+                        
+                        {/* Header Row */}
+                        <div className="flex items-center justify-between shrink-0">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-[#008751]"></span>
+                            <h3 className="text-slate-900 text-base sm:text-lg font-black tracking-tight">
+                              Discussions
+                            </h3>
+                          </div>
+                          
+                          <button
+                            onClick={() => setViewState('ADD_DISCUSSION')}
+                            className="bg-[#eefcf4] border border-[#b8deb3] text-[#008751] hover:bg-[#e1f9eb] px-3.5 py-1.5 rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer transition"
+                          >
+                            <Plus className="w-3.5 h-3.5 text-[#008751] stroke-[3]" />
+                            <span>New Discussion</span>
+                          </button>
+                        </div>
+
+                        {/* Tabs Row */}
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-0.5 mt-3 shrink-0">
+                          <div className="flex gap-4 text-xs font-bold text-slate-500">
+                            <button
+                              onClick={() => setActiveDiscussionTab('ALL')}
+                              className={`pb-2.5 px-0.5 relative cursor-pointer ${
+                                activeDiscussionTab === 'ALL'
+                                  ? 'text-slate-900 font-extrabold border-b-2 border-emerald-600'
+                                  : 'hover:text-slate-800'
+                              }`}
+                            >
+                              All
+                            </button>
+                            <button
+                              onClick={() => setActiveDiscussionTab('OFFICIAL')}
+                              className={`pb-2.5 px-0.5 relative cursor-pointer flex items-center gap-1.5 ${
+                                activeDiscussionTab === 'OFFICIAL'
+                                  ? 'text-slate-900 font-extrabold border-b-2 border-emerald-600'
+                                  : 'hover:text-slate-800'
+                              }`}
+                            >
+                              <span>Official Threads</span>
+                              <span className="w-4.5 h-4.5 bg-[#004d2b] text-white text-[9px] rounded-full flex items-center justify-center font-bold">
+                                1
+                              </span>
+                            </button>
+                            <button
+                              onClick={() => setActiveDiscussionTab('DIRECT')}
+                              className={`pb-2.5 px-0.5 relative cursor-pointer ${
+                                activeDiscussionTab === 'DIRECT'
+                                  ? 'text-slate-900 font-extrabold border-b-2 border-emerald-600'
+                                  : 'hover:text-slate-800'
+                              }`}
+                            >
+                              Direct Messages
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-2 pb-1.5">
+                            <button
+                              onClick={() => {
+                                setShowSearch(!showSearch);
+                                if (showSearch) setSearchQuery("");
+                              }}
+                              className={`w-8 h-8 rounded-full border text-slate-500 flex items-center justify-center hover:bg-slate-50 transition cursor-pointer ${
+                                showSearch ? 'bg-slate-100 border-slate-300' : 'border-slate-200'
+                              }`}
+                              title="Search discussions"
+                            >
+                              <Search className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                alert("Filter: Showing active discussions. Search to find archived items.");
+                              }}
+                              className="w-8 h-8 rounded-full border border-slate-200 text-slate-500 flex items-center justify-center hover:bg-slate-50 transition cursor-pointer"
+                              title="Filter discussions"
+                            >
+                              <Filter className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Search field if active */}
+                        {showSearch && (
+                          <div className="pt-2 shrink-0">
+                            <input
+                              type="text"
+                              value={searchQuery}
+                              onChange={(e) => setSearchQuery(e.target.value)}
+                              placeholder="Search threads..."
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-emerald-600 font-medium"
+                            />
+                          </div>
+                        )}
+
+                        {/* Thread Cards Stack */}
+                        <div className="flex-grow overflow-y-auto mt-4 space-y-3 min-h-0 pr-1">
+                          
+                          {/* Thread 1: Editorial Inquiry (OFFICIAL THREAD) */}
+                          {(activeDiscussionTab === 'ALL' || activeDiscussionTab === 'OFFICIAL') &&
+                           "Editorial Inquiry".toLowerCase().includes(searchQuery.toLowerCase()) && (
+                            <div
+                              onClick={() => setActiveThreadId('thread-editorial-inquiry')}
+                              className="bg-[#f4fbf7] border border-[#d3ecd9] hover:bg-[#ebf9f0] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
+                            >
+                              <div className="shrink-0 pt-1">
+                                <Pin className="w-4.5 h-4.5 text-[#008751] rotate-45" />
+                              </div>
+                              <div className="flex-grow space-y-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="bg-[#e1f5e8] border border-[#a2ecd5]/40 text-[#008751] text-[9.5px] font-black px-1.5 py-0.5 rounded tracking-wide uppercase">
+                                    OFFICIAL THREAD
+                                  </span>
+                                  <Lock className="w-3.5 h-3.5 text-slate-400" />
+                                </div>
+                                <h4 className="text-[14.5px] font-black text-slate-900 tracking-tight leading-snug">
+                                  Editorial Inquiry
+                                </h4>
+                                <p className="text-[12.5px] font-bold text-slate-700 leading-snug line-clamp-1">
+                                  <span className="text-slate-900 font-extrabold">Dr. John Smith:</span> Dear Author, Please confirm that the manuscript complies with the journal guidelines.
+                                </p>
+                              </div>
+                              <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
+                                <span className="text-[10px] font-bold text-slate-400 font-mono">10:30 AM</span>
+                                <span className="w-5 h-5 rounded-full bg-[#004d2b] text-white text-[10px] font-black flex items-center justify-center font-sans mt-1.5">
+                                  2
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Thread 2: Technical Check */}
+                          {(activeDiscussionTab === 'ALL') &&
+                           "Technical Check".toLowerCase().includes(searchQuery.toLowerCase()) && (
+                            <div
+                              onClick={() => setActiveThreadId('thread-technical-check')}
+                              className="bg-white border border-slate-100 hover:border-slate-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
+                            >
+                              <div className="shrink-0 pt-0.5">
+                                <div className="w-8 h-8 rounded-full border border-slate-200 text-slate-400 flex items-center justify-center bg-slate-50">
+                                  <Lock className="w-3.5 h-3.5 text-slate-400" />
+                                </div>
+                              </div>
+                              <div className="flex-grow space-y-0.5">
+                                <h4 className="text-[14.5px] font-black text-slate-900 tracking-tight leading-snug">
+                                  Technical Check
+                                </h4>
+                                <p className="text-[12.5px] font-bold text-slate-700 leading-snug line-clamp-1">
+                                  <span className="text-slate-900 font-extrabold">System:</span> Your file "Manuscript.pdf" has been successfully checked.
+                                </p>
+                              </div>
+                              <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
+                                <span className="text-[10px] font-bold text-slate-400 font-mono">Yesterday</span>
+                                <span className="w-5 h-5 rounded-full bg-[#004d2b] text-white text-[10px] font-black flex items-center justify-center font-sans mt-1.5">
+                                  1
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Thread 3: Formatting & Style */}
+                          {(activeDiscussionTab === 'ALL' || activeDiscussionTab === 'DIRECT') &&
+                           "Formatting & Style".toLowerCase().includes(searchQuery.toLowerCase()) && (
+                            <div
+                              onClick={() => setActiveThreadId('thread-formatting-style')}
+                              className="bg-white border border-slate-100 hover:border-slate-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
+                            >
+                              <div className="shrink-0 pt-0.5">
+                                <div className="w-8 h-8 rounded-full border border-slate-200 text-slate-400 flex items-center justify-center bg-slate-50">
+                                  <User className="w-3.5 h-3.5 text-slate-400" />
+                                </div>
+                              </div>
+                              <div className="flex-grow space-y-0.5">
+                                <h4 className="text-[14.5px] font-black text-slate-900 tracking-tight leading-snug">
+                                  Formatting & Style
+                                </h4>
+                                <p className="text-[12.5px] font-bold text-slate-700 leading-snug line-clamp-1">
+                                  <span className="text-slate-900 font-extrabold">Editor:</span> Please ensure all references follow the journal format.
+                                </p>
+                              </div>
+                              <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
+                                <span className="text-[10px] font-bold text-slate-400 font-mono">2 Jun 2026</span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Render custom threads added by user */}
+                          {discussionThreads.length > 0 && (activeDiscussionTab === 'ALL' || activeDiscussionTab === 'DIRECT') && (
+                            discussionThreads
+                              .filter(t => t.subject.toLowerCase().includes(searchQuery.toLowerCase()))
+                              .map(thread => (
+                                <div
+                                  key={thread.id}
+                                  onClick={() => setActiveThreadId(thread.id)}
+                                  className="bg-white border border-slate-100 hover:border-slate-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
+                                >
+                                  <div className="shrink-0 pt-0.5">
+                                    <div className="w-8 h-8 rounded-full border border-slate-200 text-slate-400 flex items-center justify-center bg-slate-50 font-black text-xs">
+                                      {thread.initiator ? thread.initiator.substring(0, 2).toUpperCase() : "UT"}
+                                    </div>
+                                  </div>
+                                  <div className="flex-grow space-y-0.5">
+                                    <h4 className="text-[14.5px] font-black text-slate-900 tracking-tight leading-snug">
+                                      {thread.subject}
+                                    </h4>
+                                    <p className="text-[12.5px] font-bold text-slate-700 leading-snug line-clamp-1">
+                                      <span className="text-slate-900 font-extrabold">{thread.initiator}:</span> {thread.messages[0]?.text || "No messages yet."}
+                                    </p>
+                                  </div>
+                                  <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
+                                    <span className="text-[10px] font-bold text-slate-400 font-mono">
+                                      {new Date(thread.createdAt || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))
+                          )}
+
+                          {/* Fallback Empty State */}
+                          {((activeDiscussionTab === 'OFFICIAL' && searchQuery !== "" && !"Editorial Inquiry".toLowerCase().includes(searchQuery.toLowerCase())) ||
+                           (activeDiscussionTab === 'DIRECT' && searchQuery !== "" && !"Formatting & Style".toLowerCase().includes(searchQuery.toLowerCase()) && discussionThreads.length === 0)) && (
+                            <div className="text-center py-10 text-slate-400 font-medium text-xs">
+                              No discussions match your filter or search.
+                            </div>
+                          )}
+
+                        </div>
+
+                        {/* View All footer link */}
+                        <div className="pt-2 border-t border-slate-100 flex justify-center mt-auto shrink-0 bg-white">
+                          <button
+                            onClick={() => {
+                              setActiveDiscussionTab('ALL');
+                              setSearchQuery('');
+                              alert("Showing all discussions. Click on any discussion item to enter its dedicated communication channel.");
+                            }}
+                            className="text-[#008751] hover:text-[#007043] font-black hover:underline text-xs flex items-center gap-1 cursor-pointer"
+                          >
+                            <span>View All Discussions</span>
+                            <span className="font-extrabold">→</span>
+                          </button>
+                        </div>
+
+                      </div>
+                    ) : activeThreadId === 'thread-editorial-inquiry' ? (
+                      /* ========== WHATSAPP CHAT CHANNEL: EDITORIAL TRIAGE GROUP (FIRST IMAGE) ========== */
+                      <div id="discussions-card" className="bg-[#efeae2] border border-slate-200 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
+                        
+                        {/* WhatsApp Top Header Bar */}
+                        <div className="bg-[#075e54] text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-sm z-10">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setActiveThreadId(null)}
+                              className="mr-1 hover:bg-emerald-800/40 p-1.5 rounded-full transition cursor-pointer flex items-center justify-center"
+                              title="Back to Discussions list"
+                            >
+                              <ChevronLeft className="w-5 h-5 text-white stroke-[3.5]" />
+                            </button>
+                            
+                            {/* Group Icon Avatar */}
+                            <div className="w-9 h-9 rounded-full bg-[#128c7e] text-white font-extrabold text-xs flex items-center justify-center border border-emerald-500/20 shadow-inner">
+                              ET
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-xs text-slate-100 tracking-tight flex items-center gap-1">
+                                Editorial Triage Group
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#25d366] animate-pulse"></span>
+                              </h4>
+                              <p className="text-[10px] text-emerald-200/90 font-medium">
+                                Dr. John Smith, Akshaya G • Online
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 text-emerald-100">
+                            {/* Audio Call representation icon */}
+                            <button className="hover:text-white transition opacity-80 hover:opacity-100 cursor-pointer" title="Voice Call" onClick={() => alert("Connecting encrypted peer voice audio line...")}>
+                              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                                <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" />
+                              </svg>
+                            </button>
+                            {/* Video Call representation icon */}
+                            <button className="hover:text-white transition opacity-80 hover:opacity-100 cursor-pointer" title="Video Call" onClick={() => alert("Connecting high-definition face to face editorial video channel...")}>
+                              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                                <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" />
+                              </svg>
+                            </button>
+                            {/* Thread wizard helper */}
+                            <button
+                              onClick={() => setViewState('ADD_DISCUSSION')}
+                              className="hover:text-white transition opacity-80 hover:opacity-100 cursor-pointer"
+                              title="New Thread Inquiry"
+                            >
+                              <Plus className="w-4 h-4 text-emerald-200 font-extrabold stroke-[2.5]" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* WhatsApp Conversation Scroll Pane */}
+                        <div className="flex-grow p-4 overflow-y-auto space-y-3 flex flex-col justify-start bg-[#efeae2] relative min-h-0">
+                          {/* Grid background doodle placeholder texture */}
+                          <div className="absolute inset-0 opacity-[0.06] bg-[radial-gradient(#334155_1.2px,transparent_1.2px)] [background-size:16px_16px] pointer-events-none"></div>
+                          
+                          <div className="mx-auto bg-[#e1f3e1] border border-[#b8deb3] text-[#075e54] text-[10px] sm:text-[11px] font-bold px-3 py-1 rounded-lg uppercase tracking-wider text-center select-none shadow-3xs z-10 font-mono">
+                            Secure Editorial Sandbox Chat • Active
+                          </div>
+
+                          {/* Base messages */}
+                          <div className="flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition self-start bg-white text-slate-900 rounded-tl-none border border-slate-200 text-left">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-[11px] font-bold block text-sky-700">Dr. John Smith</span>
+                              <span className="text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border bg-slate-50 border-slate-200 text-slate-500">EDITOR</span>
+                            </div>
+                            <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">
+                              Dear Author, Please confirm that the manuscript complies with the journal guidelines.
+                            </p>
+                            <div className="flex items-center justify-end gap-1 mt-1 text-slate-400 select-none">
+                              <span className="text-[9px] font-mono font-medium">10:30 AM</span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition self-end bg-[#d9fdd3] text-slate-900 rounded-tr-none border border-[#c6ecbf] text-left">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-[11px] font-bold block text-[#075e54]">Akshaya G</span>
+                              <span className="text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border bg-[#e9f7e5] border-[#b0e2a7] text-emerald-700">AUTHOR</span>
+                            </div>
+                            <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">
+                              Thank you for your message. Yes, the manuscript follows all the guidelines.
+                            </p>
+                            <div className="flex items-center justify-end gap-1 mt-1 text-slate-400 select-none">
+                              <span className="text-[9px] font-mono font-medium">11:02 AM</span>
+                              <span className="text-[#53bdeb] text-[11px] leading-none font-extrabold tracking-tighter" title="Read status">✓✓</span>
+                            </div>
+                          </div>
+
+                          {/* Additional dynamic user messages */}
+                          {whatsappMessages.slice(2).map((msg) => (
+                            <div
+                              key={msg.id}
+                              className={`flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition text-left ${
+                                msg.isMe
+                                  ? 'self-end bg-[#d9fdd3] text-slate-900 rounded-tr-none border border-[#c6ecbf]'
+                                  : 'self-start bg-white text-slate-900 rounded-tl-none border border-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className={`text-[11px] font-bold block ${msg.isMe ? 'text-[#075e54]' : 'text-sky-700'}`}>
+                                  {msg.sender}
+                                </span>
+                                <span className={`text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border ${
+                                  msg.isMe
+                                    ? 'bg-[#e9f7e5] border-[#b0e2a7] text-emerald-700'
+                                    : 'bg-slate-50 border-slate-200 text-slate-500'
+                                }`}>
+                                  {msg.senderRole}
+                                </span>
+                              </div>
+                              <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">{msg.text}</p>
+                              <div className="flex items-center justify-end gap-1 mt-1 text-slate-400 select-none">
+                                <span className="text-[9px] font-mono font-medium">{msg.timestamp}</span>
+                                {msg.isMe && (
+                                  <span className="text-[#53bdeb] text-[11px] leading-none font-extrabold tracking-tighter" title="Read status">✓✓</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* WhatsApp text input bar */}
+                        <div className="bg-[#f0f2f5] px-3 py-2.5 border-t border-slate-200/60 flex items-center gap-2 shrink-0 z-10">
+                          <button
+                            onClick={() => {
+                              alert("This is an end-to-end encrypted discussion workspace for author-editor direct communications.");
+                            }}
+                            className="text-slate-500 hover:text-slate-700 transition cursor-pointer p-1 rounded-full hover:bg-slate-200"
+                            title="Sandbox System Info"
+                          >
+                            <Info className="w-5 h-5" />
+                          </button>
+
+                          <button
+                            onClick={() => handleSimulateUpload(false, true)}
+                            className="text-slate-500 hover:text-slate-700 transition cursor-pointer p-1 rounded-full hover:bg-slate-200"
+                            title="Attach file to pre-review list"
+                          >
+                            <Paperclip className="w-4.5 h-4.5 rotate-45" />
+                          </button>
+
+                          <input
+                            type="text"
+                            value={whatsappInput}
+                            onChange={(e) => setWhatsappInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSendWhatsappMessage();
+                            }}
+                            placeholder="Type a message..."
+                            className="flex-grow bg-white border border-slate-200 rounded-lg px-3.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-emerald-600 focus:border-emerald-600 text-slate-800 font-bold shadow-3xs"
+                          />
+
+                          <button
+                            onClick={handleSendWhatsappMessage}
+                            className="bg-[#00a884] hover:bg-[#008f72] text-white p-2 rounded-full transition flex items-center justify-center cursor-pointer shadow-sm hover:scale-105 active:scale-95"
+                            title="Send Message"
+                          >
+                            <Send className="w-3.5 h-3.5 text-white" />
+                          </button>
+                        </div>
+
+                        {/* Pre-review custom links footer bar */}
+                        <div className="bg-white px-4 py-2 border-t border-slate-100 flex items-center justify-between text-[10.5px] font-mono shrink-0">
+                          <button
+                            onClick={() => setViewState('ADD_DISCUSSION')}
+                            className="text-[#008751] hover:underline font-extrabold flex items-center gap-1 cursor-pointer"
+                          >
+                            <span>+ Official Thread Inquiry</span>
+                          </button>
+                          
+                          <button
+                            onClick={() => setActiveThreadId(null)}
+                            className="text-slate-500 hover:text-slate-800 transition font-bold"
+                          >
+                            ← Back to Discussions
+                          </button>
+                        </div>
+
+                      </div>
+                    ) : activeThreadId === 'thread-technical-check' ? (
+                      /* ========== TECHNICAL CHECK SYSTEM LOG CHAT ========== */
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
+                        
+                        {/* Header Bar */}
+                        <div className="bg-slate-800 text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-sm z-10">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setActiveThreadId(null)}
+                              className="mr-1 hover:bg-slate-700/60 p-1.5 rounded-full transition cursor-pointer flex items-center justify-center"
+                              title="Back to Discussions list"
+                            >
+                              <ChevronLeft className="w-5 h-5 text-white stroke-[3.5]" />
+                            </button>
+                            
+                            <div className="w-9 h-9 rounded-full bg-slate-600 text-white font-extrabold text-xs flex items-center justify-center border border-slate-500/20 shadow-inner">
+                              SYS
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-xs text-slate-100 tracking-tight flex items-center gap-1">
+                                Technical Check System
+                              </h4>
+                              <p className="text-[10px] text-slate-300 font-medium">
+                                automated verification report log
+                              </p>
+                            </div>
+                          </div>
+                          
+                          <span className="text-[10px] bg-slate-700 text-slate-300 font-mono font-bold px-2.5 py-1 rounded-full uppercase border border-slate-600">
+                            SYSTEM RUNNER
+                          </span>
+                        </div>
+
+                        {/* Chat Scroll Pane */}
+                        <div className="flex-grow p-4 overflow-y-auto space-y-3 flex flex-col justify-start bg-[#f8fafc] relative min-h-0">
+                          {techCheckMessages.map((msg) => (
+                            <div
+                              key={msg.id}
+                              className={`flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition text-left ${
+                                msg.isMe
+                                  ? 'self-end bg-[#d9fdd3] text-slate-900 rounded-tr-none border border-[#c6ecbf]'
+                                  : 'self-start bg-white text-slate-900 rounded-tl-none border border-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className={`text-[11px] font-bold block ${msg.isMe ? 'text-[#075e54]' : 'text-slate-700'}`}>
+                                  {msg.sender}
+                                </span>
+                                <span className={`text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border ${
+                                  msg.isMe
+                                    ? 'bg-[#e9f7e5] border-[#b0e2a7] text-emerald-700'
+                                    : 'bg-slate-100 border-slate-200 text-slate-500'
+                                }`}>
+                                  {msg.senderRole}
+                                </span>
+                              </div>
+                              <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">{msg.text}</p>
+                              <div className="flex items-center justify-end gap-1 mt-1 text-slate-400 select-none">
+                                <span className="text-[9px] font-mono font-medium">{msg.timestamp}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Input bar */}
+                        <div className="bg-[#f1f5f9] px-3 py-2.5 border-t border-slate-200 flex items-center gap-2 shrink-0 z-10">
+                          <input
+                            type="text"
+                            value={techCheckInput}
+                            onChange={(e) => setTechCheckInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSendTechCheckMessage();
+                            }}
+                            placeholder="Ask System or write confirmation notes..."
+                            className="flex-grow bg-white border border-slate-200 rounded-lg px-3.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-slate-600 text-slate-800 font-bold shadow-3xs"
+                          />
+
+                          <button
+                            onClick={handleSendTechCheckMessage}
+                            className="bg-slate-800 hover:bg-slate-700 text-white p-2 rounded-full transition flex items-center justify-center cursor-pointer shadow-sm"
+                            title="Send Note"
+                          >
+                            <Send className="w-3.5 h-3.5 text-white" />
+                          </button>
+                        </div>
+
+                        {/* Footer bar */}
+                        <div className="bg-white px-4 py-2 border-t border-slate-100 flex items-center justify-between text-[10.5px] font-mono shrink-0">
+                          <span className="text-slate-400">Automated Security Audit</span>
+                          <button
+                            onClick={() => setActiveThreadId(null)}
+                            className="text-slate-500 hover:text-slate-800 transition font-bold"
+                          >
+                            ← Back to Discussions
+                          </button>
+                        </div>
+
+                      </div>
+                    ) : activeThreadId === 'thread-formatting-style' ? (
+                      /* ========== FORMATTING & STYLE DIRECT CHAT ========== */
+                      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
+                        
+                        {/* Header Bar */}
+                        <div className="bg-sky-800 text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-sm z-10">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setActiveThreadId(null)}
+                              className="mr-1 hover:bg-sky-700/60 p-1.5 rounded-full transition cursor-pointer flex items-center justify-center"
+                              title="Back to Discussions list"
+                            >
+                              <ChevronLeft className="w-5 h-5 text-white stroke-[3.5]" />
+                            </button>
+                            
+                            <div className="w-9 h-9 rounded-full bg-sky-600 text-white font-extrabold text-xs flex items-center justify-center border border-sky-500/20 shadow-inner">
+                              FS
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-xs text-slate-100 tracking-tight flex items-center gap-1">
+                                Formatting & Style Desk
+                              </h4>
+                              <p className="text-[10px] text-sky-200 font-medium">
+                                Kellye Milhorn (Editor) • Away
+                              </p>
+                            </div>
+                          </div>
+                          
+                          <span className="text-[10px] bg-sky-900 text-sky-200 font-mono font-bold px-2.5 py-1 rounded-full uppercase border border-sky-700">
+                            EDITOR INQUIRY
+                          </span>
+                        </div>
+
+                        {/* Chat Scroll Pane */}
+                        <div className="flex-grow p-4 overflow-y-auto space-y-3 flex flex-col justify-start bg-[#f0f4f8] relative min-h-0">
+                          {formattingMessages.map((msg) => (
+                            <div
+                              key={msg.id}
+                              className={`flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition text-left ${
+                                msg.isMe
+                                  ? 'self-end bg-[#d9fdd3] text-slate-900 rounded-tr-none border border-[#c6ecbf]'
+                                  : 'self-start bg-white text-slate-900 rounded-tl-none border border-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className={`text-[11px] font-bold block ${msg.isMe ? 'text-[#075e54]' : 'text-sky-700'}`}>
+                                  {msg.sender}
+                                </span>
+                                <span className={`text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border ${
+                                  msg.isMe
+                                    ? 'bg-[#e9f7e5] border-[#b0e2a7] text-emerald-700'
+                                    : 'bg-slate-100 border-slate-200 text-slate-500'
+                                }`}>
+                                  {msg.senderRole}
+                                </span>
+                              </div>
+                              <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">{msg.text}</p>
+                              <div className="flex items-center justify-end gap-1 mt-1 text-slate-400 select-none">
+                                <span className="text-[9px] font-mono font-medium">{msg.timestamp}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Input bar */}
+                        <div className="bg-[#f0f4f8] px-3 py-2.5 border-t border-slate-200 flex items-center gap-2 shrink-0 z-10">
+                          <input
+                            type="text"
+                            value={formattingInput}
+                            onChange={(e) => setFormattingInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSendFormattingMessage();
+                            }}
+                            placeholder="Type a response to Formatting Desk..."
+                            className="flex-grow bg-white border border-slate-200 rounded-lg px-3.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-sky-600 text-slate-800 font-bold shadow-3xs"
+                          />
+
+                          <button
+                            onClick={handleSendFormattingMessage}
+                            className="bg-sky-800 hover:bg-sky-700 text-white p-2 rounded-full transition flex items-center justify-center cursor-pointer shadow-sm"
+                            title="Send Response"
+                          >
+                            <Send className="w-3.5 h-3.5 text-white" />
+                          </button>
+                        </div>
+
+                        {/* Footer bar */}
+                        <div className="bg-white px-4 py-2 border-t border-slate-100 flex items-center justify-between text-[10.5px] font-mono shrink-0">
+                          <span className="text-slate-400">Layout Desk Channel</span>
+                          <button
+                            onClick={() => setActiveThreadId(null)}
+                            className="text-slate-500 hover:text-slate-800 transition font-bold"
+                          >
+                            ← Back to Discussions
+                          </button>
+                        </div>
+
+                      </div>
+                    ) : (
+                      /* ========== GENERIC CHAT CHANNELS FOR CUSTOM USER CREATED THREADS ========== */
+                      (() => {
+                        const thread = discussionThreads.find(t => t.id === activeThreadId);
+                        if (!thread) return null;
+                        return (
+                          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
+                            
+                            {/* Header Bar */}
+                            <div className="bg-emerald-800 text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-sm z-10">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => setActiveThreadId(null)}
+                                  className="mr-1 hover:bg-emerald-700/60 p-1.5 rounded-full transition cursor-pointer flex items-center justify-center"
+                                  title="Back to Discussions list"
+                                >
+                                  <ChevronLeft className="w-5 h-5 text-white stroke-[3.5]" />
+                                </button>
+                                
+                                <div className="w-9 h-9 rounded-full bg-emerald-600 text-white font-extrabold text-xs flex items-center justify-center border border-emerald-500/20 shadow-inner">
+                                  {thread.initiator ? thread.initiator.substring(0, 2).toUpperCase() : "UT"}
+                                </div>
+                                <div>
+                                  <h4 className="font-bold text-xs text-slate-100 tracking-tight flex items-center gap-1">
+                                    {thread.subject}
+                                  </h4>
+                                  <p className="text-[10px] text-emerald-200 font-medium">
+                                    Initiated by {thread.initiator}
+                                  </p>
+                                </div>
+                              </div>
+                              
+                              <span className="text-[10px] bg-emerald-900 text-emerald-200 font-mono font-bold px-2.5 py-1 rounded-full uppercase border border-emerald-700">
+                                USER DISCUSSION
+                              </span>
+                            </div>
+
+                            {/* Chat Scroll Pane */}
+                            <div className="flex-grow p-4 overflow-y-auto space-y-3 flex flex-col justify-start bg-slate-50 relative min-h-0">
+                              {thread.messages.map((msg: any) => (
+                                <div
+                                  key={msg.id}
+                                  className={`flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition text-left ${
+                                    msg.sender === (currentUser?.name || "Akshaya G")
+                                      ? 'self-end bg-[#d9fdd3] text-slate-900 rounded-tr-none border border-[#c6ecbf]'
+                                      : 'self-start bg-white text-slate-900 rounded-tl-none border border-slate-200'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-1.5 mb-1">
+                                    <span className="text-[11px] font-bold block text-slate-700">
+                                      {msg.sender}
+                                    </span>
+                                    <span className="text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border bg-slate-100 border-slate-200 text-slate-500">
+                                      {msg.sender === (currentUser?.name || "Akshaya G") ? "AUTHOR" : "PARTICIPANT"}
+                                    </span>
+                                  </div>
+                                  <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">{msg.text}</p>
+                                  <div className="flex items-center justify-end gap-1 mt-1 text-slate-400 select-none">
+                                    <span className="text-[9px] font-mono font-medium">
+                                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Reply Input block */}
+                            <div className="bg-slate-100 px-3 py-2.5 border-t border-slate-200 flex items-center gap-2 shrink-0 z-10">
+                              <input
+                                type="text"
+                                placeholder="Type a response message..."
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const val = (e.target as HTMLInputElement).value;
+                                    if (!val.trim()) return;
+                                    
+                                    // Append reply to selected thread
+                                    const updatedThreads = discussionThreads.map(t => {
+                                      if (t.id === thread.id) {
+                                        return {
+                                          ...t,
+                                          messages: [
+                                            ...t.messages,
+                                            {
+                                              id: "msg-" + Date.now(),
+                                              sender: currentUser?.name || "Akshaya G",
+                                              senderRole: "Author",
+                                              text: val.trim(),
+                                              timestamp: new Date().toISOString()
+                                            }
+                                          ]
+                                        };
+                                      }
+                                      return t;
+                                    });
+                                    setDiscussionThreads(updatedThreads);
+                                    (e.target as HTMLInputElement).value = "";
+                                  }
+                                }}
+                                className="flex-grow bg-white border border-slate-200 rounded-lg px-3.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-emerald-600 text-slate-800 font-bold shadow-3xs"
+                              />
+                            </div>
+
+                            {/* Footer bar */}
+                            <div className="bg-white px-4 py-2 border-t border-slate-100 flex items-center justify-between text-[10.5px] font-mono shrink-0">
+                              <span className="text-slate-400">Secure Channel</span>
+                              <button
+                                onClick={() => setActiveThreadId(null)}
+                                className="text-slate-500 hover:text-slate-800 transition font-bold"
+                              >
+                                ← Back to Discussions
+                              </button>
+                            </div>
+
+                          </div>
+                        );
+                      })()
+                    )}
+
+                  </div>
+                </div>
+
+              </div>
+
+              {/* RIGHT DETAILS SIDEBAR (COLUMN 3) */}
+              <aside id="ojs-column-right-details-dashboard" className="w-full lg:w-80 shrink-0 space-y-6 text-left leading-normal">
+                
+                {/* Submission Timeline */}
+                <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-2xs text-left">
+                  <h3 className="text-slate-800 text-sm font-extrabold tracking-tight mb-5">Submission Timeline</h3>
+                  
+                  <div className="relative pl-5 ml-2.5 space-y-6 text-xs border-l border-slate-150">
+                    {[
+                      { label: "Manuscript Submitted", sub: "08 June 2026, 10:20 AM", status: "completed" },
+                      { label: "Editor Assigned", sub: "08 June 2026, 11:15 AM", status: "active" },
+                      { label: "Reviewer Invited", sub: "Pending", status: "pending" },
+                      { label: "Under Review", sub: "Pending", status: "pending" },
+                      { label: "Decision", sub: "Pending", status: "pending" },
+                      { label: "Production", sub: "Pending", status: "pending" }
+                    ].map((item, idx) => {
+                      let markerStyle = "bg-white border-slate-200 text-slate-350";
+                      let textStyle = "text-slate-400";
+                      let subStyle = "text-slate-400";
+                      
+                      if (item.status === "completed") {
+                        markerStyle = "bg-[#008751] border-[#008751] text-white";
+                        textStyle = "text-slate-800 font-extrabold";
+                        subStyle = "text-slate-500 font-medium";
+                      } else if (item.status === "active") {
+                        markerStyle = "border-2 border-[#008751] bg-[#eefcf5] text-[#008751]";
+                        textStyle = "text-[#008751] font-extrabold";
+                        subStyle = "text-emerald-700 font-semibold";
+                      }
+                      
+                      return (
+                        <div key={idx} className="relative">
+                          {/* Timeline marker */}
+                          <div className={`absolute -left-[30.5px] top-0.5 w-5 h-5 rounded-full flex items-center justify-center border-2 transition duration-150 ${markerStyle}`}>
+                            {item.status === "completed" ? (
+                              <Check className="w-2.5 h-2.5 stroke-[3.5]" />
+                            ) : item.status === "active" ? (
+                              <span className="w-1.5 h-1.5 bg-[#008751] rounded-full" />
+                            ) : (
+                              <span className="w-1.5 h-1.5 bg-slate-200 rounded-full" />
+                            )}
+                          </div>
+                          
+                          <div className="space-y-0.5 text-left">
+                            <span className={`block text-xs ${textStyle}`}>{item.label}</span>
+                            <span className={`block text-[10px] font-mono ${subStyle}`}>{item.sub}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Recent Activity */}
+                <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-2xs text-left space-y-4">
+                  <h3 className="text-slate-800 text-sm font-extrabold tracking-tight border-b pb-3 border-slate-100">Recent Activity</h3>
+                  
+                  <div className="space-y-3.5 text-xs">
+                    {[
+                      { label: "Manuscript submitted", time: "10:20 AM", icon: FileText, color: "bg-emerald-50 text-emerald-700" },
+                      { label: "Files uploaded", time: "10:22 AM", icon: Download, color: "bg-blue-50 text-blue-700", rotate: true },
+                      { label: "Metadata completed", time: "10:40 AM", icon: Check, color: "bg-emerald-50 text-emerald-700" },
+                      { label: "Editor assigned", time: "11:15 AM", icon: User, color: "bg-emerald-50 text-emerald-700" }
+                    ].map((act, i) => {
+                      const Icon = act.icon;
+                      return (
+                        <div key={i} className="flex items-center justify-between gap-3 hover:bg-slate-50/50 p-1 rounded-lg transition">
+                          <div className="flex items-center gap-2.5 overflow-hidden">
+                            <div className={`w-7 h-7 rounded-lg ${act.color} flex items-center justify-center shrink-0`}>
+                              <Icon className={`w-3.5 h-3.5 ${act.rotate ? 'rotate-180' : ''}`} />
+                            </div>
+                            <span className="font-semibold text-slate-700 truncate">{act.label}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-mono shrink-0">{act.time}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Need Help? */}
+                <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-2xs text-left space-y-3">
+                  <h3 className="text-slate-800 text-sm font-extrabold tracking-tight">Need Help?</h3>
+                  <p className="text-xs text-slate-500 leading-normal font-medium">
+                    If you have any questions, please contact the editorial office.
+                  </p>
+                  <button
+                    onClick={() => alert("Connecting you with TULITICS Scholarly Publishing Editorial Desk. A support ticket is logged.")}
+                    className="border border-emerald-200 text-[#008751] bg-white hover:bg-emerald-50 px-4 py-2 text-xs font-black rounded-lg transition duration-150 cursor-pointer w-full flex items-center justify-center gap-2 mt-2"
+                  >
+                    <HelpCircle className="w-3.5 h-3.5 text-[#008751]" />
+                    <span>Contact Support</span>
+                  </button>
+                </div>
+
+              </aside>
+
+            </div>
+
+          </div>
+        ) : (
+          /* ======================= ORIGINAL DEFAULT WORKFLOW LAYOUT ======================= */
+          <>
         <div id="ojs-hero-panel-banner" className="bg-[#005c35] bg-gradient-to-r from-[#005230] to-[#007043] rounded-2xl p-6 text-white relative overflow-hidden flex flex-col md:flex-row md:items-center md:justify-between shadow-sm min-h-[110px]">
           
           {/* Wave Curve Abstract SVG Background overlay matching screenshot */}
@@ -810,7 +2163,12 @@ export default function OjsSubmissionDetail({
                                 <div className="text-left">
                                   <button
                                     id="download-asset-handle-btn"
-                                    onClick={() => alert(`Simulating downloading: ${editingFileName}`)}
+                                    onClick={() => {
+                                      setPreviewFileName(editingFileName);
+                                      setPreviewFileType('Manuscript');
+                                      setPreviewFileSize('1.24 MB');
+                                      setPreviewModalOpen(true);
+                                    }}
                                     className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-sm text-left transition"
                                   >
                                     {editingFileName}
@@ -837,7 +2195,12 @@ export default function OjsSubmissionDetail({
                               <div className="inline-flex items-center gap-2">
                                 <button
                                   id="view-file-quick"
-                                  onClick={() => alert(`Reviewing quick document layout details: ${editingFileName}`)}
+                                  onClick={() => {
+                                    setPreviewFileName(editingFileName);
+                                    setPreviewFileType('Manuscript');
+                                    setPreviewFileSize('1.24 MB');
+                                    setPreviewModalOpen(true);
+                                  }}
                                   className="p-1.5 bg-slate-100 hover:bg-[#eefcf4] text-slate-500 hover:text-[#008751] rounded-lg transition cursor-pointer"
                                   title="View galley document"
                                 >
@@ -1071,10 +2434,18 @@ export default function OjsSubmissionDetail({
                                 <span className="block text-[9.5px] font-bold text-slate-400 uppercase font-mono tracking-widest mb-1.5">Attached Documentation</span>
                                 {m.files.map((file: any, fIdx: number) => (
                                   <div key={fIdx} className="flex items-center justify-between text-[11px] text-slate-600">
-                                    <span className="flex items-center gap-1.5 font-bold text-[#008751] hover:underline cursor-pointer">
+                                    <button
+                                      onClick={() => {
+                                        setPreviewFileName(file.name);
+                                        setPreviewFileType('Supplementary File');
+                                        setPreviewFileSize(file.size || '1.2 MB');
+                                        setPreviewModalOpen(true);
+                                      }}
+                                      className="flex items-center gap-1.5 font-bold text-[#008751] hover:underline cursor-pointer text-left"
+                                    >
                                       <FileText className="w-4 h-4 text-rose-500" />
                                       {file.name}
-                                    </span>
+                                    </button>
                                     <span className="font-mono text-slate-400 text-[10px]">({file.size})</span>
                                   </div>
                                 ))}
@@ -1647,6 +3018,8 @@ export default function OjsSubmissionDetail({
           })()}
 
         </div>
+      </>
+    )}
 
       </div>
 
@@ -1700,6 +3073,17 @@ export default function OjsSubmissionDetail({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Dynamic interactive Document & Sandbox Asset Previewer */}
+      {previewModalOpen && (
+        <FilePreviewModal
+          isOpen={previewModalOpen}
+          onClose={() => setPreviewModalOpen(false)}
+          fileName={previewFileName}
+          fileType={previewFileType}
+          fileSize={previewFileSize}
+        />
       )}
 
     </div>

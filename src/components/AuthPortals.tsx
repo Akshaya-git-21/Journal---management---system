@@ -36,7 +36,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
 
   const getPresetEmail = (role: Role) => {
     if (role === 'AUTHOR') return 'author@stanford.edu';
-    if (role === 'REVIEWER') return 'reviewer@stanford.edu';
+    if (role === 'REVIEWER') return 'neumann@ias.edu';
     if (role === 'EDITOR') return 'editor@stanford.edu';
     if (role === 'PUBLISHER') return 'publisher@stanford.edu';
     if (role === 'COORDINATOR') return 'coordinator-triage@jms-journal.org';
