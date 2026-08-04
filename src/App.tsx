@@ -23,7 +23,8 @@ import {
   getManuscriptsFromDb, 
   upsertManuscriptToDb, 
   deleteManuscriptFromDb,
-  getSupabaseSQLScript 
+  getSupabaseSQLScript,
+  subscribeToManuscriptsRealtime
 } from './lib/supabase';
 
 export default function App() {
@@ -56,14 +57,18 @@ export default function App() {
   // Load manuscripts state from localStorage or load default initial data
   const [manuscripts, setManuscripts] = useState<Manuscript[]>(() => {
     const saved = localStorage.getItem('jms_sim_manuscripts');
+    const blacklistedIds = ['990', '986', '985', 'OJS-990', 'OJS-986', 'OJS-985'];
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((m: Manuscript) => !blacklistedIds.includes(m.id) && !blacklistedIds.includes(m.id.replace('OJS-', '')));
+        }
       } catch (e) {
         console.error("Failed to parse manuscripts local storage", e);
       }
     }
-    return INITIAL_MANUSCRIPTS;
+    return INITIAL_MANUSCRIPTS.filter((m: Manuscript) => !blacklistedIds.includes(m.id) && !blacklistedIds.includes(m.id.replace('OJS-', '')));
   });
 
   const [notification, setNotification] = useState<string>('');
@@ -75,6 +80,9 @@ export default function App() {
 
   // Load/Seed database on startup if active
   useEffect(() => {
+    // Completely remove the ojs_deleted_paper_ids local storage mechanism as requested
+    localStorage.removeItem('ojs_deleted_paper_ids');
+
     async function initSupabase() {
       const status = await checkSupabaseConnection();
       setSupabaseStatus(status);
@@ -82,16 +90,34 @@ export default function App() {
       if (status.connected && status.schemaExists) {
         try {
           const dbManuscripts = await getManuscriptsFromDb();
-          if (dbManuscripts.length === 0) {
+          
+          // Proactively clean up any default/hardcoded OJS submissions from Supabase if found!
+          const blacklistedIds = ['990', '986', '985', 'OJS-990', 'OJS-986', 'OJS-985'];
+          const defaultOjsToCleanup = dbManuscripts.filter(m => blacklistedIds.includes(m.id) || blacklistedIds.includes(m.id.replace('OJS-', '')));
+          for (const m of defaultOjsToCleanup) {
+            console.log(`Cleaning up blacklisted default manuscript ${m.id} from Supabase...`);
+            try {
+              await deleteManuscriptFromDb(m.id);
+            } catch (err) {
+              console.warn(`Failed to delete blacklisted manuscript ${m.id} from DB:`, err);
+            }
+          }
+          
+          // Exclude any blacklisted IDs from the list loaded into memory
+          const cleanDbManuscripts = dbManuscripts.filter(m => !blacklistedIds.includes(m.id) && !blacklistedIds.includes(m.id.replace('OJS-', '')));
+
+          if (cleanDbManuscripts.length === 0) {
             // Seed the Supabase database with default entries for immediate rich dashboard content
             console.log("Supabase database empty. Seeding INITIAL_MANUSCRIPTS...");
             for (const m of INITIAL_MANUSCRIPTS) {
               await upsertManuscriptToDb(m);
             }
             const reloaded = await getManuscriptsFromDb();
-            setManuscripts(reloaded);
+            const cleanReloaded = reloaded.filter(m => !blacklistedIds.includes(m.id) && !blacklistedIds.includes(m.id.replace('OJS-', '')));
+            setManuscripts(cleanReloaded);
           } else {
-            setManuscripts(dbManuscripts);
+            // Set clean database manuscripts as the absolute source of truth
+            setManuscripts(cleanDbManuscripts);
           }
         } catch (err) {
           console.error("Failed to load or seed Supabase manuscripts", err);
@@ -99,6 +125,24 @@ export default function App() {
       }
     }
     initSupabase();
+
+    // Subscribe to Realtime changes across manuscripts table
+    const unsubscribe = subscribeToManuscriptsRealtime((updatedMs) => {
+      setManuscripts((prev) => {
+        const index = prev.findIndex((m) => m.id === updatedMs.id);
+        if (index >= 0) {
+          const next = [...prev];
+          next[index] = updatedMs;
+          return next;
+        } else {
+          return [updatedMs, ...prev];
+        }
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Synchronize state changes to Local Storage
@@ -206,7 +250,9 @@ export default function App() {
       const updated: Manuscript = {
         ...m,
         status: 'SUBMITTED',
-        submittedAt: new Date().toISOString()
+        submittedAt: new Date().toISOString(),
+        assignedEditor: m.assignedEditor || 'Unassigned',
+        assignedEditorEmail: m.assignedEditorEmail || null
       };
       await handleUpdateManuscript(updated);
     }
@@ -239,7 +285,7 @@ export default function App() {
       {/* Supabase Connection Helper Widget */}
       {supabaseStatus && (!supabaseStatus.connected || !supabaseStatus.schemaExists) && (
         <div id="supabase-status-helper" className="bg-[#fff9e6] border-b border-[#ffe0b2] text-[#5c3e00] p-4 shrink-0 transition-all">
-          <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 text-[#f57c00] shrink-0 mt-0.5" />
               <div className="text-xs font-sans text-left">
@@ -267,7 +313,7 @@ export default function App() {
           </div>
 
           {showSqlScript && (
-            <div className="max-w-7xl mx-auto px-4 mt-4 animate-fade-in text-left">
+            <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 mt-4 animate-fade-in text-left">
               <div className="bg-slate-900 text-slate-300 p-4 rounded-xl border border-slate-800 relative shadow-inner">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
                   <span className="text-[10px] font-mono font-bold uppercase text-slate-500">SQL Schema & Storage Policies Setup</span>
@@ -295,7 +341,7 @@ export default function App() {
       {/* Main operational notifications banner */}
       {notification && (
         <div id="global-success-banner" className="bg-emerald-700 text-white p-3 shadow-md shrink-0">
-          <div className="max-w-7xl mx-auto px-4 flex items-center gap-2 text-xs font-mono">
+          <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 flex items-center gap-2 text-xs font-mono">
             <CheckCircle2 className="w-4 h-4 text-emerald-200 shrink-0" />
             <span className="font-bold uppercase tracking-wide">NOTIFICATION:</span>
             <span>{notification}</span>
@@ -308,7 +354,7 @@ export default function App() {
         <div className="flex-grow flex flex-col min-h-screen bg-slate-50">
           {/* Top Editorial Ribbon */}
           <div className="bg-[#0f172a] text-slate-300 py-2.5 px-4 sm:px-6 border-b border-slate-800 text-xs">
-            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 flex flex-col sm:flex-row items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-slate-400 font-mono">
                 <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span>SYSTEM STATUS: ONLINE</span>
@@ -343,7 +389,7 @@ export default function App() {
 
           {/* Main Navigation Header */}
           <header className="bg-white border-b border-[#e2e8f0] px-4 sm:px-6 py-2.5 shadow-xs sticky top-0 z-50">
-            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <TuliticsLogo iconSize={32} showText={true} textColorClass="text-[#155e42]" subTitle="PORTAL" usePng={true} />
               </div>
@@ -402,7 +448,7 @@ export default function App() {
           </header>
 
           {/* Main Wizard Area */}
-          <div className="flex-grow max-w-7xl mx-auto w-full px-4 sm:px-6 py-8">
+          <div className="flex-grow w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 py-8">
             <NewSubmissionFlow
               currentUser={loggedInUser}
               onCancel={() => {
@@ -489,7 +535,11 @@ export default function App() {
           initialMode={authMode}
           manuscripts={manuscripts}
           onBackToLanding={() => {
-            window.location.href = 'https://www.tulitics.com';
+            if (loggedInUser) {
+              setCurrentScreen('WORKSPACE');
+            } else {
+              setCurrentScreen('SUBMISSION');
+            }
           }}
           onSuccessAuth={(user) => {
             setLoggedInUser(user);
@@ -574,7 +624,7 @@ export default function App() {
       {/* Static premium workspace info footer */}
       {currentScreen !== 'AUTH' && (
         <footer id="jms-platform-footer" className="bg-slate-900 text-slate-400 py-4 border-t border-slate-800 px-6 shrink-0 text-left">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-[11px] font-mono">
+          <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 flex flex-col md:flex-row items-center justify-between gap-4 text-[11px] font-mono">
             <div className="space-y-1">
               <p className="font-bold text-white uppercase tracking-wider text-xs">
                 Journal of Artificial Intelligence in Medicine & Public Health

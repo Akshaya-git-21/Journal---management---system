@@ -102,7 +102,7 @@ export default function RoleSelector({
       <div id="jms-role-selector-container" className="sticky top-0 z-50 flex flex-col select-none">
         {/* 1. MAIN DARK GREEN NAVIGATION HEADER */}
         <div className="bg-[#002818] border-b border-[#001f12] text-white py-2 px-6 shadow-md text-left">
-          <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-4">
+          <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 flex items-center justify-between gap-4">
             
             {/* Left: Brand Identity with Custom Logo */}
             <div className="shrink-0">
@@ -172,7 +172,7 @@ export default function RoleSelector({
 
         {/* 2. SECONDARY CONTEXT & TELEMETRY STRIP */}
         <div className="bg-white border-b border-slate-200 px-6 py-2.5 text-left">
-          <div className="max-w-[1600px] mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-[11px] text-slate-500">
+          <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 flex flex-col md:flex-row items-center justify-between gap-3 text-[11px] text-slate-500">
             
             {/* Simulated Session Persona Status */}
             <div className="flex items-center gap-2 flex-wrap text-left justify-center md:justify-start">
@@ -231,7 +231,7 @@ export default function RoleSelector({
     <div id="jms-role-selector-container" className="bg-[#f8fafc]/50 border-b border-gray-150 sticky top-0 z-50 backdrop-blur-sm">
       
       {/* 1. MAIN NAVIGATION HEADER */}
-      <div className="max-w-[1600px] mx-auto px-6 py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
         
         {/* Brand & Identity */}
         <div className="shrink-0">
@@ -310,7 +310,7 @@ export default function RoleSelector({
 
       {/* 2. SECONDARY CONTEXT & TELEMETRY STRIP */}
       <div className="bg-[#fcfdfe] border-t border-gray-150 px-6 py-2.5">
-        <div className="max-w-[1600px] mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-xs md:text-sm text-slate-500">
+        <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 flex flex-col md:flex-row items-center justify-between gap-3 text-xs md:text-sm text-slate-500">
           
           {/* Simulated Session Persona Status */}
           <div className="flex items-center gap-2 flex-wrap text-left justify-center md:justify-start">

@@ -404,7 +404,7 @@ export const recordEditorialDecisionGate = async (
         </div>
       </header>
 
-      <div id="architect-panel-root" className="max-w-6xl mx-auto px-4 w-full flex-grow">
+      <div id="architect-panel-root" className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 py-8 flex-grow">
       
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b pb-4 mb-6 gap-3">
         <div>

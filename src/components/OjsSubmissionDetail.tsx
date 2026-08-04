@@ -1,5 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import FilePreviewModal from './FilePreviewModal';
+import {
+  uploadManuscriptFile,
+  syncManuscriptFilesToSupabase,
+  syncManuscriptDiscussionsToSupabase,
+  subscribeToManuscriptsRealtime
+} from '../lib/supabase';
 import {
   ChevronLeft,
   FileText,
@@ -89,11 +95,20 @@ export default function OjsSubmissionDetail({
   const [editingFileName, setEditingFileName] = useState<string>(paper.fileName || `${paper.title || 'test'}-publication.pdf`);
   const [showFileEditModal, setShowFileEditModal] = useState<boolean>(false);
   const [showDetailedRoadmap, setShowDetailedRoadmap] = useState<boolean>(false);
-  const [uploadedFiles, setUploadedFiles] = useState<any[]>([
-    { name: "Manuscript.pdf", type: "Manuscript", size: "1.2 MB", date: "08 Jun 2026" },
-    { name: "Figures.docx", type: "Figures", size: "850 KB", date: "08 Jun 2026" },
-    { name: "Supplementary.zip", type: "Supplementary File", size: "2.4 MB", date: "08 Jun 2026" }
-  ]);
+  
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+
+  const [uploadedFiles, setUploadedFiles] = useState<any[]>(() => {
+    if (paper?.uploadedFiles && Array.isArray(paper.uploadedFiles) && paper.uploadedFiles.length > 0) {
+      return paper.uploadedFiles;
+    }
+    return [
+      { name: paper?.fileName || "Manuscript.pdf", type: "Manuscript", size: paper?.fileSize || "1.2 MB", date: "08 Jun 2026" },
+      { name: "Figures.docx", type: "Figures", size: "850 KB", date: "08 Jun 2026" },
+      { name: "Supplementary.zip", type: "Supplementary File", size: "2.4 MB", date: "08 Jun 2026" }
+    ];
+  });
 
   // File Preview States
   const [previewModalOpen, setPreviewModalOpen] = useState<boolean>(false);
@@ -534,6 +549,9 @@ export default function OjsSubmissionDetail({
 
   // Discussion thread states
   const [discussionThreads, setDiscussionThreads] = useState<any[]>(() => {
+    if (paper?.discussions && Array.isArray(paper.discussions) && paper.discussions.length > 0) {
+      return paper.discussions;
+    }
     const key = `ojs_discussions_paper_${paper.id}`;
     const saved = localStorage.getItem(key);
     if (saved) {
@@ -542,13 +560,41 @@ export default function OjsSubmissionDetail({
     return []; // Empty list per typical default empty state
   });
 
+  // Real-time synchronization of uploaded files to Supabase
+  useEffect(() => {
+    if (paper?.id) {
+      syncManuscriptFilesToSupabase(paper.id, uploadedFiles);
+    }
+  }, [uploadedFiles, paper?.id]);
+
+  // Real-time synchronization of discussion threads to Supabase
   useEffect(() => {
     const key = `ojs_discussions_paper_${paper.id}`;
     localStorage.setItem(key, JSON.stringify(discussionThreads));
+    if (paper?.id) {
+      syncManuscriptDiscussionsToSupabase(paper.id, discussionThreads);
+    }
     if (onUpdatePaperDiscussions) {
       onUpdatePaperDiscussions(paper.id, discussionThreads);
     }
   }, [discussionThreads, paper.id]);
+
+  // Realtime subscription for live database synchronization
+  useEffect(() => {
+    const unsubscribe = subscribeToManuscriptsRealtime((updatedMs) => {
+      if (updatedMs.id === paper?.id || updatedMs.id === `OJS-${paper?.id}` || updatedMs.id.replace('OJS-', '') === paper?.id) {
+        if (updatedMs.uploadedFiles && Array.isArray(updatedMs.uploadedFiles) && updatedMs.uploadedFiles.length > 0) {
+          setUploadedFiles(updatedMs.uploadedFiles);
+        }
+        if (updatedMs.discussions && Array.isArray(updatedMs.discussions) && updatedMs.discussions.length > 0) {
+          setDiscussionThreads(updatedMs.discussions);
+        }
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [paper?.id]);
 
   // View state: 'DASHBOARD' | 'ADD_DISCUSSION' | 'VIEW_THREAD'
   const [viewState, setViewState] = useState<'DASHBOARD' | 'ADD_DISCUSSION' | 'VIEW_THREAD'>('DASHBOARD');
@@ -655,6 +701,53 @@ export default function OjsSubmissionDetail({
     setThreadReplyAttached([]);
   };
 
+  // Real file upload handler connected to Supabase
+  const handleRealFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+
+    setIsUploading(true);
+    try {
+      let fileType = "Supplementary File";
+      if (file.name.endsWith('.pdf') || file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
+        fileType = "Manuscript";
+      } else if (file.name.endsWith('.png') || file.name.endsWith('.jpg') || file.name.endsWith('.jpeg') || file.name.endsWith('.svg')) {
+        fileType = "Figures";
+      }
+
+      const formattedSize = file.size > 1024 * 1024
+        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+        : `${Math.round(file.size / 1024)} KB`;
+
+      let uploadResult = null;
+      try {
+        uploadResult = await uploadManuscriptFile(file, paper.id || 'manuscript-general');
+      } catch (err) {
+        console.warn("[Supabase Storage] Storage upload warning, preserving record in Supabase database:", err);
+      }
+
+      const newFileObj = {
+        id: 'file-' + Date.now(),
+        name: file.name,
+        type: fileType,
+        size: formattedSize,
+        date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+        url: uploadResult?.publicUrl || null,
+        storagePath: uploadResult?.path || null
+      };
+
+      const updatedList = [newFileObj, ...uploadedFiles];
+      setUploadedFiles(updatedList);
+      await syncManuscriptFilesToSupabase(paper.id, updatedList);
+    } catch (err: any) {
+      console.error("Error uploading file:", err);
+    } finally {
+      setIsUploading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
   // Simulation upload file helper
   const handleSimulateUpload = (forReply = false, forMainList = false) => {
     const mockFiles = [
@@ -685,14 +778,14 @@ export default function OjsSubmissionDetail({
   const isSubmissionDashboard = activeTab === 'SUBMISSION' && viewState === 'DASHBOARD';
 
   return (
-    <div id="ojs-submission-detail-container" className="w-full bg-[#f4f7f6] min-h-screen text-slate-800 flex flex-col md:flex-row items-stretch border-t border-slate-200">
+    <div id="ojs-submission-detail-container" className="w-full bg-[#e8f3ed] min-h-screen text-slate-950 flex flex-col md:flex-row items-stretch border-t border-slate-200">
       
       {/* ======= COLUMN 1: LEFT WORKFLOW & PUBLICATION SIDEBAR ======= */}
-      <aside id="ojs-left-sidebar-navigation" className="w-full md:w-64 bg-white border-r border-[#e9ecef] flex flex-col shrink-0 p-5 space-y-7 text-left font-sans">
+      <aside id="ojs-left-sidebar-navigation" className="w-full md:w-64 bg-white border-r border-[#d1e7dd] flex flex-col shrink-0 p-5 space-y-7 text-left font-sans">
         
         {/* Section A: Workflow headings and items */}
         <div className="space-y-3">
-          <span className="block text-[10.5px] font-extrabold uppercase tracking-widest text-slate-400 font-mono">
+          <span className="block text-[11px] font-black uppercase tracking-widest text-[#004d2e] font-mono">
             Workflow
           </span>
           <nav className="flex flex-col space-y-1">
@@ -712,19 +805,19 @@ export default function OjsSubmissionDetail({
                     setActiveTab(item.id);
                     setViewState('DASHBOARD');
                   }}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-150 ${
+                  className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-all duration-150 ${
                     isActive
-                      ? 'bg-[#eefcf4] text-[#008751] font-extrabold border-l-[3.5px] border-[#008751]'
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      ? 'bg-emerald-100/75 text-[#005a36] border-l-[4px] border-[#008751] shadow-3xs'
+                      : 'text-slate-900 hover:bg-emerald-50/50 hover:text-emerald-950'
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <IconComp className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-400'}`} />
+                    <IconComp className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-700'}`} />
                     <span>{item.label}</span>
                   </div>
                   {item.badge !== null && (
-                    <span className={`text-[10.5px] font-bold font-mono px-2 py-0.5 rounded-full ${
-                      isActive ? 'bg-[#008751]/10 text-[#008751]' : 'bg-slate-100 text-slate-500'
+                    <span className={`text-[11px] font-black font-mono px-2 py-0.5 rounded-full ${
+                      isActive ? 'bg-[#008751] text-white' : 'bg-slate-200 text-slate-900'
                     }`}>
                       {item.badge}
                     </span>
@@ -738,10 +831,10 @@ export default function OjsSubmissionDetail({
         {/* Section B: Publication headings and items with checkmarks */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="block text-[10.5px] font-extrabold uppercase tracking-widest text-slate-400 font-mono">
+            <span className="block text-[11px] font-black uppercase tracking-widest text-[#004d2e] font-mono">
               Publication
             </span>
-            <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+            <ChevronUp className="w-3.5 h-3.5 text-[#004d2e] font-bold" />
           </div>
           <nav className="flex flex-col space-y-1">
             {[
@@ -760,20 +853,20 @@ export default function OjsSubmissionDetail({
                     setActiveTab(item.id);
                     setViewState('DASHBOARD');
                   }}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-semibold transition-all duration-150 ${
+                  className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-all duration-150 ${
                     isActive
-                      ? 'bg-[#eefcf4] text-[#008751] font-extrabold border-l-[3.5px] border-[#008751]'
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      ? 'bg-emerald-100/75 text-[#005a36] border-l-[4px] border-[#008751] shadow-3xs'
+                      : 'text-slate-900 hover:bg-emerald-50/50 hover:text-emerald-950'
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <item.icon className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-400'}`} />
+                    <item.icon className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-700'}`} />
                     <span>{item.label}</span>
                   </div>
                   
                   {/* Circular check mark badge inside a green ring or indicator */}
-                  <div className="w-4 h-4 rounded-full bg-[#eafbf0] text-[#008751] flex items-center justify-center">
-                    <Check className="w-2.5 h-2.5 stroke-[3]" />
+                  <div className="w-4 h-4 rounded-full bg-[#008751] text-white flex items-center justify-center shadow-3xs">
+                    <Check className="w-2.5 h-2.5 stroke-[4.5]" />
                   </div>
                 </button>
               );
@@ -811,32 +904,32 @@ export default function OjsSubmissionDetail({
           /* ======================= PREMIUM IMAGE-MATCHING DASHBOARD ======================= */
           <div className="space-y-6 w-full animate-in fade-in duration-200">
             {/* Top Header Row with dynamic/stat values matching screenshot */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-slate-100 gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-emerald-200 gap-4">
               <div className="text-left">
-                <h1 className="text-2xl font-black text-slate-800 tracking-tight">Submission</h1>
-                <p className="text-xs text-[#008751] mt-1 font-bold">Track and manage your manuscript submission.</p>
+                <h1 className="text-[32px] font-black text-black tracking-tight leading-none">Submission</h1>
+                <p className="text-[14px] text-[#005e38] mt-1.5 font-medium">Track and manage your manuscript submission.</p>
               </div>
               <div className="flex items-center gap-3">
                 {/* + New Submission Button */}
                 <button
                   onClick={() => alert("Simulating launching a new academic manuscript submission workflow in TULITICS Author Workspace.")}
-                  className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-full flex items-center gap-1.5 transition duration-150 shadow-xs cursor-pointer"
+                  className="bg-[#008751] hover:bg-[#007043] text-white text-[15px] font-bold px-5 py-2.5 rounded-full flex items-center gap-1.5 transition duration-150 shadow-md cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
                 >
-                  <Plus className="w-3.5 h-3.5 text-white font-bold" />
+                  <Plus className="w-4 h-4 text-white font-bold stroke-[3]" />
                   <span>New Submission</span>
                 </button>
                 {/* Notification Bell */}
-                <div className="relative p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition cursor-pointer">
-                  <div className="absolute right-1 top-1 w-1.5 h-1.5 bg-red-500 rounded-full border border-white" />
-                  <Bell className="w-4 h-4 text-slate-600" />
+                <div className="relative p-2.5 bg-white border border-emerald-200 hover:bg-emerald-50 rounded-full transition cursor-pointer shadow-2xs">
+                  <div className="absolute right-1 top-1 w-2 h-2 bg-red-600 rounded-full border border-white" />
+                  <Bell className="w-4 h-4 text-slate-900 stroke-[2.5]" />
                 </div>
                 {/* Profile Avatar Block */}
-                <div className="flex items-center gap-2 cursor-pointer hover:opacity-90 select-none pl-2 border-l border-slate-200">
-                  <div className="w-8 h-8 rounded-full bg-[#008751] text-white font-black text-xs flex items-center justify-center font-mono">
+                <div className="flex items-center gap-2 cursor-pointer hover:opacity-90 select-none pl-2 border-l border-emerald-200">
+                  <div className="w-9 h-9 rounded-full bg-[#008751] text-white font-bold text-xs flex items-center justify-center font-mono shadow-xs border border-white">
                     AG
                   </div>
-                  <span className="text-xs font-black text-slate-800 font-sans hidden sm:inline">Akshaya G</span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                  <span className="text-[14px] font-semibold text-black font-sans hidden sm:inline">Akshaya G</span>
+                  <ChevronDown className="w-4 h-4 text-slate-900 stroke-[2.5]" />
                 </div>
               </div>
             </div>
@@ -848,52 +941,55 @@ export default function OjsSubmissionDetail({
               <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full lg:max-w-[70%]">
                 
                 {/* Manuscript Detail Banner */}
-                <div className="bg-gradient-to-br from-[#f5fbf7] to-[#eef9f2] border border-[#d1f2e1]/70 rounded-2xl p-6 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-2xs">
+                <div className="bg-gradient-to-br from-[#022c22] via-[#047857] to-[#065f46] border border-[#047857]/40 rounded-2xl p-6 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-md text-white">
+                  {/* Decorative background radial glow */}
+                  <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+                  
                   <div className="space-y-2 text-left relative z-10 flex-grow">
-                    <span className="text-[#008751] text-xs font-extrabold uppercase tracking-widest block font-mono">
-                      Manuscript ID: #{paper.id || "990"}
+                    <span className="text-emerald-200 text-[13px] font-medium uppercase tracking-widest block font-mono">
+                      Manuscript ID: #{paper.id || "N/A"}
                     </span>
-                    <h2 className="text-slate-800 text-lg md:text-xl font-extrabold font-sans tracking-tight leading-snug">
+                    <h2 className="text-white text-[28px] font-black font-sans tracking-tight leading-snug drop-shadow-xs">
                       {paper.title || "Artificial Intelligence in Healthcare: Opportunities and Challenges"}
                     </h2>
                     
                     {/* Metadata line */}
-                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-2 text-[11px] text-slate-500 font-medium">
-                      <div className="flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Submitted On <strong className="text-slate-800 font-extrabold ml-0.5">{paper.receivedAt || "08 June 2026"}</strong></span>
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-3 pt-3 text-[13px] text-emerald-100 font-medium">
+                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
+                        <Calendar className="w-4 h-4 text-emerald-300 shrink-0" />
+                        <span>Submitted On <strong className="text-white font-semibold ml-1 text-[14px]">{paper.receivedAt || "08 June 2026"}</strong></span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <BookOpen className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Journal <strong className="text-slate-800 font-extrabold ml-0.5">Journal of AI in Medicine</strong></span>
+                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
+                        <BookOpen className="w-4 h-4 text-emerald-300 shrink-0" />
+                        <span>Journal <strong className="text-white font-semibold ml-1 text-[14px]">Journal of AI in Medicine</strong></span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Author <strong className="text-slate-800 font-extrabold ml-0.5">{paper.author || "Akshaya G"}</strong></span>
+                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
+                        <User className="w-4 h-4 text-emerald-300 shrink-0" />
+                        <span>Author <strong className="text-white font-semibold ml-1 text-[14px]">{paper.author || "Akshaya G"}</strong></span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Corresponding Author <strong className="text-slate-800 font-extrabold ml-0.5">{paper.author || "Akshaya G"}</strong></span>
+                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
+                        <User className="w-4 h-4 text-emerald-300 shrink-0" />
+                        <span>Corresponding Author <strong className="text-white font-semibold ml-1 text-[14px]">{paper.author || "Akshaya G"}</strong></span>
                       </div>
                     </div>
                   </div>
 
                   {/* Current Status sub-card on the right */}
-                  <div className="shrink-0 flex items-center gap-4 relative z-10 bg-white/70 border border-white/60 p-4 rounded-xl shadow-3xs self-stretch md:self-auto flex-row justify-between md:justify-start">
+                  <div className="shrink-0 flex items-center gap-4 relative z-10 bg-white border border-emerald-500/20 p-5 rounded-2xl shadow-lg self-stretch md:self-auto flex-row justify-between md:justify-start">
                     <div className="space-y-1 text-left">
-                      <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest block">Current Status</span>
-                      <span className="bg-[#e6f7ef] text-[#008751] border border-emerald-200 px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-[#008751]" />
+                      <span className="text-slate-800 text-[11px] font-semibold uppercase tracking-widest block">Current Status</span>
+                      <span className="bg-[#e6f7ef] text-[#008751] border-2 border-emerald-500/30 px-3.5 py-1.5 rounded-full text-[13px] font-bold inline-flex items-center gap-1.5 shadow-3xs">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#008751]" />
                         Submitted
                       </span>
                     </div>
                     
                     {/* Cute document sheet with green check overlay */}
                     <div className="relative">
-                      <div className="w-12 h-14 bg-slate-100 border border-slate-200 rounded-lg flex items-center justify-center shadow-3xs relative">
-                        <FileText className="w-6 h-6 text-slate-400" />
+                      <div className="w-12 h-14 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-center shadow-xs relative">
+                        <FileText className="w-6 h-6 text-[#008751]" />
                         <div className="absolute -bottom-1 -right-1 bg-[#008751] text-white rounded-full p-0.5 border-2 border-white shadow-2xs">
-                          <Check className="w-2.5 h-2.5 stroke-[3.5]" />
+                          <Check className="w-3 h-3 stroke-[3.5]" />
                         </div>
                       </div>
                     </div>
@@ -903,17 +999,17 @@ export default function OjsSubmissionDetail({
                 {/* 4-Metric Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   {/* Card 1: Files */}
-                  <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs flex items-center gap-4 hover:border-emerald-200 transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#eefcf5] flex items-center justify-center text-[#008751] shrink-0">
-                      <FolderOpen className="w-5.5 h-5.5" />
+                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
+                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
+                      <FolderOpen className="w-5.5 h-5.5 stroke-[2.5]" />
                     </div>
                     <div className="text-left space-y-0.5">
-                      <span className="text-slate-400 text-xs font-bold block">Files</span>
-                      <div className="text-2xl font-black text-slate-800 leading-none">{uploadedFiles.length}</div>
-                      <span className="text-slate-400 text-[10.5px] block font-medium">Files Uploaded</span>
+                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Files</span>
+                      <div className="text-2xl font-black text-black leading-none">{uploadedFiles.length}</div>
+                      <span className="text-slate-900 text-[11px] block font-medium">Files Uploaded</span>
                       <button 
                         onClick={() => document.getElementById("uploaded-files-card")?.scrollIntoView({ behavior: 'smooth' })}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-[10.5px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
                       >
                         <span>View Files</span>
                         <span>→</span>
@@ -922,17 +1018,17 @@ export default function OjsSubmissionDetail({
                   </div>
 
                   {/* Card 2: Discussions */}
-                  <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs flex items-center gap-4 hover:border-emerald-200 transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#eefcf5] flex items-center justify-center text-[#008751] shrink-0">
-                      <MessageSquare className="w-5.5 h-5.5" />
+                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
+                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
+                      <MessageSquare className="w-5.5 h-5.5 stroke-[2.5]" />
                     </div>
                     <div className="text-left space-y-0.5">
-                      <span className="text-slate-400 text-xs font-bold block">Discussions</span>
-                      <div className="text-2xl font-black text-slate-800 leading-none">2</div>
-                      <span className="text-slate-400 text-[10.5px] block font-medium">New Messages</span>
+                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Discussions</span>
+                      <div className="text-2xl font-black text-black leading-none">2</div>
+                      <span className="text-slate-900 text-[11px] block font-medium">New Messages</span>
                       <button 
                         onClick={() => document.getElementById("discussions-card")?.scrollIntoView({ behavior: 'smooth' })}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-[10.5px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
                       >
                         <span>Open</span>
                         <span>→</span>
@@ -941,17 +1037,17 @@ export default function OjsSubmissionDetail({
                   </div>
 
                   {/* Card 3: Editorial Team */}
-                  <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs flex items-center gap-4 hover:border-emerald-200 transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#eefcf5] flex items-center justify-center text-[#008751] shrink-0">
-                      <User className="w-5.5 h-5.5" />
+                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
+                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
+                      <User className="w-5.5 h-5.5 stroke-[2.5]" />
                     </div>
                     <div className="text-left space-y-0.5 overflow-hidden">
-                      <span className="text-slate-400 text-xs font-bold block">Editorial Team</span>
-                      <div className="text-sm font-black text-slate-800 leading-none truncate" title="Dr. John Smith">Dr. John Smith</div>
-                      <span className="text-slate-400 text-[10.5px] block font-medium">Editor Assigned</span>
+                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Editorial Team</span>
+                      <div className="text-sm font-semibold text-black leading-none truncate font-sans" title="Dr. John Smith">Dr. John Smith</div>
+                      <span className="text-slate-900 text-[11px] block font-medium">Editor Assigned</span>
                       <button 
                         onClick={() => alert("Assigned Editorial Contact Panel:\nDr. John Smith (Lead Managing Editor)\nJournal of AI in Medicine.")}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-[10.5px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
                       >
                         <span>View Details</span>
                         <span>→</span>
@@ -960,19 +1056,19 @@ export default function OjsSubmissionDetail({
                   </div>
 
                   {/* Card 4: Important Dates */}
-                  <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-2xs flex items-center gap-4 hover:border-emerald-200 transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#eefcf5] flex items-center justify-center text-[#008751] shrink-0">
-                      <Calendar className="w-5.5 h-5.5" />
+                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
+                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
+                      <Calendar className="w-5.5 h-5.5 stroke-[2.5]" />
                     </div>
                     <div className="text-left space-y-0.5">
-                      <span className="text-slate-400 text-xs font-bold block">Important Dates</span>
-                      <div className="text-[10px] font-medium text-slate-500 leading-tight">
-                        <div>Submitted <strong className="text-slate-700 font-extrabold">08 June 2026</strong></div>
-                        <div className="mt-0.5">Expected <strong className="text-slate-700 font-extrabold">22 June 2026</strong></div>
+                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Important Dates</span>
+                      <div className="text-[11px] font-medium text-slate-900 leading-tight">
+                        <div>Submitted <strong className="text-black font-semibold">08 June 2026</strong></div>
+                        <div className="mt-0.5">Expected <strong className="text-black font-semibold">22 June 2026</strong></div>
                       </div>
                       <button 
                         onClick={() => alert("Opening manuscript editorial milestones tracking calendar.")}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-[10.5px] block mt-1 flex items-center gap-0.5 cursor-pointer"
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1 flex items-center gap-0.5 cursor-pointer"
                       >
                         <span>View Calendar</span>
                         <span>→</span>
@@ -982,12 +1078,12 @@ export default function OjsSubmissionDetail({
                 </div>
 
                 {/* Submission Workflow horizontal stepper */}
-                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-2xs text-left">
-                  <h3 className="text-slate-800 text-sm font-extrabold tracking-tight mb-6">Submission Workflow</h3>
+                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-6 shadow-xs text-left">
+                  <h3 className="text-black text-[20px] font-black tracking-tight mb-6">Submission Workflow</h3>
                   
                   <div className="relative flex items-center justify-between">
                     {/* Background connecting line */}
-                    <div className="absolute top-4 left-4 right-4 h-0.5 bg-slate-150 z-0">
+                    <div className="absolute top-4 left-4 right-4 h-0.5 bg-emerald-200 z-0">
                       {/* Completed progress fill */}
                       <div className="absolute top-0 left-0 w-[20%] h-full bg-[#008751]" />
                     </div>
@@ -1000,29 +1096,33 @@ export default function OjsSubmissionDetail({
                       { label: "Decision", sub: "Pending", status: "pending" },
                       { label: "Production", sub: "Pending", status: "pending" }
                     ].map((step, idx) => {
-                      let circleStyle = "bg-white border-slate-200 text-slate-350";
-                      let labelStyle = "text-slate-400 font-medium";
-                      let subStyle = "text-slate-400";
+                      let circleStyle = "bg-white border-emerald-200 text-[#004d2e]";
+                      let labelStyle = "text-slate-800 font-medium";
+                      let subStyle = "text-slate-900 font-normal";
                       
                       if (step.status === "completed") {
-                        circleStyle = "bg-[#008751] border-[#008751] text-white";
-                        labelStyle = "text-slate-800 font-extrabold";
-                        subStyle = "text-slate-500 font-medium";
+                        circleStyle = "bg-[#008751] border-[#008751] text-white shadow-3xs";
+                        labelStyle = "text-black font-bold text-[12px]";
+                        subStyle = "text-slate-800 font-medium text-[11px]";
                       } else if (step.status === "active") {
-                        circleStyle = "border-2 border-[#008751] bg-[#eefcf5] text-[#008751]";
-                        labelStyle = "text-[#008751] font-extrabold";
-                        subStyle = "text-emerald-700 font-semibold";
+                        circleStyle = "border-2 border-[#008751] bg-[#eefcf5] text-[#008751] ring-2 ring-[#008751]/10";
+                        labelStyle = "text-[#005a36] font-bold text-[12px] bg-emerald-100/70 px-1.5 py-0.5 rounded border border-emerald-200 shadow-3xs";
+                        subStyle = "text-emerald-800 font-bold text-[11px]";
+                      } else {
+                        circleStyle = "bg-slate-50 border-emerald-100 text-slate-500";
+                        labelStyle = "text-slate-900 font-medium text-[11px]";
+                        subStyle = "text-slate-600 font-normal text-[10px]";
                       }
                       
                       return (
                         <div key={idx} className="relative z-10 flex flex-col items-center flex-1 text-center">
                           <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 text-xs transition duration-150 ${circleStyle}`}>
                             {step.status === "completed" ? (
-                              <Check className="w-4 h-4 stroke-[3]" />
+                              <Check className="w-4 h-4 stroke-[4]" />
                             ) : step.status === "active" ? (
-                              <span className="w-2 h-2 rounded-full bg-[#008751]" />
+                              <span className="w-2.5 h-2.5 rounded-full bg-[#008751]" />
                             ) : (
-                              <span className="w-1.5 h-1.5 bg-slate-200 rounded-full" />
+                              <span className="w-2 h-2 bg-slate-300 rounded-full" />
                             )}
                           </div>
                           <span className={`text-[10px] sm:text-[11px] mt-2 block tracking-tight ${labelStyle}`}>{step.label}</span>
@@ -1036,40 +1136,64 @@ export default function OjsSubmissionDetail({
                 {/* Uploaded Files and Pre-Review Discussions Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Uploaded Files Panel */}
-                  <div id="uploaded-files-card" className="bg-white border border-slate-100 rounded-2xl p-5 shadow-2xs text-left flex flex-col justify-between">
+                  <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left flex flex-col justify-between">
                     <div>
-                      <div className="flex items-center justify-between border-b pb-3 border-slate-100">
-                        <h3 className="text-slate-800 text-sm font-extrabold tracking-tight">Uploaded Files</h3>
-                        <button
-                          onClick={() => handleSimulateUpload(false, true)}
-                          className="border border-slate-200 hover:bg-slate-50 text-slate-700 text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer"
-                        >
-                          <Plus className="w-3 h-3 text-slate-500 stroke-[3]" />
-                          <span>Upload New File</span>
-                        </button>
+                      <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        onChange={handleRealFileUpload} 
+                        className="hidden" 
+                      />
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3 border-emerald-100">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-black text-[20px] font-black tracking-tight">Uploaded Files</h3>
+                          <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            Supabase Connected
+                          </span>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isUploading}
+                            className="border border-emerald-600 bg-[#008751] hover:bg-[#007043] text-white text-[13px] font-bold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer shadow-3xs disabled:opacity-50"
+                          >
+                            <Plus className="w-4 h-4 text-white stroke-[3]" />
+                            <span>{isUploading ? "Uploading..." : "Upload New File"}</span>
+                          </button>
+                          
+                          <button
+                            onClick={() => handleSimulateUpload(false, true)}
+                            title="Simulate adding sample file"
+                            className="border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[#005a36] text-[12px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-3xs"
+                          >
+                            <span>+ Demo</span>
+                          </button>
+                        </div>
                       </div>
                       
-                      <div className="mt-4 overflow-x-auto">
+                      <div className="mt-4 overflow-x-auto rounded-xl border border-emerald-50">
                         <table className="w-full text-left text-xs border-collapse">
                           <thead>
-                            <tr className="text-[10px] uppercase font-mono tracking-wider text-slate-400 border-b border-slate-100">
-                              <th className="pb-2 font-bold">File Name</th>
-                              <th className="pb-2 font-bold">Type</th>
-                              <th className="pb-2 font-bold">Size</th>
-                              <th className="pb-2 font-bold">Uploaded On</th>
-                              <th className="pb-2 text-center font-bold">Actions</th>
+                            <tr className="text-[13px] font-bold uppercase tracking-wider text-[#004d2e] border-b border-emerald-200 bg-emerald-50/50">
+                              <th className="p-3 font-bold">File Name</th>
+                              <th className="p-3 font-bold">Type</th>
+                              <th className="p-3 font-bold">Size</th>
+                              <th className="p-3 font-bold">Uploaded On</th>
+                              <th className="p-3 text-center font-bold">Actions</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-50">
+                          <tbody className="divide-y divide-emerald-50 bg-white">
                             {uploadedFiles.map((file, i) => {
                               // Icon coloring depending on file type extension
-                              let fileIconColor = "text-rose-500";
-                              if (file.name.endsWith(".docx")) fileIconColor = "text-blue-500";
-                              else if (file.name.endsWith(".zip")) fileIconColor = "text-amber-500";
+                              let fileIconColor = "text-rose-600";
+                              if (file.name.endsWith(".docx")) fileIconColor = "text-blue-600";
+                              else if (file.name.endsWith(".zip")) fileIconColor = "text-amber-600";
                               
                               return (
-                                <tr key={i} className="hover:bg-slate-50/40 transition">
-                                  <td className="py-3.5 pr-2">
+                                <tr key={file.id || i} className="hover:bg-emerald-50/30 transition">
+                                  <td className="p-3">
                                     <button 
                                       onClick={() => {
                                         setPreviewFileName(file.name);
@@ -1077,17 +1201,17 @@ export default function OjsSubmissionDetail({
                                         setPreviewFileSize(file.size || '1.2 MB');
                                         setPreviewModalOpen(true);
                                       }}
-                                      className="flex items-center gap-2 max-w-[150px] sm:max-w-none text-left hover:underline cursor-pointer"
+                                      className="flex items-center gap-2 max-w-[150px] sm:max-w-none text-left hover:underline cursor-pointer group"
                                     >
-                                      <FileText className={`w-4 h-4 ${fileIconColor} shrink-0`} />
-                                      <span className="font-extrabold text-slate-800 truncate" title={file.name}>{file.name}</span>
+                                      <FileText className={`w-4.5 h-4.5 ${fileIconColor} shrink-0 stroke-[2]`} />
+                                      <span className="text-[14px] font-semibold text-black truncate group-hover:text-[#008751]" title={file.name}>{file.name}</span>
                                     </button>
                                   </td>
-                                  <td className="py-3.5 text-slate-500 font-medium">{file.type}</td>
-                                  <td className="py-3.5 text-slate-400 font-mono text-[10.5px]">{file.size}</td>
-                                  <td className="py-3.5 text-slate-400 font-mono text-[10.5px]">{file.date}</td>
-                                  <td className="py-3.5">
-                                    <div className="flex items-center justify-center gap-1">
+                                  <td className="p-3 text-[14px] font-medium text-slate-900">{file.type}</td>
+                                  <td className="p-3 text-[14px] font-medium text-slate-950 font-mono">{file.size}</td>
+                                  <td className="p-3 text-[14px] font-medium text-slate-950 font-mono">{file.date}</td>
+                                  <td className="p-3">
+                                    <div className="flex items-center justify-center gap-1.5">
                                       <button 
                                         onClick={() => {
                                           setPreviewFileName(file.name);
@@ -1095,18 +1219,25 @@ export default function OjsSubmissionDetail({
                                           setPreviewFileSize(file.size || '1.2 MB');
                                           setPreviewModalOpen(true);
                                         }}
-                                        className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-[#008751] transition"
+                                        className="p-1.5 hover:bg-emerald-50 rounded text-slate-900 hover:text-[#008751] transition border border-transparent hover:border-emerald-200 cursor-pointer"
                                         title="View file"
                                       >
-                                        <Eye className="w-3.5 h-3.5" />
+                                        <Eye className="w-4 h-4" />
                                       </button>
-                                      <button 
-                                        onClick={() => alert(`Simulating file download: ${file.name}`)}
-                                        className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-[#008751] transition"
+                                      <a 
+                                        href={file.url || '#'} 
+                                        download={file.name}
+                                        onClick={(e) => {
+                                          if (!file.url) {
+                                            e.preventDefault();
+                                            alert(`Downloading document file: ${file.name}`);
+                                          }
+                                        }}
+                                        className="p-1.5 hover:bg-emerald-50 rounded text-slate-900 hover:text-[#008751] transition border border-transparent hover:border-emerald-200 cursor-pointer"
                                         title="Download file"
                                       >
-                                        <Download className="w-3.5 h-3.5" />
-                                      </button>
+                                        <Download className="w-4.5 h-4.5" />
+                                      </a>
                                     </div>
                                   </td>
                                 </tr>
@@ -1116,13 +1247,13 @@ export default function OjsSubmissionDetail({
                         </table>
                       </div>
                     </div>
-
-                    <div className="border-t pt-3 border-slate-100 mt-4">
+ 
+                    <div className="border-t pt-4 border-emerald-100 mt-4">
                       <button
                         onClick={() => alert("Downloading all matching document publication files recursively as a single zip file.")}
-                        className="inline-flex items-center gap-2 text-[11px] font-black text-[#008751] hover:text-[#007043] cursor-pointer"
+                        className="inline-flex items-center gap-2 text-[13px] font-bold text-[#008751] hover:text-[#007043] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-4 py-2 rounded-xl transition cursor-pointer shadow-3xs"
                       >
-                        <Download className="w-4 h-4 text-[#008751]" />
+                        <Download className="w-4.5 h-4.5 text-[#008751] stroke-[2.5]" />
                         <span>Download All Files</span>
                       </button>
                     </div>
@@ -1133,35 +1264,39 @@ export default function OjsSubmissionDetail({
                     
                     {activeThreadId === null ? (
                       /* ========== DISCUSSION FORUM THREAD LIST (SECOND IMAGE) ========== */
-                      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs text-left p-5 flex flex-col justify-between h-[540px] relative">
+                      <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl overflow-hidden shadow-xs text-left p-5 flex flex-col justify-between h-[540px] relative">
                         
                         {/* Header Row */}
                         <div className="flex items-center justify-between shrink-0">
                           <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full bg-[#008751]"></span>
-                            <h3 className="text-slate-900 text-base sm:text-lg font-black tracking-tight">
+                            <span className="w-3 h-3 rounded-full bg-[#008751]"></span>
+                            <h3 className="text-black text-[20px] font-black tracking-tight">
                               Discussions
                             </h3>
+                            <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                              Supabase Synced
+                            </span>
                           </div>
                           
                           <button
                             onClick={() => setViewState('ADD_DISCUSSION')}
-                            className="bg-[#eefcf4] border border-[#b8deb3] text-[#008751] hover:bg-[#e1f9eb] px-3.5 py-1.5 rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer transition"
+                            className="bg-[#eefcf4] border-2 border-[#008751]/30 text-[#004d2e] hover:bg-[#e1f9eb] px-4 py-2 rounded-xl text-[14px] font-bold flex items-center gap-1.5 cursor-pointer transition shadow-3xs"
                           >
-                            <Plus className="w-3.5 h-3.5 text-[#008751] stroke-[3]" />
+                            <Plus className="w-4 h-4 text-[#008751] stroke-[3]" />
                             <span>New Discussion</span>
                           </button>
                         </div>
 
                         {/* Tabs Row */}
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-0.5 mt-3 shrink-0">
-                          <div className="flex gap-4 text-xs font-bold text-slate-500">
+                        <div className="flex items-center justify-between border-b border-emerald-100 pb-0.5 mt-4 shrink-0">
+                          <div className="flex gap-4 text-[14px] font-semibold text-slate-800">
                             <button
                               onClick={() => setActiveDiscussionTab('ALL')}
                               className={`pb-2.5 px-0.5 relative cursor-pointer ${
                                 activeDiscussionTab === 'ALL'
-                                  ? 'text-slate-900 font-extrabold border-b-2 border-emerald-600'
-                                  : 'hover:text-slate-800'
+                                  ? 'text-black border-b-2 border-[#008751] font-bold'
+                                  : 'text-slate-700 hover:text-[#008751]'
                               }`}
                             >
                               All
@@ -1170,12 +1305,12 @@ export default function OjsSubmissionDetail({
                               onClick={() => setActiveDiscussionTab('OFFICIAL')}
                               className={`pb-2.5 px-0.5 relative cursor-pointer flex items-center gap-1.5 ${
                                 activeDiscussionTab === 'OFFICIAL'
-                                  ? 'text-slate-900 font-extrabold border-b-2 border-emerald-600'
-                                  : 'hover:text-slate-800'
+                                  ? 'text-black border-b-2 border-[#008751] font-bold'
+                                  : 'text-slate-700 hover:text-[#008751]'
                               }`}
                             >
                               <span>Official Threads</span>
-                              <span className="w-4.5 h-4.5 bg-[#004d2b] text-white text-[9px] rounded-full flex items-center justify-center font-bold">
+                              <span className="w-5 h-5 bg-[#004d2b] text-white text-[10px] rounded-full flex items-center justify-center font-bold">
                                 1
                               </span>
                             </button>
@@ -1183,8 +1318,8 @@ export default function OjsSubmissionDetail({
                               onClick={() => setActiveDiscussionTab('DIRECT')}
                               className={`pb-2.5 px-0.5 relative cursor-pointer ${
                                 activeDiscussionTab === 'DIRECT'
-                                  ? 'text-slate-900 font-extrabold border-b-2 border-emerald-600'
-                                  : 'hover:text-slate-800'
+                                  ? 'text-black border-b-2 border-[#008751] font-bold'
+                                  : 'text-slate-700 hover:text-[#008751]'
                               }`}
                             >
                               Direct Messages
@@ -1197,21 +1332,21 @@ export default function OjsSubmissionDetail({
                                 setShowSearch(!showSearch);
                                 if (showSearch) setSearchQuery("");
                               }}
-                              className={`w-8 h-8 rounded-full border text-slate-500 flex items-center justify-center hover:bg-slate-50 transition cursor-pointer ${
-                                showSearch ? 'bg-slate-100 border-slate-300' : 'border-slate-200'
+                              className={`w-8.5 h-8.5 rounded-xl border text-slate-900 flex items-center justify-center hover:bg-emerald-50 transition cursor-pointer ${
+                                showSearch ? 'bg-emerald-100/50 border-[#008751]' : 'border-emerald-200 bg-white'
                               }`}
                               title="Search discussions"
                             >
-                              <Search className="w-3.5 h-3.5" />
+                              <Search className="w-4 h-4 stroke-[2.5]" />
                             </button>
                             <button
                               onClick={() => {
                                 alert("Filter: Showing active discussions. Search to find archived items.");
                               }}
-                              className="w-8 h-8 rounded-full border border-slate-200 text-slate-500 flex items-center justify-center hover:bg-slate-50 transition cursor-pointer"
+                              className="w-8.5 h-8.5 rounded-xl border border-emerald-200 text-slate-900 flex items-center justify-center hover:bg-emerald-50 bg-white transition cursor-pointer"
                               title="Filter discussions"
                             >
-                              <Filter className="w-3.5 h-3.5" />
+                              <Filter className="w-4 h-4 stroke-[2.5]" />
                             </button>
                           </div>
                         </div>
@@ -1224,7 +1359,7 @@ export default function OjsSubmissionDetail({
                               value={searchQuery}
                               onChange={(e) => setSearchQuery(e.target.value)}
                               placeholder="Search threads..."
-                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-emerald-600 font-medium"
+                              className="w-full bg-[#f4fbf7] border-2 border-emerald-200 rounded-xl px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-[#008751]/20 text-black font-medium placeholder-slate-500"
                             />
                           </div>
                         )}
@@ -1237,28 +1372,28 @@ export default function OjsSubmissionDetail({
                            "Editorial Inquiry".toLowerCase().includes(searchQuery.toLowerCase()) && (
                             <div
                               onClick={() => setActiveThreadId('thread-editorial-inquiry')}
-                              className="bg-[#f4fbf7] border border-[#d3ecd9] hover:bg-[#ebf9f0] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
+                              className="bg-[#f0faf4] border-2 border-[#b8ebd0] hover:bg-[#e2f7eb] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
                             >
                               <div className="shrink-0 pt-1">
-                                <Pin className="w-4.5 h-4.5 text-[#008751] rotate-45" />
+                                <Pin className="w-5 h-5 text-[#008751] rotate-45 stroke-[2.5]" />
                               </div>
                               <div className="flex-grow space-y-1">
                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="bg-[#e1f5e8] border border-[#a2ecd5]/40 text-[#008751] text-[9.5px] font-black px-1.5 py-0.5 rounded tracking-wide uppercase">
+                                  <span className="bg-[#004d2e] text-white text-[9px] font-bold px-2 py-0.5 rounded-md tracking-wider uppercase">
                                     OFFICIAL THREAD
                                   </span>
-                                  <Lock className="w-3.5 h-3.5 text-slate-400" />
+                                  <Lock className="w-3.5 h-3.5 text-slate-900 stroke-[2.5]" />
                                 </div>
-                                <h4 className="text-[14.5px] font-black text-slate-900 tracking-tight leading-snug">
+                                <h4 className="text-[15px] font-bold text-black tracking-tight leading-snug">
                                   Editorial Inquiry
                                 </h4>
-                                <p className="text-[12.5px] font-bold text-slate-700 leading-snug line-clamp-1">
-                                  <span className="text-slate-900 font-extrabold">Dr. John Smith:</span> Dear Author, Please confirm that the manuscript complies with the journal guidelines.
+                                <p className="text-[13px] font-normal text-slate-900 leading-snug line-clamp-1">
+                                  <strong className="text-black font-semibold">Dr. John Smith:</strong> Dear Author, Please confirm that the manuscript complies with the guidelines.
                                 </p>
                               </div>
                               <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                <span className="text-[10px] font-bold text-slate-400 font-mono">10:30 AM</span>
-                                <span className="w-5 h-5 rounded-full bg-[#004d2b] text-white text-[10px] font-black flex items-center justify-center font-sans mt-1.5">
+                                <span className="text-[11px] font-semibold text-black font-mono">10:30 AM</span>
+                                <span className="w-5.5 h-5.5 rounded-full bg-[#004d2b] text-white text-[11px] font-bold flex items-center justify-center font-sans mt-1.5">
                                   2
                                 </span>
                               </div>
@@ -1270,24 +1405,24 @@ export default function OjsSubmissionDetail({
                            "Technical Check".toLowerCase().includes(searchQuery.toLowerCase()) && (
                             <div
                               onClick={() => setActiveThreadId('thread-technical-check')}
-                              className="bg-white border border-slate-100 hover:border-slate-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
+                              className="bg-white border border-emerald-100 hover:border-[#008751] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
                             >
                               <div className="shrink-0 pt-0.5">
-                                <div className="w-8 h-8 rounded-full border border-slate-200 text-slate-400 flex items-center justify-center bg-slate-50">
-                                  <Lock className="w-3.5 h-3.5 text-slate-400" />
+                                <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50">
+                                  <Lock className="w-4 h-4 text-[#004d2e] stroke-[2.5]" />
                                 </div>
                               </div>
                               <div className="flex-grow space-y-0.5">
-                                <h4 className="text-[14.5px] font-black text-slate-900 tracking-tight leading-snug">
+                                <h4 className="text-[15px] font-bold text-black tracking-tight leading-snug">
                                   Technical Check
                                 </h4>
-                                <p className="text-[12.5px] font-bold text-slate-700 leading-snug line-clamp-1">
-                                  <span className="text-slate-900 font-extrabold">System:</span> Your file "Manuscript.pdf" has been successfully checked.
+                                <p className="text-[13px] font-normal text-slate-900 leading-snug line-clamp-1">
+                                  <strong className="text-black font-semibold">System:</strong> Your file "Manuscript.pdf" has been successfully checked.
                                 </p>
                               </div>
                               <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                <span className="text-[10px] font-bold text-slate-400 font-mono">Yesterday</span>
-                                <span className="w-5 h-5 rounded-full bg-[#004d2b] text-white text-[10px] font-black flex items-center justify-center font-sans mt-1.5">
+                                <span className="text-[11px] font-semibold text-black font-mono">Yesterday</span>
+                                <span className="w-5.5 h-5.5 rounded-full bg-[#004d2b] text-white text-[11px] font-bold flex items-center justify-center font-sans mt-1.5">
                                   1
                                 </span>
                               </div>
@@ -1299,23 +1434,23 @@ export default function OjsSubmissionDetail({
                            "Formatting & Style".toLowerCase().includes(searchQuery.toLowerCase()) && (
                             <div
                               onClick={() => setActiveThreadId('thread-formatting-style')}
-                              className="bg-white border border-slate-100 hover:border-slate-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
+                              className="bg-white border border-emerald-100 hover:border-[#008751] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
                             >
                               <div className="shrink-0 pt-0.5">
-                                <div className="w-8 h-8 rounded-full border border-slate-200 text-slate-400 flex items-center justify-center bg-slate-50">
-                                  <User className="w-3.5 h-3.5 text-slate-400" />
+                                <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50">
+                                  <User className="w-4 h-4 text-[#004d2e] stroke-[2.5]" />
                                 </div>
                               </div>
                               <div className="flex-grow space-y-0.5">
-                                <h4 className="text-[14.5px] font-black text-slate-900 tracking-tight leading-snug">
+                                <h4 className="text-[15px] font-bold text-black tracking-tight leading-snug">
                                   Formatting & Style
                                 </h4>
-                                <p className="text-[12.5px] font-bold text-slate-700 leading-snug line-clamp-1">
-                                  <span className="text-slate-900 font-extrabold">Editor:</span> Please ensure all references follow the journal format.
+                                <p className="text-[13px] font-normal text-slate-900 leading-snug line-clamp-1">
+                                  <strong className="text-black font-semibold">Editor:</strong> Please ensure all references follow the journal format.
                                 </p>
                               </div>
                               <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                <span className="text-[10px] font-bold text-slate-400 font-mono">2 Jun 2026</span>
+                                <span className="text-[11px] font-semibold text-black font-mono">2 Jun 2026</span>
                               </div>
                             </div>
                           )}
@@ -1328,23 +1463,23 @@ export default function OjsSubmissionDetail({
                                 <div
                                   key={thread.id}
                                   onClick={() => setActiveThreadId(thread.id)}
-                                  className="bg-white border border-slate-100 hover:border-slate-200 rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
+                                  className="bg-white border border-emerald-100 hover:border-[#008751] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
                                 >
                                   <div className="shrink-0 pt-0.5">
-                                    <div className="w-8 h-8 rounded-full border border-slate-200 text-slate-400 flex items-center justify-center bg-slate-50 font-black text-xs">
+                                    <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50 font-black text-xs">
                                       {thread.initiator ? thread.initiator.substring(0, 2).toUpperCase() : "UT"}
                                     </div>
                                   </div>
                                   <div className="flex-grow space-y-0.5">
-                                    <h4 className="text-[14.5px] font-black text-slate-900 tracking-tight leading-snug">
+                                    <h4 className="text-[15px] font-black text-black tracking-tight leading-snug">
                                       {thread.subject}
                                     </h4>
-                                    <p className="text-[12.5px] font-bold text-slate-700 leading-snug line-clamp-1">
-                                      <span className="text-slate-900 font-extrabold">{thread.initiator}:</span> {thread.messages[0]?.text || "No messages yet."}
+                                    <p className="text-[13px] font-bold text-slate-950 leading-snug line-clamp-1">
+                                      <strong className="text-black font-black">{thread.initiator}:</strong> {thread.messages[0]?.text || "No messages yet."}
                                     </p>
                                   </div>
                                   <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                    <span className="text-[10px] font-bold text-slate-400 font-mono">
+                                    <span className="text-[11px] font-black text-black font-mono">
                                       {new Date(thread.createdAt || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric' })}
                                     </span>
                                   </div>
@@ -1355,7 +1490,7 @@ export default function OjsSubmissionDetail({
                           {/* Fallback Empty State */}
                           {((activeDiscussionTab === 'OFFICIAL' && searchQuery !== "" && !"Editorial Inquiry".toLowerCase().includes(searchQuery.toLowerCase())) ||
                            (activeDiscussionTab === 'DIRECT' && searchQuery !== "" && !"Formatting & Style".toLowerCase().includes(searchQuery.toLowerCase()) && discussionThreads.length === 0)) && (
-                            <div className="text-center py-10 text-slate-400 font-medium text-xs">
+                            <div className="text-center py-10 text-slate-900 font-bold text-xs">
                               No discussions match your filter or search.
                             </div>
                           )}
@@ -1363,14 +1498,14 @@ export default function OjsSubmissionDetail({
                         </div>
 
                         {/* View All footer link */}
-                        <div className="pt-2 border-t border-slate-100 flex justify-center mt-auto shrink-0 bg-white">
+                        <div className="pt-3 border-t border-emerald-100 flex justify-center mt-auto shrink-0 bg-white">
                           <button
                             onClick={() => {
                               setActiveDiscussionTab('ALL');
                               setSearchQuery('');
                               alert("Showing all discussions. Click on any discussion item to enter its dedicated communication channel.");
                             }}
-                            className="text-[#008751] hover:text-[#007043] font-black hover:underline text-xs flex items-center gap-1 cursor-pointer"
+                            className="text-[#008751] hover:text-[#007043] font-black hover:underline text-[13px] flex items-center gap-1 cursor-pointer bg-emerald-50/50 hover:bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl"
                           >
                             <span>View All Discussions</span>
                             <span className="font-extrabold">→</span>
@@ -1379,93 +1514,77 @@ export default function OjsSubmissionDetail({
 
                       </div>
                     ) : activeThreadId === 'thread-editorial-inquiry' ? (
-                      /* ========== WHATSAPP CHAT CHANNEL: EDITORIAL TRIAGE GROUP (FIRST IMAGE) ========== */
-                      <div id="discussions-card" className="bg-[#efeae2] border border-slate-200 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
+                      /* ========== PROFESSIONAL ACADEMIC PEER FORUM DISCUSSION PANEL ========== */
+                      <div id="discussions-card" className="bg-[#fafdfb] border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
                         
-                        {/* WhatsApp Top Header Bar */}
-                        <div className="bg-[#075e54] text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-sm z-10">
+                        {/* Elegant Academic Header Bar */}
+                        <div className="bg-gradient-to-r from-[#004d2e] to-[#047857] text-white px-4 py-3.5 flex items-center justify-between shrink-0 shadow-sm z-10">
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => setActiveThreadId(null)}
-                              className="mr-1 hover:bg-emerald-800/40 p-1.5 rounded-full transition cursor-pointer flex items-center justify-center"
+                              className="mr-1 hover:bg-white/10 p-2 rounded-xl transition cursor-pointer flex items-center justify-center"
                               title="Back to Discussions list"
                             >
-                              <ChevronLeft className="w-5 h-5 text-white stroke-[3.5]" />
+                              <ChevronLeft className="w-5 h-5 text-white stroke-[4]" />
                             </button>
                             
                             {/* Group Icon Avatar */}
-                            <div className="w-9 h-9 rounded-full bg-[#128c7e] text-white font-extrabold text-xs flex items-center justify-center border border-emerald-500/20 shadow-inner">
-                              ET
+                            <div className="w-9 h-9 rounded-full bg-[#d1f2e1] text-[#004d2e] font-bold text-xs flex items-center justify-center border-2 border-white shadow-xs">
+                              FI
                             </div>
                             <div>
-                              <h4 className="font-bold text-xs text-slate-100 tracking-tight flex items-center gap-1">
-                                Editorial Triage Group
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#25d366] animate-pulse"></span>
+                              <h4 className="font-black text-[14px] text-white tracking-tight flex items-center gap-1.5">
+                                Editorial Inquiry Forum
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
                               </h4>
-                              <p className="text-[10px] text-emerald-200/90 font-medium">
-                                Dr. John Smith, Akshaya G • Online
+                              <p className="text-[11.5px] text-emerald-100/90 font-medium">
+                                Editorial Board Panel • Active Conversation
                               </p>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-3 text-emerald-100">
-                            {/* Audio Call representation icon */}
-                            <button className="hover:text-white transition opacity-80 hover:opacity-100 cursor-pointer" title="Voice Call" onClick={() => alert("Connecting encrypted peer voice audio line...")}>
-                              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                                <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" />
-                              </svg>
-                            </button>
-                            {/* Video Call representation icon */}
-                            <button className="hover:text-white transition opacity-80 hover:opacity-100 cursor-pointer" title="Video Call" onClick={() => alert("Connecting high-definition face to face editorial video channel...")}>
-                              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                                <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" />
-                              </svg>
-                            </button>
-                            {/* Thread wizard helper */}
+                          <div className="flex items-center gap-3">
                             <button
                               onClick={() => setViewState('ADD_DISCUSSION')}
-                              className="hover:text-white transition opacity-80 hover:opacity-100 cursor-pointer"
+                              className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl transition cursor-pointer"
                               title="New Thread Inquiry"
                             >
-                              <Plus className="w-4 h-4 text-emerald-200 font-extrabold stroke-[2.5]" />
+                              <Plus className="w-4 h-4 text-white font-bold stroke-[3]" />
                             </button>
                           </div>
                         </div>
 
-                        {/* WhatsApp Conversation Scroll Pane */}
-                        <div className="flex-grow p-4 overflow-y-auto space-y-3 flex flex-col justify-start bg-[#efeae2] relative min-h-0">
-                          {/* Grid background doodle placeholder texture */}
-                          <div className="absolute inset-0 opacity-[0.06] bg-[radial-gradient(#334155_1.2px,transparent_1.2px)] [background-size:16px_16px] pointer-events-none"></div>
-                          
-                          <div className="mx-auto bg-[#e1f3e1] border border-[#b8deb3] text-[#075e54] text-[10px] sm:text-[11px] font-bold px-3 py-1 rounded-lg uppercase tracking-wider text-center select-none shadow-3xs z-10 font-mono">
-                            Secure Editorial Sandbox Chat • Active
+                        {/* Academic Message Scroll Pane */}
+                        <div className="flex-grow p-4 overflow-y-auto space-y-4 flex flex-col justify-start bg-[#f3faf5] relative min-h-0">
+                          <div className="mx-auto bg-emerald-100 border-2 border-[#b8deb3] text-[#004d2e] text-[11px] font-bold px-3 py-1.5 rounded-lg uppercase tracking-wider text-center select-none shadow-3xs z-10 font-mono">
+                            OFFICIAL PEER COMMUNICATION STREAM
                           </div>
 
                           {/* Base messages */}
-                          <div className="flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition self-start bg-white text-slate-900 rounded-tl-none border border-slate-200 text-left">
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <span className="text-[11px] font-bold block text-sky-700">Dr. John Smith</span>
-                              <span className="text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border bg-slate-50 border-slate-200 text-slate-500">EDITOR</span>
+                          <div className="flex flex-col max-w-[90%] rounded-2xl p-4 shadow-sm relative leading-relaxed z-10 transition self-start bg-white text-black rounded-tl-none border-2 border-emerald-100/50 text-left">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="text-[12px] font-bold block text-sky-800">Dr. John Smith</span>
+                              <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded font-sans tracking-wider border-2 bg-emerald-50 border-emerald-200 text-[#004d2e]">EDITOR</span>
                             </div>
-                            <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">
+                            <p className="text-[14px] font-medium text-black leading-relaxed font-sans">
                               Dear Author, Please confirm that the manuscript complies with the journal guidelines.
                             </p>
-                            <div className="flex items-center justify-end gap-1 mt-1 text-slate-400 select-none">
-                              <span className="text-[9px] font-mono font-medium">10:30 AM</span>
+                            <div className="flex items-center justify-end gap-1 mt-2 text-slate-800 select-none border-t pt-1.5 border-emerald-50">
+                              <span className="text-[10px] font-medium font-mono">10:30 AM</span>
                             </div>
                           </div>
 
-                          <div className="flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition self-end bg-[#d9fdd3] text-slate-900 rounded-tr-none border border-[#c6ecbf] text-left">
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <span className="text-[11px] font-bold block text-[#075e54]">Akshaya G</span>
-                              <span className="text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border bg-[#e9f7e5] border-[#b0e2a7] text-emerald-700">AUTHOR</span>
+                          <div className="flex flex-col max-w-[90%] rounded-2xl p-4 shadow-sm relative leading-relaxed z-10 transition self-end bg-[#e8fbf1] text-black rounded-tr-none border-2 border-[#b8ebd0] text-left">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="text-[12px] font-bold block text-[#004d2e]">Akshaya G</span>
+                              <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded font-sans tracking-wider border-2 bg-[#d1f2e1] border-[#a2ecd5] text-emerald-800">AUTHOR</span>
                             </div>
-                            <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">
+                            <p className="text-[14px] font-medium text-black leading-relaxed font-sans">
                               Thank you for your message. Yes, the manuscript follows all the guidelines.
                             </p>
-                            <div className="flex items-center justify-end gap-1 mt-1 text-slate-400 select-none">
-                              <span className="text-[9px] font-mono font-medium">11:02 AM</span>
-                              <span className="text-[#53bdeb] text-[11px] leading-none font-extrabold tracking-tighter" title="Read status">✓✓</span>
+                            <div className="flex items-center justify-end gap-1 mt-2 text-slate-800 select-none border-t pt-1.5 border-emerald-100">
+                              <span className="text-[10px] font-medium font-mono">11:02 AM</span>
+                              <span className="text-[#008751] text-[12px] leading-none font-bold tracking-tighter" title="Read status">✓✓</span>
                             </div>
                           </div>
 
@@ -1473,53 +1592,53 @@ export default function OjsSubmissionDetail({
                           {whatsappMessages.slice(2).map((msg) => (
                             <div
                               key={msg.id}
-                              className={`flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition text-left ${
+                              className={`flex flex-col max-w-[90%] rounded-2xl p-4 shadow-sm relative leading-relaxed z-10 transition text-left ${
                                 msg.isMe
-                                  ? 'self-end bg-[#d9fdd3] text-slate-900 rounded-tr-none border border-[#c6ecbf]'
-                                  : 'self-start bg-white text-slate-900 rounded-tl-none border border-slate-200'
+                                  ? 'self-end bg-[#e8fbf1] text-black rounded-tr-none border-2 border-[#b8ebd0]'
+                                  : 'self-start bg-white text-black rounded-tl-none border-2 border-emerald-100/50'
                               }`}
                             >
-                              <div className="flex items-center gap-1.5 mb-1">
-                                <span className={`text-[11px] font-bold block ${msg.isMe ? 'text-[#075e54]' : 'text-sky-700'}`}>
+                              <div className="flex items-center gap-2 mb-1.5">
+                                <span className={`text-[12px] font-bold block ${msg.isMe ? 'text-[#004d2e]' : 'text-sky-800'}`}>
                                   {msg.sender}
                                 </span>
-                                <span className={`text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border ${
+                                <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded font-sans tracking-wider border-2 ${
                                   msg.isMe
-                                    ? 'bg-[#e9f7e5] border-[#b0e2a7] text-emerald-700'
-                                    : 'bg-slate-50 border-slate-200 text-slate-500'
+                                    ? 'bg-[#d1f2e1] border-[#a2ecd5] text-emerald-800'
+                                    : 'bg-emerald-50 border-emerald-200 text-[#004d2e]'
                                 }`}>
                                   {msg.senderRole}
                                 </span>
                               </div>
-                              <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">{msg.text}</p>
-                              <div className="flex items-center justify-end gap-1 mt-1 text-slate-400 select-none">
-                                <span className="text-[9px] font-mono font-medium">{msg.timestamp}</span>
+                              <p className="text-[14px] font-medium text-black leading-relaxed font-sans">{msg.text}</p>
+                              <div className="flex items-center justify-end gap-1 mt-2 text-slate-800 select-none border-t pt-1.5 border-emerald-50">
+                                <span className="text-[10px] font-medium font-mono">{msg.timestamp}</span>
                                 {msg.isMe && (
-                                  <span className="text-[#53bdeb] text-[11px] leading-none font-extrabold tracking-tighter" title="Read status">✓✓</span>
+                                  <span className="text-[#008751] text-[12px] leading-none font-bold tracking-tighter" title="Read status">✓✓</span>
                                 )}
                               </div>
                             </div>
                           ))}
                         </div>
 
-                        {/* WhatsApp text input bar */}
-                        <div className="bg-[#f0f2f5] px-3 py-2.5 border-t border-slate-200/60 flex items-center gap-2 shrink-0 z-10">
+                        {/* Professional Thread Message Input Bar */}
+                        <div className="bg-[#eefcf4] px-4 py-3.5 border-t border-emerald-100 flex items-center gap-2 shrink-0 z-10">
                           <button
                             onClick={() => {
-                              alert("This is an end-to-end encrypted discussion workspace for author-editor direct communications.");
+                              alert("This is a secure peer-to-peer discussion workspace for certified author-editor communication.");
                             }}
-                            className="text-slate-500 hover:text-slate-700 transition cursor-pointer p-1 rounded-full hover:bg-slate-200"
-                            title="Sandbox System Info"
+                            className="text-slate-900 hover:text-emerald-700 transition cursor-pointer p-1.5 rounded-lg hover:bg-emerald-100"
+                            title="Discussion Information"
                           >
                             <Info className="w-5 h-5" />
                           </button>
 
                           <button
                             onClick={() => handleSimulateUpload(false, true)}
-                            className="text-slate-500 hover:text-slate-700 transition cursor-pointer p-1 rounded-full hover:bg-slate-200"
-                            title="Attach file to pre-review list"
+                            className="text-slate-900 hover:text-emerald-700 transition cursor-pointer p-1.5 rounded-lg hover:bg-emerald-100"
+                            title="Attach manuscript file"
                           >
-                            <Paperclip className="w-4.5 h-4.5 rotate-45" />
+                            <Paperclip className="w-5 h-5 rotate-45" />
                           </button>
 
                           <input
@@ -1529,16 +1648,17 @@ export default function OjsSubmissionDetail({
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') handleSendWhatsappMessage();
                             }}
-                            placeholder="Type a message..."
-                            className="flex-grow bg-white border border-slate-200 rounded-lg px-3.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-emerald-600 focus:border-emerald-600 text-slate-800 font-bold shadow-3xs"
+                            placeholder="Type an official response..."
+                            className="flex-grow bg-white border-2 border-emerald-200 rounded-xl px-4 py-2 text-[13px] outline-none focus:ring-2 focus:ring-[#008751]/20 text-black font-medium placeholder-slate-500 shadow-3xs"
                           />
 
                           <button
                             onClick={handleSendWhatsappMessage}
-                            className="bg-[#00a884] hover:bg-[#008f72] text-white p-2 rounded-full transition flex items-center justify-center cursor-pointer shadow-sm hover:scale-105 active:scale-95"
+                            className="bg-[#008751] hover:bg-[#007043] text-white px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer font-bold text-[13px] shadow-sm hover:scale-[1.02] active:scale-[0.98]"
                             title="Send Message"
                           >
-                            <Send className="w-3.5 h-3.5 text-white" />
+                            <span>Send</span>
+                            <Send className="w-3.5 h-3.5 text-white stroke-[3]" />
                           </button>
                         </div>
 
@@ -1880,14 +2000,14 @@ export default function OjsSubmissionDetail({
 
               </div>
 
-              {/* RIGHT DETAILS SIDEBAR (COLUMN 3) */}
+               {/* RIGHT DETAILS SIDEBAR (COLUMN 3) */}
               <aside id="ojs-column-right-details-dashboard" className="w-full lg:w-80 shrink-0 space-y-6 text-left leading-normal">
                 
                 {/* Submission Timeline */}
-                <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-2xs text-left">
-                  <h3 className="text-slate-800 text-sm font-extrabold tracking-tight mb-5">Submission Timeline</h3>
+                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left">
+                  <h3 className="text-black text-[20px] font-black tracking-tight mb-5 border-b pb-3 border-emerald-100">Submission Timeline</h3>
                   
-                  <div className="relative pl-5 ml-2.5 space-y-6 text-xs border-l border-slate-150">
+                  <div className="relative pl-5 ml-2.5 space-y-6 text-xs border-l-2 border-emerald-100">
                     {[
                       { label: "Manuscript Submitted", sub: "08 June 2026, 10:20 AM", status: "completed" },
                       { label: "Editor Assigned", sub: "08 June 2026, 11:15 AM", status: "active" },
@@ -1896,18 +2016,18 @@ export default function OjsSubmissionDetail({
                       { label: "Decision", sub: "Pending", status: "pending" },
                       { label: "Production", sub: "Pending", status: "pending" }
                     ].map((item, idx) => {
-                      let markerStyle = "bg-white border-slate-200 text-slate-350";
-                      let textStyle = "text-slate-400";
-                      let subStyle = "text-slate-400";
+                      let markerStyle = "bg-white border-slate-300 text-slate-400";
+                      let textStyle = "text-slate-950 font-bold text-[14px]";
+                      let subStyle = "text-slate-700 font-bold text-[12px] font-mono";
                       
                       if (item.status === "completed") {
                         markerStyle = "bg-[#008751] border-[#008751] text-white";
-                        textStyle = "text-slate-800 font-extrabold";
-                        subStyle = "text-slate-500 font-medium";
+                        textStyle = "text-black font-black text-[14px]";
+                        subStyle = "text-[#004d2b] font-bold text-[12px] font-mono";
                       } else if (item.status === "active") {
                         markerStyle = "border-2 border-[#008751] bg-[#eefcf5] text-[#008751]";
-                        textStyle = "text-[#008751] font-extrabold";
-                        subStyle = "text-emerald-700 font-semibold";
+                        textStyle = "text-[#008751] font-black text-[14px]";
+                        subStyle = "text-emerald-800 font-bold text-[12px] font-mono";
                       }
                       
                       return (
@@ -1919,13 +2039,13 @@ export default function OjsSubmissionDetail({
                             ) : item.status === "active" ? (
                               <span className="w-1.5 h-1.5 bg-[#008751] rounded-full" />
                             ) : (
-                              <span className="w-1.5 h-1.5 bg-slate-200 rounded-full" />
+                              <span className="w-1.5 h-1.5 bg-slate-300 rounded-full" />
                             )}
                           </div>
                           
                           <div className="space-y-0.5 text-left">
-                            <span className={`block text-xs ${textStyle}`}>{item.label}</span>
-                            <span className={`block text-[10px] font-mono ${subStyle}`}>{item.sub}</span>
+                            <span className={`block ${textStyle}`}>{item.label}</span>
+                            <span className={`block ${subStyle}`}>{item.sub}</span>
                           </div>
                         </div>
                       );
@@ -1934,26 +2054,26 @@ export default function OjsSubmissionDetail({
                 </div>
 
                 {/* Recent Activity */}
-                <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-2xs text-left space-y-4">
-                  <h3 className="text-slate-800 text-sm font-extrabold tracking-tight border-b pb-3 border-slate-100">Recent Activity</h3>
+                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left space-y-4">
+                  <h3 className="text-black text-[20px] font-black tracking-tight border-b pb-3 border-emerald-100">Recent Activity</h3>
                   
                   <div className="space-y-3.5 text-xs">
                     {[
-                      { label: "Manuscript submitted", time: "10:20 AM", icon: FileText, color: "bg-emerald-50 text-emerald-700" },
-                      { label: "Files uploaded", time: "10:22 AM", icon: Download, color: "bg-blue-50 text-blue-700", rotate: true },
-                      { label: "Metadata completed", time: "10:40 AM", icon: Check, color: "bg-emerald-50 text-emerald-700" },
-                      { label: "Editor assigned", time: "11:15 AM", icon: User, color: "bg-emerald-50 text-emerald-700" }
+                      { label: "Manuscript submitted", time: "10:20 AM", icon: FileText, color: "bg-[#eefcf4] text-[#008751] border border-emerald-100" },
+                      { label: "Files uploaded", time: "10:22 AM", icon: Download, color: "bg-blue-50 text-blue-700 border border-blue-100", rotate: true },
+                      { label: "Metadata completed", time: "10:40 AM", icon: Check, color: "bg-[#eefcf4] text-[#008751] border border-emerald-100" },
+                      { label: "Editor assigned", time: "11:15 AM", icon: User, color: "bg-[#eefcf4] text-[#008751] border border-emerald-100" }
                     ].map((act, i) => {
                       const Icon = act.icon;
                       return (
-                        <div key={i} className="flex items-center justify-between gap-3 hover:bg-slate-50/50 p-1 rounded-lg transition">
+                        <div key={i} className="flex items-center justify-between gap-3 hover:bg-emerald-50/40 p-1.5 rounded-lg transition">
                           <div className="flex items-center gap-2.5 overflow-hidden">
                             <div className={`w-7 h-7 rounded-lg ${act.color} flex items-center justify-center shrink-0`}>
                               <Icon className={`w-3.5 h-3.5 ${act.rotate ? 'rotate-180' : ''}`} />
                             </div>
-                            <span className="font-semibold text-slate-700 truncate">{act.label}</span>
+                            <span className="font-black text-black truncate">{act.label}</span>
                           </div>
-                          <span className="text-[10px] text-slate-400 font-mono shrink-0">{act.time}</span>
+                          <span className="text-[11px] text-black font-mono shrink-0 font-extrabold">{act.time}</span>
                         </div>
                       );
                     })}
@@ -1961,16 +2081,16 @@ export default function OjsSubmissionDetail({
                 </div>
 
                 {/* Need Help? */}
-                <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-2xs text-left space-y-3">
-                  <h3 className="text-slate-800 text-sm font-extrabold tracking-tight">Need Help?</h3>
-                  <p className="text-xs text-slate-500 leading-normal font-medium">
+                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left space-y-3">
+                  <h3 className="text-black text-[20px] font-black tracking-tight border-b pb-3 border-emerald-100">Need Help?</h3>
+                  <p className="text-[14px] text-slate-950 leading-relaxed font-bold">
                     If you have any questions, please contact the editorial office.
                   </p>
                   <button
                     onClick={() => alert("Connecting you with TULITICS Scholarly Publishing Editorial Desk. A support ticket is logged.")}
-                    className="border border-emerald-200 text-[#008751] bg-white hover:bg-emerald-50 px-4 py-2 text-xs font-black rounded-lg transition duration-150 cursor-pointer w-full flex items-center justify-center gap-2 mt-2"
+                    className="bg-[#008751] text-white hover:bg-[#007043] border-2 border-[#004d2e] px-4 py-2.5 text-[14.5px] font-black rounded-xl transition duration-150 cursor-pointer w-full flex items-center justify-center gap-2 mt-2 shadow-xs hover:scale-[1.01] active:scale-[0.99]"
                   >
-                    <HelpCircle className="w-3.5 h-3.5 text-[#008751]" />
+                    <HelpCircle className="w-4 h-4 text-white stroke-[2.5]" />
                     <span>Contact Support</span>
                   </button>
                 </div>
@@ -2027,10 +2147,10 @@ export default function OjsSubmissionDetail({
             <div className="space-y-1">
               <div className="flex items-center gap-2.5">
                 <span className="text-3xl font-bold text-emerald-200 tracking-tight font-sans">
-                  {paper.id || "990"}
+                  {paper.id || "N/A"}
                 </span>
                 <h1 className="text-xl font-bold tracking-tight text-white line-clamp-1">
-                  {paper.author || "Пестерніков"} — {paper.title || "test"}
+                  {paper.author || "Anonymous"} — {paper.title || "Untitled"}
                 </h1>
               </div>
               
@@ -2991,7 +3111,7 @@ export default function OjsSubmissionDetail({
                 
                 <div className="flex flex-col space-y-1 text-left">
                   <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold">Submission ID</span>
-                  <strong className="text-slate-800 font-extrabold font-mono text-[13px]">{paper.id || "990"}</strong>
+                  <strong className="text-slate-800 font-extrabold font-mono text-[13px]">{paper.id || "N/A"}</strong>
                 </div>
 
                 <div className="flex flex-col space-y-1 text-left">

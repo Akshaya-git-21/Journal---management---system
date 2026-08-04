@@ -39,6 +39,8 @@ export const INITIAL_MANUSCRIPTS: Manuscript[] = [
     authorEmail: "ada@computing.org",
     submissionStep: 5,
     editorsNotes: "",
+    assignedEditor: "Unassigned",
+    assignedEditorEmail: null,
     suggestedReviewers: [],
     discussions: []
   },
@@ -108,6 +110,8 @@ export const INITIAL_MANUSCRIPTS: Manuscript[] = [
     authorEmail: "turing@enigma.labs",
     submissionStep: 5,
     editorsNotes: "Assigned two reviewers immediately. Hopper was very fast with submission. Need one more full report before decision threshold, or Editor manual override.",
+    assignedEditor: "Dr. Cynthia Dwork",
+    assignedEditorEmail: "editor@stanford.edu",
     suggestedReviewers: [],
     discussions: []
   },
@@ -224,114 +228,6 @@ export const INITIAL_MANUSCRIPTS: Manuscript[] = [
     editorsNotes: "Successfully published. DOI issued and indexed.",
     suggestedReviewers: [],
     discussions: []
-  },
-  {
-    id: "OJS-7593",
-    title: "Agile collab",
-    abstract: "A highly collaborative and agile namespace design methodology to ensure distributed peer synchronization. This paper introduces the core parameters of optimistic concurrency controls paired with high-frequency telemetry validation structures inside modular workspaces.",
-    references: "[1] A. Lovelace, 'High-frequency telemetry validation,' 2024.\n[2] J. Wilinksy, 'Agile systems design,' 1999.",
-    isDoubleBlind: true,
-    coverLetter: "Dear Editor,\n\nPlease find attached the supplementary metadata references mapped for our validation test. All author arrays are structured in compliance with double-blind peer validation policies. We look forward to your editorial advisory.\n\nSincerely,\nAda Lovelace",
-    fileName: "Other, Submission_New Submission.docx",
-    fileSize: "1.8 MB",
-    uploadedAt: "2026-06-02T10:15:00Z",
-    language: "French (Canada)",
-    contributors: [
-      {
-        id: "c1",
-        name: "Ada Lovelace",
-        email: "ada@computing.org",
-        affiliation: "Stanford Dept of Computer Science",
-        role: "Primary Author"
-      },
-      {
-        id: "c2",
-        name: "Charles Babbage",
-        email: "charles@differential.edu",
-        affiliation: "Cambridge Engineering Labs",
-        role: "Co-Author"
-      }
-    ],
-    status: 'UNDER_REVIEW',
-    submittedAt: "2026-06-02T10:15:00Z",
-    reviewers: [
-      {
-        id: "rev8",
-        name: "Dr. Tim Berners-Lee",
-        email: "timbl@w3.org",
-        status: 'INVITED',
-        recommendation: null,
-        commentsToAuthor: '',
-        commentsToEditor: '',
-        assignedAt: "2026-06-05T08:00:00Z",
-        invitedOn: "2026-06-05",
-        dueDate: "2026-06-20",
-        type: "External"
-      },
-      {
-        id: "rev-susy",
-        name: "Susy Decarlo",
-        email: "decarlo@reviewers.com",
-        status: 'ACCEPTED',
-        recommendation: null,
-        commentsToAuthor: '',
-        commentsToEditor: '',
-        assignedAt: "2026-06-01T08:00:00Z",
-        invitedOn: "2026-06-01",
-        dueDate: "2026-06-15",
-        type: "External",
-        isOverdueForce: true
-      },
-      {
-        id: "rev-claris",
-        name: "Claris Clevinger",
-        email: "clevinger@reviewers.com",
-        status: 'ACCEPTED',
-        recommendation: null,
-        commentsToAuthor: '',
-        commentsToEditor: '',
-        assignedAt: "2026-06-02T08:00:00Z",
-        invitedOn: "2026-06-02",
-        dueDate: "2026-06-16",
-        type: "External",
-        reminderSent: true
-      },
-      {
-        id: "rev-decline",
-        name: "Reviewer",
-        email: "declined@reviewers.com",
-        status: 'DECLINED',
-        recommendation: null,
-        commentsToAuthor: '',
-        commentsToEditor: '',
-        assignedAt: "2026-06-03T08:00:00Z",
-        invitedOn: "-",
-        dueDate: "-",
-        type: "External"
-      }
-    ],
-    suggestedReviewers: [],
-    discussions: [
-      {
-        id: "disc-1",
-        senderName: "Ada Lovelace",
-        senderEmail: "ada@computing.org",
-        senderRole: "AUTHOR",
-        text: "Dear Editor, Please find attached the supplementary metadata references mapped for our validation test. All author arrays are structured in compliance with double-blind peer validation policies. We look forward to your editorial advisory. Sincerely, Corresponding Author",
-        timestamp: "10:51 AM",
-        fileName: "Other, Submission_New Submission.docx",
-        fileSize: "1.8 MB"
-      }
-    ],
-    editorsNotes: "",
-    doi: null,
-    volume: null,
-    issue: null,
-    publishedAt: null,
-    authorId: "auth_ada",
-    authorName: "Ada Lovelace",
-    authorEmail: "ada@computing.org",
-    submissionStep: 5
   }
 ];
 

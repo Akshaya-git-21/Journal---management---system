@@ -11,6 +11,7 @@ import {
   ChevronDown, 
   Check, 
   UserPlus, 
+  UserCheck,
   RefreshCw,
   ExternalLink,
   Shield,
@@ -365,7 +366,7 @@ export default function CoordinatorWorkspace({ manuscripts: propManuscripts, onU
           authorEmail: pm.authorEmail || 'author@medai.edu',
           stage: stage,
           priority: pm.isDoubleBlind ? 'High' : 'Medium',
-          assignedTo: 'Dr. Elizabeth Vance',
+          assignedTo: pm.assignedEditor || 'Unassigned',
           submitted: pm.submittedAt ? new Date(pm.submittedAt).toLocaleDateString() : 'Jun 25, 2026',
           dueDate: 'Jul 10, 2026',
           dueStatus: '14 days left',
@@ -385,14 +386,65 @@ export default function CoordinatorWorkspace({ manuscripts: propManuscripts, onU
     return baseList;
   });
 
+  // Keep manuscriptsList synchronized with propManuscripts updates (e.g. from new submissions)
+  React.useEffect(() => {
+    setManuscriptsList(prev => {
+      const updated = [...prev];
+      propManuscripts.forEach(pm => {
+        const idx = updated.findIndex(m => m.id === pm.id);
+        if (idx >= 0) {
+          updated[idx] = {
+            ...updated[idx],
+            title: pm.title,
+            assignedTo: pm.assignedEditor || updated[idx].assignedTo || 'Unassigned',
+            status: pm.status === 'UNDER_REVIEW' ? 'In Progress' : pm.status === 'SUBMITTED' ? 'Pending' : updated[idx].status,
+            stage: pm.status === 'UNDER_REVIEW' ? 'Under Review' : pm.status === 'SUBMITTED' ? 'Screening' : updated[idx].stage,
+            original: pm
+          };
+        } else {
+          updated.unshift({
+            id: pm.id,
+            title: pm.title,
+            author: pm.authorName || 'Unknown Author',
+            authorEmail: pm.authorEmail || 'author@medai.edu',
+            stage: pm.status === 'UNDER_REVIEW' ? 'Under Review' : 'Screening',
+            priority: pm.isDoubleBlind ? 'High' : 'Medium',
+            assignedTo: pm.assignedEditor || 'Unassigned',
+            submitted: pm.submittedAt ? new Date(pm.submittedAt).toLocaleDateString() : new Date().toLocaleDateString(),
+            dueDate: 'Jul 10, 2026',
+            dueStatus: '14 days left',
+            status: pm.status === 'UNDER_REVIEW' ? 'In Progress' : 'Pending',
+            abstract: pm.abstract || 'No abstract supplied with proposal submission.',
+            coverLetter: pm.coverLetter || 'No cover letter supplied.',
+            contributors: pm.contributors?.map(c => ({ name: c.name, email: c.email, affiliation: c.affiliation, role: c.role })) || [],
+            reviewersAssigned: pm.reviewers?.map(r => r.name) || [],
+            comments: pm.editorsNotes || '',
+            original: pm
+          } as any);
+        }
+      });
+      return updated;
+    });
+  }, [propManuscripts]);
+
   // Master update action that syncs with system state
   const handleUpdateManuscriptRow = (id: string, updatedFields: Partial<typeof manuscriptsList[0]>) => {
+    let manuscriptToNotify: Manuscript | null = null;
+
     setManuscriptsList(prev => prev.map(m => {
       if (m.id === id) {
         const nextItem = { ...m, ...updatedFields };
         
-        // Sync system state
-        if (onUpdateManuscript && m.original) {
+        // Auto-update stage to Under Review if assigned to an editor from Unassigned
+        if (updatedFields.assignedTo && updatedFields.assignedTo !== 'Unassigned') {
+          if (nextItem.stage === 'Screening' || nextItem.stage === 'Submission') {
+            nextItem.stage = 'Under Review';
+            nextItem.status = 'In Progress';
+          }
+        }
+
+        // Prepare system state
+        if (onUpdateManuscript) {
           let nextStatus: ManuscriptStatus = 'SUBMITTED';
           if (nextItem.stage === 'Under Review') nextStatus = 'UNDER_REVIEW';
           else if (nextItem.stage === 'Decision Pending') nextStatus = 'AWAITING_DECISION';
@@ -400,18 +452,55 @@ export default function CoordinatorWorkspace({ manuscripts: propManuscripts, onU
           else if (nextItem.stage === 'Rejected') nextStatus = 'REJECTED';
           else if (nextItem.stage === 'Draft') nextStatus = 'DRAFT';
 
-          const updatedOrig: Manuscript = {
-            ...m.original,
+          const assignedMember = boardMembers.find(b => b.name === nextItem.assignedTo);
+
+          const baseOriginal = m.original || {
+            id: m.id,
+            title: m.title,
+            abstract: m.abstract,
+            references: '',
+            isDoubleBlind: true,
+            coverLetter: m.coverLetter || '',
+            fileName: null,
+            fileSize: null,
+            uploadedAt: null,
+            contributors: [],
+            status: nextStatus,
+            submittedAt: new Date().toISOString(),
+            reviewers: [],
+            suggestedReviewers: [],
+            discussions: [],
+            doi: null,
+            volume: null,
+            issue: null,
+            publishedAt: null,
+            authorId: 'auth_user',
+            authorName: m.author,
+            authorEmail: m.authorEmail,
+            submissionStep: 5,
+            editorsNotes: m.comments || ''
+          };
+
+          manuscriptToNotify = {
+            ...baseOriginal,
             title: nextItem.title,
             status: nextStatus,
-            editorsNotes: nextItem.comments || ''
+            editorsNotes: nextItem.comments || '',
+            assignedEditor: nextItem.assignedTo,
+            assignedEditorEmail: assignedMember?.email || (nextItem.assignedTo === 'Dr. Cynthia Dwork' ? 'editor@stanford.edu' : null)
           };
-          onUpdateManuscript(updatedOrig);
         }
         return nextItem;
       }
       return m;
     }));
+
+    if (manuscriptToNotify && onUpdateManuscript) {
+      const ms = manuscriptToNotify;
+      setTimeout(() => {
+        onUpdateManuscript(ms);
+      }, 0);
+    }
     
     // Also keep drawer in sync if open
     if (selectedManuscript && selectedManuscript.id === id) {
@@ -420,12 +509,24 @@ export default function CoordinatorWorkspace({ manuscripts: propManuscripts, onU
   };
 
 
+  const unassignedCount = manuscriptsList.filter(m => !m.assignedTo || m.assignedTo === 'Unassigned' || m.assignedTo === 'None').length;
+
   // Filter queue manuscripts
   const filteredQueue = manuscriptsList.filter(m => {
     const matchesSearch = m.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           m.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          m.author.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'ALL' || m.stage.toUpperCase() === statusFilter.toUpperCase() || m.status.toUpperCase() === statusFilter.toUpperCase();
+                          m.author.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          (m.assignedTo && m.assignedTo.toLowerCase().includes(searchQuery.toLowerCase()));
+    
+    let matchesStatus = true;
+    if (statusFilter === 'ALL') {
+      matchesStatus = true;
+    } else if (statusFilter === 'UNASSIGNED') {
+      matchesStatus = !m.assignedTo || m.assignedTo === 'Unassigned' || m.assignedTo === 'None';
+    } else {
+      matchesStatus = m.stage.toUpperCase() === statusFilter.toUpperCase() || m.status.toUpperCase() === statusFilter.toUpperCase();
+    }
+
     return matchesSearch && matchesStatus;
   });
 
@@ -954,20 +1055,24 @@ export default function CoordinatorWorkspace({ manuscripts: propManuscripts, onU
                 <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white border border-slate-200 p-4 rounded-xl shadow-sm">
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { label: 'All Stages', count: 46, filterValue: 'ALL' },
-                      { label: 'Submission', count: 19, filterValue: 'SUBMITTED' },
-                      { label: 'Screening', count: 12, filterValue: 'SCREENING' },
-                      { label: 'Review', count: 8, filterValue: 'UNDER REVIEW' },
-                      { label: 'Decision', count: 7, filterValue: 'DECISION PENDING' },
-                      { label: 'Production', count: 0, filterValue: 'PRODUCTION' }
+                      { label: 'All Stages', count: manuscriptsList.length, filterValue: 'ALL' },
+                      { label: 'Unassigned Queue', count: unassignedCount, filterValue: 'UNASSIGNED', isHighlight: unassignedCount > 0 },
+                      { label: 'Submission', count: manuscriptsList.filter(m => m.stage === 'Submission' || m.stage === 'Screening').length, filterValue: 'SUBMITTED' },
+                      { label: 'Review', count: manuscriptsList.filter(m => m.stage === 'Under Review').length, filterValue: 'UNDER REVIEW' },
+                      { label: 'Decision', count: manuscriptsList.filter(m => m.stage === 'Decision Pending').length, filterValue: 'DECISION PENDING' },
+                      { label: 'Production', count: manuscriptsList.filter(m => m.stage === 'Production').length, filterValue: 'PRODUCTION' }
                     ].map((pill, idx) => {
                       const isActive = statusFilter === pill.filterValue;
                       return (
                         <button 
                           key={idx}
                           onClick={() => setStatusFilter(pill.filterValue)}
-                          className={`px-3 py-1.5 text-xs font-bold rounded-lg transition ${
-                            isActive ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          className={`px-3 py-1.5 text-xs font-bold rounded-lg transition flex items-center gap-1.5 ${
+                            isActive 
+                              ? 'bg-emerald-700 text-white shadow-xs' 
+                              : pill.isHighlight
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 animate-pulse'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                           }`}
                         >
                           {pill.label} ({pill.count})
@@ -1044,8 +1149,34 @@ export default function CoordinatorWorkspace({ manuscripts: propManuscripts, onU
                                 {item.priority}
                               </span>
                             </td>
-                            <td className="p-4">
-                              <span className="font-semibold text-slate-800">{item.assignedTo}</span>
+                            <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {(!item.assignedTo || item.assignedTo === 'Unassigned' || item.assignedTo === 'None') ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                                    <UserPlus className="w-3 h-3 text-amber-700 shrink-0" /> Unassigned
+                                  </span>
+                                ) : (
+                                  <span className="font-semibold text-slate-800 text-xs flex items-center gap-1">
+                                    <UserCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    {item.assignedTo}
+                                  </span>
+                                )}
+                                <select
+                                  value={item.assignedTo || 'Unassigned'}
+                                  onChange={(e) => {
+                                    const newAssigned = e.target.value;
+                                    handleUpdateManuscriptRow(item.id, { assignedTo: newAssigned });
+                                  }}
+                                  className="bg-slate-50 border border-slate-300 hover:border-emerald-600 rounded px-1.5 py-1 text-[11px] font-semibold text-slate-700 outline-none transition cursor-pointer max-w-[140px] truncate"
+                                >
+                                  <option value="Unassigned">-- Assign Managing Editor --</option>
+                                  {boardMembers.map((bm) => (
+                                    <option key={bm.id} value={bm.name}>
+                                      {bm.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
                             </td>
                             <td className="p-4 text-slate-500 font-mono font-semibold">{item.submitted}</td>
                             <td className="p-4 leading-normal">

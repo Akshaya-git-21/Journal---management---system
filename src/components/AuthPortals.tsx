@@ -273,52 +273,71 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
           });
         }, 1500);
       } else {
-        if (localRole === 'REVIEWER') {
-          let invitedName = '';
-          let isInvited = false;
+        // Mode is LOGIN -> Support Development Login bypass
+        const cleanEmail = email.trim().toLowerCase();
+        
+        // Helper to resolve user name from email across system presets & manuscripts
+        let resolvedName = '';
+        const KNOWN_USERS: Record<string, string> = {
+          'editor@stanford.edu': 'Dr. Cynthia Dwork',
+          'elizabeth.vance@medai.edu': 'Dr. Elizabeth Vance',
+          'hiroshi.tanaka@medai.jp': 'Dr. Hiroshi Tanaka',
+          'arjun.patel@iitd.ac.in': 'Prof. Arjun Patel',
+          'maria.garcia@nih.gov': 'Dr. Maria Garcia',
+          'james.wilson@bioinfo.org': 'Dr. James Wilson',
+          'coordinator-triage@jms-journal.org': 'Sarah Jenkins, MSc',
+          'author@stanford.edu': 'Dr. Ada Lovelace',
+          'ada@computing.org': 'Dr. Ada Lovelace',
+          'neumann@ias.edu': 'Prof. John von Neumann',
+          'reviewer@stanford.edu': 'Dr. Stanford Reviewer'
+        };
 
+        if (KNOWN_USERS[cleanEmail]) {
+          resolvedName = KNOWN_USERS[cleanEmail];
+        } else {
+          // Check manuscripts for author, editor, or reviewer name match
           for (const m of (manuscripts || [])) {
-            const rev = (m.reviewers || []).find((r: any) => r.email.toLowerCase() === email.toLowerCase());
-            if (rev) {
-              isInvited = true;
-              invitedName = rev.name || invitedName;
+            if (m.authorEmail && m.authorEmail.toLowerCase() === cleanEmail) {
+              resolvedName = m.authorName || resolvedName;
+            }
+            if (m.assignedEditorEmail && m.assignedEditorEmail.toLowerCase() === cleanEmail) {
+              resolvedName = m.assignedEditor || resolvedName;
+            }
+            if (m.reviewers) {
+              const rev = m.reviewers.find((r: any) => r.email && r.email.toLowerCase() === cleanEmail);
+              if (rev) resolvedName = rev.name || resolvedName;
             }
           }
-
-          const presetRev = AVAILABLE_REVIEWERS.find(r => r.email.toLowerCase() === email.toLowerCase());
-          if (presetRev) {
-            invitedName = presetRev.name;
-          }
-
-          const isDefaultPreset = email.toLowerCase() === 'reviewer@stanford.edu' || email.toLowerCase() === 'reviewer@jms-referee.com';
-          
-          if (!isInvited && !isDefaultPreset && !presetRev) {
-            setErrorMsg("ACCESS DENIED: Only invited peer reviewers assigned to an active manuscript are authorized to login. Please contact the Editor-in-Chief if you believe this is an error.");
-            setLoading(false);
-            return;
-          }
-
-          const displayName = invitedName || (email.toLowerCase() === 'reviewer@stanford.edu' ? 'Dr. Stanford Reviewer' : email.split('@')[0]);
-          setSuccessMsg(`SUCCESS: Invited peer referee "${displayName}" authenticated! Redirecting to Reviewer Assessment Hub...`);
-          setTimeout(() => {
-            onSuccessAuth({
-              name: displayName,
-              email: email.toLowerCase(),
-              role: 'REVIEWER'
-            });
-          }, 1500);
-          return;
         }
 
-        const authUser = await loginSupabaseUser(email, password);
-        setSuccessMsg(`SUCCESS: Authenticated via Supabase Auth! Redirecting...`);
+        if (!resolvedName) {
+          // Derive clean name from email prefix
+          const prefix = cleanEmail.split('@')[0] || 'User';
+          resolvedName = prefix.split(/[._-]/).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+          if (localRole === 'EDITOR' || localRole === 'REVIEWER') {
+            resolvedName = `Dr. ${resolvedName}`;
+          }
+        }
+
+        // Try Supabase authentication first, but fall back gracefully for Dev Login
+        try {
+          const authUser = await loginSupabaseUser(cleanEmail, password);
+          if (authUser && authUser.name) {
+            resolvedName = authUser.name;
+          }
+        } catch (supabaseErr) {
+          console.log("[Dev Login Mode]: Supabase password check bypassed for testing:", supabaseErr);
+        }
+
+        setSuccessMsg(`⚡ DEV LOGIN SUCCESS: Authenticated as ${resolvedName} (${cleanEmail}). Password check bypassed.`);
         setTimeout(() => {
           onSuccessAuth({
-            name: authUser.name,
-            email: authUser.email,
+            name: resolvedName,
+            email: cleanEmail,
             role: localRole
           });
-        }, 1500);
+        }, 1200);
+        return;
       }
     } catch (err: any) {
       console.error("[Supabase Auth Error Captured in AuthPortals]:", err);

@@ -4,6 +4,7 @@ export type ManuscriptStatus =
   | 'DRAFT'
   | 'SUBMITTED'       // Unassigned (waiting for Editor)
   | 'UNDER_REVIEW'    // In Review
+  | 'REVISION_REQUESTED' // Editor requested author revisions
   | 'AWAITING_DECISION'
   | 'ACCEPTED'        // In Production
   | 'PUBLISHED'       // Archived
@@ -79,6 +80,27 @@ export interface ReviewerAssignment {
   };
 }
 
+export interface UploadedFile {
+  id?: string;
+  name: string;
+  type: string; // e.g. "Manuscript", "Figures", "Supplementary File"
+  size: string;
+  date: string;
+  url?: string | null;
+  storagePath?: string | null;
+}
+
+export interface RevisionRecord {
+  id: string;
+  revisionNumber: number; // e.g. 1, 2, 3...
+  requestedBy: string; // e.g., "Dr. Cynthia Dwork"
+  requestedByEmail?: string;
+  requestedAt: string; // ISO date-time or formatted timestamp
+  decisionLetter: string; // Comments / decision letter
+  status: 'AWAITING_AUTHOR_UPLOAD' | 'REVISION_SUBMITTED' | 'UNDER_REVIEW' | 'COMPLETED' | string;
+  uploadedFiles: UploadedFile[];
+}
+
 export interface Manuscript {
   id: string;
   title: string;
@@ -91,6 +113,8 @@ export interface Manuscript {
   uploadedAt: string | null;
   storagePath?: string | null;
   publicUrl?: string | null;
+  uploadedFiles?: UploadedFile[];
+  revisions?: RevisionRecord[];
   contributors: Contributor[];
   status: ManuscriptStatus;
   submittedAt: string | null;
@@ -107,5 +131,7 @@ export interface Manuscript {
   submissionStep: number; // For the Author wizard (1 to 5)
   editorsNotes: string; // Editors notes section
   language?: string;
+  assignedEditor?: string | null;
+  assignedEditorEmail?: string | null;
 }
 

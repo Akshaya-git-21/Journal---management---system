@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import TuliticsLogo from './TuliticsLogo';
-import { Manuscript, ReviewerAssignment, ManuscriptStatus, ReviewStatus } from '../types';
+import { Manuscript, ReviewerAssignment, ManuscriptStatus, ReviewStatus, DiscussionMessage, RevisionRecord } from '../types';
 import { AVAILABLE_REVIEWERS } from '../initialData';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
 import {
@@ -28,7 +28,8 @@ import {
   Award,
   Archive,
   Megaphone,
-  AreaChart
+  AreaChart,
+  Upload,
 } from 'lucide-react';
 
 import { 
@@ -233,15 +234,24 @@ export default function EditorWorkspace({
 
   // Editor private notes update
   const [editorsNotesTemp, setEditorsNotesTemp] = useState('');
+  const [customRefName, setCustomRefName] = useState('');
+  const [customRefEmail, setCustomRefEmail] = useState('');
+  const [decisionSuccessMsg, setDecisionSuccessMsg] = useState<string | null>(null);
 
   // Selected paper state matching
   const selectedPaper = manuscripts.find(m => m.id === selectedManuscriptId);
   const baseReviewsCompleted = selectedPaper ? selectedPaper.reviewers.filter(r => r.status === 'SUBMITTED').length : 0;
-  const reviewsCompletedCount = selectedPaper?.id === 'OJS-7593' ? 1 : baseReviewsCompleted;
+  const reviewsCompletedCount = baseReviewsCompleted;
   const reviewsCompletedPercent = Math.round((reviewsCompletedCount / 2) * 100);
   
-  const [editorOjsTab, setEditorOjsTab] = useState<'REVIEW' | 'SUBMISSION' | 'COPYEDITING' | 'PRODUCTION' | 'TITLE_ABSTRACT' | 'CONTRIBUTORS' | 'METADATA' | 'REFERENCES'>('REVIEW');
+  const [editorOjsTab, setEditorOjsTab] = useState<'REVIEW' | 'SUBMISSION' | 'COPYEDITING' | 'PRODUCTION' | 'TITLE_ABSTRACT' | 'CONTRIBUTORS' | 'METADATA' | 'REFERENCES' | 'GALLEYS' | 'JATS_XML' | 'PERMISSIONS' | 'ISSUE' | 'GUIDELINES'>('REVIEW');
   const [readingFile, setReadingFile] = useState<any | null>(null);
+
+  // File Upload Modal state
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [uploadModalCategory, setUploadModalCategory] = useState<'REVIEW' | 'REVISION'>('REVIEW');
+  const [uploadFileName, setUploadFileName] = useState('');
+  const [uploadFileType, setUploadFileType] = useState('Article Text');
 
   // Localized edits for OJS and reference image compatibility
   const [ojsLanguage, setOjsLanguage] = useState('French (Canada)');
@@ -442,16 +452,28 @@ export default function EditorWorkspace({
     
     let targetStatus: ManuscriptStatus = selectedPaper.status;
     let statusLog = '';
+    let updatedRevisions: RevisionRecord[] = selectedPaper.revisions ? [...selectedPaper.revisions] : [];
+    let revisionNum = 0;
     
     if (decisionType === 'ACCEPT') {
       targetStatus = 'ACCEPTED';
       statusLog = 'Submission accepted and transitioned to Copyediting production pipeline.';
-    } else if (decisionType === 'MINOR_REVISIONS') {
-      targetStatus = 'UNDER_REVIEW';
-      statusLog = 'Minor revisions requested. Letter emailed to Corresponding Author.';
-    } else if (decisionType === 'REVISE') {
-      targetStatus = 'UNDER_REVIEW';
-      statusLog = 'Major revisions requested. Paper returned for authors rewrite.';
+    } else if (decisionType === 'MINOR_REVISIONS' || decisionType === 'REVISE') {
+      targetStatus = 'REVISION_REQUESTED';
+      revisionNum = updatedRevisions.length + 1;
+      statusLog = `Revisions requested (Revision ${revisionNum}). Author notified to upload updated draft.`;
+
+      const newRevision: RevisionRecord = {
+        id: `rev_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        revisionNumber: revisionNum,
+        requestedBy: currentUser?.name || selectedPaper.assignedEditor || "Dr. Cynthia Dwork",
+        requestedByEmail: currentUser?.email || selectedPaper.assignedEditorEmail || "editor@ojs-journal.org",
+        requestedAt: new Date().toISOString(),
+        decisionLetter: decisionLetterText || decisionJustification || "Please revise your manuscript according to the editorial decision.",
+        status: 'AWAITING_AUTHOR_UPLOAD',
+        uploadedFiles: []
+      };
+      updatedRevisions.push(newRevision);
     } else if (decisionType === 'REJECT') {
       targetStatus = 'REJECTED';
       statusLog = 'Submission rejected and archived.';
@@ -460,12 +482,28 @@ export default function EditorWorkspace({
       statusLog = 'Sent back for additional technical reviewer tracks.';
     }
 
-    const updatedPaper = {
+    const isRevision = decisionType === 'MINOR_REVISIONS' || decisionType === 'REVISE';
+    const revisionPrefix = isRevision ? `[Revision ${revisionNum} Requested] ` : "";
+
+    const newDiscussion: DiscussionMessage = {
+      id: `msg_mod_dec_${Date.now()}`,
+      senderName: currentUser?.name || selectedPaper.assignedEditor || "Dr. Cynthia Dwork",
+      senderEmail: currentUser?.email || selectedPaper.assignedEditorEmail || "editor@ojs-journal.org",
+      senderRole: "EDITOR",
+      text: isRevision
+        ? `🔔 [EDITORIAL DECISION: REVISION ${revisionNum} REQUESTED]\n\nStatus: Revision Requested\nRequested By: ${currentUser?.name || selectedPaper.assignedEditor || "Dr. Cynthia Dwork"}\nRequest Date & Time: ${new Date().toLocaleString()}\n\nDecision Letter / Comments:\n${decisionLetterText || decisionJustification || 'Please address reviewer comments and upload your revised files.'}`
+        : `[Editorial Decision: ${decisionType}] ${decisionJustification || statusLog}`,
+      timestamp: new Date().toISOString()
+    };
+
+    const updatedPaper: Manuscript = {
       ...selectedPaper,
       status: targetStatus,
+      revisions: updatedRevisions,
+      discussions: [newDiscussion, ...(selectedPaper.discussions || [])],
       editorsNotes: decisionJustification 
-        ? `${selectedPaper.editorsNotes}\n\n[Editorial Decision - ${decisionType}]: ${decisionJustification}\n[Decision letter]: ${decisionLetterText}`
-        : `${selectedPaper.editorsNotes}\n\n[Editorial Decision - ${decisionType}] recorded inside evaluation desk.`
+        ? `${revisionPrefix}${selectedPaper.editorsNotes || ''}\n\n[Editorial Decision - ${decisionType}]: ${decisionJustification}\n[Decision letter]: ${decisionLetterText}`
+        : `${revisionPrefix}${selectedPaper.editorsNotes || ''}\n\n[Editorial Decision - ${decisionType}] recorded inside evaluation desk.`
     };
 
     onUpdateManuscript(updatedPaper);
@@ -530,6 +568,27 @@ export default function EditorWorkspace({
   const getSubmenuMatchedManuscripts = () => {
     return manuscripts.filter(m => {
       if (m.status === 'DRAFT') return false;
+
+      // Filter by assigned editor if logged in and showAllSubmissions is false
+      if (currentUser && currentUser.name && !showAllSubmissions) {
+        const editorNameLower = currentUser.name.toLowerCase();
+        const editorEmailLower = (currentUser.email || '').toLowerCase();
+
+        const isAssignedToMe = 
+          (m.assignedEditor && (
+            m.assignedEditor.toLowerCase() === editorNameLower ||
+            m.assignedEditor.toLowerCase().includes(editorNameLower) ||
+            editorNameLower.includes(m.assignedEditor.toLowerCase())
+          )) ||
+          (m.assignedEditorEmail && m.assignedEditorEmail.toLowerCase() === editorEmailLower) ||
+          ((m as any).assignedTo && (
+            (m as any).assignedTo.toLowerCase() === editorNameLower ||
+            (m as any).assignedTo.toLowerCase().includes(editorNameLower) ||
+            editorNameLower.includes((m as any).assignedTo.toLowerCase())
+          ));
+
+        if (!isAssignedToMe) return false;
+      }
 
       // Filter by the sidebar sub-tab selection
       const matchesSubTab = (() => {
@@ -684,52 +743,132 @@ export default function EditorWorkspace({
     if (!selectedPaper) return;
 
     let target: ManuscriptStatus = selectedPaper.status;
+    let decisionTitle = "";
+    let decisionNote = "";
+    let updatedRevisions: RevisionRecord[] = selectedPaper.revisions ? [...selectedPaper.revisions] : [];
+    let revisionNum = 0;
+
     if (decision === 'ACCEPT') {
       target = 'ACCEPTED';
+      decisionTitle = 'Accepted for Publication';
+      decisionNote = `[Accepted for Publication on ${new Date().toLocaleDateString()}]`;
     } else if (decision === 'REJECT') {
       target = 'REJECTED';
+      decisionTitle = 'Submission Declined';
+      decisionNote = `[Declined on ${new Date().toLocaleDateString()}]`;
     } else if (decision === 'REVISE') {
-      target = 'UNDER_REVIEW';
+      target = 'REVISION_REQUESTED';
+      revisionNum = updatedRevisions.length + 1;
+      decisionTitle = `Revisions Requested (Revision ${revisionNum})`;
+      decisionNote = `[Revisions Requested (Revision ${revisionNum}) on ${new Date().toLocaleString()}]`;
+
+      const newRevision: RevisionRecord = {
+        id: `rev_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        revisionNumber: revisionNum,
+        requestedBy: currentUser?.name || selectedPaper.assignedEditor || "Dr. Cynthia Dwork",
+        requestedByEmail: currentUser?.email || selectedPaper.assignedEditorEmail || "editor@ojs-journal.org",
+        requestedAt: new Date().toISOString(),
+        decisionLetter: editorsNotesTemp || "Please address editorial and peer review comments in your revised submission.",
+        status: 'AWAITING_AUTHOR_UPLOAD',
+        uploadedFiles: []
+      };
+      updatedRevisions.push(newRevision);
     }
+
+    const noteText = editorsNotesTemp 
+      ? `${editorsNotesTemp}\n${decisionNote}`
+      : `${selectedPaper.editorsNotes || ''}\n${decisionNote}`.trim();
+
+    // Create discussion message for authors
+    const newDiscussion: DiscussionMessage = {
+      id: `msg_decision_${Date.now()}`,
+      senderName: currentUser?.name || selectedPaper.assignedEditor || "Dr. Cynthia Dwork",
+      senderEmail: currentUser?.email || selectedPaper.assignedEditorEmail || "editor@ojs-journal.org",
+      senderRole: "EDITOR",
+      text: decision === 'REVISE'
+        ? `🔔 [EDITORIAL DECISION: REVISION ${revisionNum} REQUESTED]\n\nStatus: Revision Requested\nRequested By: ${currentUser?.name || selectedPaper.assignedEditor || "Dr. Cynthia Dwork"}\nRequest Date & Time: ${new Date().toLocaleString()}\n\nDecision Letter / Comments:\n${editorsNotesTemp || 'Please address referee comments and upload your revised manuscript files.'}`
+        : `[Editorial Decision: ${decisionTitle}] ${editorsNotesTemp || 'Please check evaluation reports for details.'}`,
+      timestamp: new Date().toISOString()
+    };
 
     const updated: Manuscript = {
       ...selectedPaper,
       status: target,
-      editorsNotes: editorsNotesTemp
+      revisions: updatedRevisions,
+      editorsNotes: noteText,
+      discussions: [newDiscussion, ...(selectedPaper.discussions || [])]
     };
 
     onUpdateManuscript(updated);
     setShowOverrideModal(false);
-    setSelectedManuscriptId(null);
+    setEditorsNotesTemp('');
+    setDecisionSuccessMsg(
+      decision === 'REVISE'
+        ? `✅ Decision Recorded: Revision ${revisionNum} Requested. Manuscript status set to 'Revision Requested' and Author notified.`
+        : `✅ Decision Recorded: ${decisionTitle}. Author notified via discussion log.`
+    );
+    setTimeout(() => setDecisionSuccessMsg(null), 6000);
+  };
+
+  const handleCreateNewReviewRound = () => {
+    if (!selectedPaper) return;
+    const roundNote = `[Review Round 2 Created on ${new Date().toLocaleDateString()}]`;
+    const noteText = `${selectedPaper.editorsNotes || ''}\n${roundNote}`.trim();
+
+    const newDiscussion: DiscussionMessage = {
+      id: `msg_round_${Date.now()}`,
+      senderName: currentUser?.name || "Dr. Cynthia Dwork",
+      senderEmail: currentUser?.email || "editor@ojs-journal.org",
+      senderRole: "EDITOR",
+      text: `[Review Round 2 Initiated] Additional referee invitations are now active.`,
+      timestamp: new Date().toISOString()
+    };
+
+    const updated: Manuscript = {
+      ...selectedPaper,
+      status: 'UNDER_REVIEW',
+      editorsNotes: noteText,
+      discussions: [newDiscussion, ...(selectedPaper.discussions || [])]
+    };
+
+    onUpdateManuscript(updated);
+    setShowAssignModal(true);
+    setDecisionSuccessMsg(`✅ Review Round 2 opened! Delegate new peer referees below.`);
+    setTimeout(() => setDecisionSuccessMsg(null), 6000);
   };
 
   const handleUploadRevisionFile = () => {
-    const fileName = prompt("Upload Revision File Name:", "Revision_Revised_Manuscript.docx");
-    if (!fileName) return;
-    const nextNo = (ojsRevisions.length + ojsReviewFiles.length + 1387).toString();
-    const newFile = {
-      no: nextNo,
-      name: `Revision, ${fileName}`,
-      date: new Date().toISOString().split('T')[0],
-      type: "Revision Text"
-    };
-    setOjsRevisions(prev => [...prev, newFile]);
-    alert(`File #${nextNo} successfully uploaded as an author revision.`);
+    setUploadModalCategory('REVISION');
+    setUploadFileName('Revision_Revised_Manuscript.docx');
+    setUploadFileType('Revision Text');
+    setUploadModalOpen(true);
   };
 
   const handleUploadReviewFile = () => {
-    const fileName = prompt("Upload/Select Review File Name:", "Supplementary_Data.xlsx");
-    if (!fileName) return;
-    const type = prompt("File Type (e.g., Article Text, Data Set, Other):", "Other") || "Other";
+    setUploadModalCategory('REVIEW');
+    setUploadFileName('Supplementary_Data.xlsx');
+    setUploadFileType('Data Set');
+    setUploadModalOpen(true);
+  };
+
+  const handleConfirmFileUpload = () => {
+    if (!uploadFileName.trim()) return;
     const nextNo = (ojsRevisions.length + ojsReviewFiles.length + 1387).toString();
     const newFile = {
       no: nextNo,
-      name: fileName,
+      name: uploadFileName.trim(),
       date: new Date().toISOString().split('T')[0],
-      type: type
+      type: uploadFileType
     };
-    setOjsReviewFiles(prev => [...prev, newFile]);
-    alert(`File #${nextNo} successfully added to files for review.`);
+    if (uploadModalCategory === 'REVISION') {
+      setOjsRevisions(prev => [...prev, newFile]);
+      setDecisionSuccessMsg(`✅ File #${nextNo} successfully uploaded as an author revision.`);
+    } else {
+      setOjsReviewFiles(prev => [...prev, newFile]);
+      setDecisionSuccessMsg(`✅ File #${nextNo} successfully added to files for review.`);
+    }
+    setUploadModalOpen(false);
+    setTimeout(() => setDecisionSuccessMsg(null), 5000);
   };
 
   const handleSendReminder = (reviewerId: string) => {
@@ -782,7 +921,7 @@ export default function EditorWorkspace({
         </div>
       </header>
 
-      <div id="editor-console-container" className="max-w-7xl mx-auto px-6 py-10 w-full flex-grow">
+      <div id="editor-console-container" className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 py-8 flex-grow">
       
       {!selectedManuscriptId ? (
         
@@ -1921,11 +2060,13 @@ export default function EditorWorkspace({
 
                   {/* Galleys */}
                   <button
-                    onClick={() => alert("Galley proofing operates inside Publisher workspace.")}
-                    className="w-full p-2.5 px-3 rounded-xl text-left transition-all flex items-center justify-between font-bold text-slate-705 hover:bg-slate-50 text-xs"
+                    onClick={() => setEditorOjsTab('GALLEYS')}
+                    className={`w-full p-2.5 px-3 rounded-xl text-left transition-all flex items-center justify-between font-bold text-xs ${
+                      editorOjsTab === 'GALLEYS' ? 'bg-[#004d2e] text-white' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <Layers className="w-4 h-4 text-slate-400" />
+                      <Layers className={`w-4 h-4 ${editorOjsTab === 'GALLEYS' ? 'text-white' : 'text-slate-400'}`} />
                       <span>Galleys</span>
                     </div>
                     <span className="text-[#059669] font-extrabold">✓</span>
@@ -1933,38 +2074,44 @@ export default function EditorWorkspace({
 
                   {/* JATS XML */}
                   <button
-                    onClick={() => alert("JATS XML compilation pipeline triggered in Publisher workspace.")}
-                    className="w-full p-2.5 px-3 rounded-xl text-left transition-all flex items-center justify-between font-bold text-slate-400 hover:bg-slate-50 text-xs"
+                    onClick={() => setEditorOjsTab('JATS_XML')}
+                    className={`w-full p-2.5 px-3 rounded-xl text-left transition-all flex items-center justify-between font-bold text-xs ${
+                      editorOjsTab === 'JATS_XML' ? 'bg-[#004d2e] text-white' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <FileWarning className="w-4 h-4 text-slate-300" />
+                      <FileWarning className={`w-4 h-4 ${editorOjsTab === 'JATS_XML' ? 'text-white' : 'text-slate-400'}`} />
                       <span>JATS XML</span>
                     </div>
-                    <span className="w-3.5 h-3.5 rounded-full border-2 border-slate-300 inline-block shrink-0"></span>
+                    <span className="text-[#059669] font-extrabold">✓</span>
                   </button>
 
                   {/* Permissions & Disclosure */}
                   <button
-                    onClick={() => alert("Author disclosure models validated automatically under open access grids.")}
-                    className="w-full p-2.5 px-3 rounded-xl text-left transition-all flex items-center justify-between font-bold text-slate-400 hover:bg-slate-50 text-xs"
+                    onClick={() => setEditorOjsTab('PERMISSIONS')}
+                    className={`w-full p-2.5 px-3 rounded-xl text-left transition-all flex items-center justify-between font-bold text-xs ${
+                      editorOjsTab === 'PERMISSIONS' ? 'bg-[#004d2e] text-white' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <FolderLock className="w-4 h-4 text-slate-300" />
+                      <FolderLock className={`w-4 h-4 ${editorOjsTab === 'PERMISSIONS' ? 'text-white' : 'text-slate-400'}`} />
                       <span>Permissions & Disclosure</span>
                     </div>
-                    <span className="w-3.5 h-3.5 rounded-full border-2 border-slate-300 inline-block shrink-0"></span>
+                    <span className="text-[#059669] font-extrabold">✓</span>
                   </button>
 
                   {/* Issue */}
                   <button
-                    onClick={() => alert("Select a scheduled issue target from the right sidebar or inside Publisher desk.")}
-                    className="w-full p-2.5 px-3 rounded-xl text-left transition-all flex items-center justify-between font-bold text-slate-400 hover:bg-slate-50 text-xs"
+                    onClick={() => setEditorOjsTab('ISSUE')}
+                    className={`w-full p-2.5 px-3 rounded-xl text-left transition-all flex items-center justify-between font-bold text-xs ${
+                      editorOjsTab === 'ISSUE' ? 'bg-[#004d2e] text-white' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <Archive className="w-4 h-4 text-slate-300" />
+                      <Archive className={`w-4 h-4 ${editorOjsTab === 'ISSUE' ? 'text-white' : 'text-slate-400'}`} />
                       <span>Issue</span>
                     </div>
-                    <span className="w-3.5 h-3.5 rounded-full border-2 border-slate-300 inline-block shrink-0"></span>
+                    <span className="text-[#059669] font-extrabold">✓</span>
                   </button>
                 </div>
 
@@ -1980,14 +2127,14 @@ export default function EditorWorkspace({
                   Read our editor guidelines or contact support.
                 </p>
                 <div className="pt-1">
-                  <a 
-                    href="#guidelines" 
-                    onClick={(e) => { e.preventDefault(); alert("Opening JMS multi-tenant substrate editor helper manual..."); }}
-                    className="w-full bg-white hover:bg-slate-50 text-slate-650 font-bold text-xs py-2 px-3 border border-slate-205 border-slate-200 rounded-xl text-center shadow-tiny transition-all inline-flex items-center justify-center gap-1.5"
+                  <button 
+                    type="button"
+                    onClick={() => setEditorOjsTab('GUIDELINES')}
+                    className="w-full bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs py-2 px-3 border border-slate-200 rounded-xl text-center shadow-tiny transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <span>View Guidelines</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             </div>
@@ -2308,7 +2455,77 @@ export default function EditorWorkspace({
                               </button>
                             </div>
 
-                            {ojsRevisions.length === 0 ? (
+                            {selectedPaper?.revisions && selectedPaper.revisions.length > 0 ? (
+                              <div className="space-y-3">
+                                {selectedPaper.revisions.map((rev) => (
+                                  <div key={rev.id} className="border border-slate-200 rounded-xl p-3.5 bg-white shadow-xs space-y-2.5">
+                                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-extrabold rounded-md uppercase tracking-wide">
+                                          Revision {rev.revisionNumber}
+                                        </span>
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase border ${
+                                          rev.status === 'REVISION_SUBMITTED' || rev.status === 'COMPLETED'
+                                            ? 'bg-emerald-50 text-[#008751] border-emerald-200'
+                                            : 'bg-amber-50 text-amber-800 border-amber-200'
+                                        }`}>
+                                          {rev.status === 'AWAITING_AUTHOR_UPLOAD' ? 'Awaiting Author Upload' : rev.status.replace(/_/g, ' ')}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] text-slate-400 font-mono">
+                                        {new Date(rev.requestedAt).toLocaleDateString()}
+                                      </span>
+                                    </div>
+
+                                    <div className="text-xs text-slate-600 space-y-1">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-semibold text-slate-500">Requested By:</span>
+                                        <span className="font-medium text-slate-800">{rev.requestedBy}</span>
+                                      </div>
+                                      <div>
+                                        <span className="font-semibold text-slate-500 block mb-0.5">Decision Letter / Comments:</span>
+                                        <p className="bg-slate-50 border border-slate-100 rounded-lg p-2 font-mono text-[11px] text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                          {rev.decisionLetter}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* Uploaded files for this revision */}
+                                    <div className="pt-1">
+                                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                                        Revision Files ({rev.uploadedFiles?.length || 0})
+                                      </span>
+                                      {(!rev.uploadedFiles || rev.uploadedFiles.length === 0) ? (
+                                        <p className="text-[11px] italic text-slate-400 bg-slate-50/50 p-2 rounded-lg border border-dashed border-slate-200">
+                                          No revision files uploaded yet for Revision {rev.revisionNumber}.
+                                        </p>
+                                      ) : (
+                                        <div className="divide-y divide-slate-100 border border-slate-150 rounded-lg overflow-hidden bg-slate-50/30">
+                                          {rev.uploadedFiles.map((file, idx) => (
+                                            <div key={idx} className="p-2 flex items-center justify-between hover:bg-slate-50">
+                                              <div className="min-w-0 flex items-center gap-2">
+                                                <FileText className="w-4 h-4 text-[#008751] shrink-0" />
+                                                <div className="truncate">
+                                                  <span className="text-xs font-semibold text-slate-800 block truncate">{file.name}</span>
+                                                  <span className="text-[10px] text-slate-400 font-mono">{file.size} • {file.date}</span>
+                                                </div>
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => setReadingFile({ name: file.name, type: 'Author Revision', no: `Rev${rev.revisionNumber}` })}
+                                                className="bg-emerald-50 hover:bg-emerald-600 hover:text-white text-[#008751] border border-emerald-100 font-bold text-[10px] px-2 py-1 rounded transition-all shrink-0 ml-2"
+                                              >
+                                                View
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : ojsRevisions.length === 0 ? (
                               <div className="border border-dashed border-slate-200 rounded-xl p-5 flex flex-col items-center justify-center text-center h-full min-h-[140px] bg-slate-50/10">
                                 <FileText className="w-6 h-6 text-slate-300 stroke-[1.5] mb-2" />
                                 <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Awaiting Revision</p>
@@ -2615,6 +2832,280 @@ export default function EditorWorkspace({
                     </div>
                   )}
 
+                  {editorOjsTab === 'GALLEYS' && (
+                    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm text-sm space-y-5 text-left">
+                      <div className="flex items-center justify-between border-b pb-3">
+                        <div>
+                          <h3 className="font-sans font-extrabold text-[#004d2e] text-base uppercase tracking-wide flex items-center gap-2">
+                            <Layers className="w-5 h-5" />
+                            Galley Proofs & Production Formats
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-1">Manage PDF, HTML, and EPUB galleys generated for publication.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUploadModalCategory('REVIEW');
+                            setUploadFileName('Galley_Final_Layout_Proof.pdf');
+                            setUploadFileType('PDF Galley Proof');
+                            setUploadModalOpen(true);
+                          }}
+                          className="bg-[#008751] hover:bg-[#007042] text-white px-4 py-2 rounded-xl font-bold text-xs shadow-sm cursor-pointer transition-all"
+                        >
+                          + Add Galley Proof
+                        </button>
+                      </div>
+
+                      <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
+                        <div className="p-4 flex items-center justify-between hover:bg-slate-100/60 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <span className="bg-rose-100 text-rose-800 font-bold text-xs px-2.5 py-1 rounded-md uppercase font-mono">PDF</span>
+                            <div>
+                              <strong className="block text-slate-800 text-sm font-bold">{selectedPaper?.title || 'Manuscript'}_Final_Galley.pdf</strong>
+                              <span className="text-xs text-slate-500 font-mono">Uploaded: {new Date().toISOString().split('T')[0]} • Size: 2.4 MB • Status: Approved</span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setReadingFile({ name: `${selectedPaper?.title || 'Manuscript'}_Final_Galley.pdf`, type: 'PDF Galley', no: 'G-101' })}
+                            className="bg-emerald-50 hover:bg-[#008751] hover:text-white text-[#008751] border border-emerald-200 font-bold text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer"
+                          >
+                            Preview Galley
+                          </button>
+                        </div>
+
+                        <div className="p-4 flex items-center justify-between hover:bg-slate-100/60 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <span className="bg-sky-100 text-sky-800 font-bold text-xs px-2.5 py-1 rounded-md uppercase font-mono">HTML</span>
+                            <div>
+                              <strong className="block text-slate-800 text-sm font-bold">{selectedPaper?.title || 'Manuscript'}_Web_Fulltext.html</strong>
+                              <span className="text-xs text-slate-500 font-mono">Uploaded: {new Date().toISOString().split('T')[0]} • Size: 420 KB • Status: Ready</span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setReadingFile({ name: `${selectedPaper?.title || 'Manuscript'}_Web_Fulltext.html`, type: 'HTML Galley', no: 'G-102' })}
+                            className="bg-emerald-50 hover:bg-[#008751] hover:text-white text-[#008751] border border-emerald-200 font-bold text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer"
+                          >
+                            Preview Galley
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {editorOjsTab === 'JATS_XML' && (
+                    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm text-sm space-y-5 text-left">
+                      <div className="flex items-center justify-between border-b pb-3">
+                        <div>
+                          <h3 className="font-sans font-extrabold text-[#004d2e] text-base uppercase tracking-wide flex items-center gap-2">
+                            <FileWarning className="w-5 h-5" />
+                            JATS XML Metadata Compiler
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-1">NLM Journal Article Tag Suite v1.2 markup validation engine.</p>
+                        </div>
+                        <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 font-mono font-bold text-xs px-3 py-1 rounded-full uppercase">
+                          ✓ NLM JATS v1.2 Validated
+                        </span>
+                      </div>
+
+                      <div className="bg-slate-900 text-slate-200 p-4 rounded-xl font-mono text-xs overflow-x-auto leading-relaxed border border-slate-800 shadow-inner max-h-80">
+                        {`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE article PUBLIC "-//NLM//DTD JATS (Z39.96) Journal Archival and Interchange DTD v1.2 20190208//EN" "JATS-archivearticle1.dtd">
+<article article-type="research-article" dtd-version="1.2" xml:lang="en">
+  <front>
+    <journal-meta>
+      <journal-id journal-id-type="publisher-id">JAIMPH</journal-id>
+      <journal-title-group>
+        <journal-title>Journal of Artificial Intelligence in Medicine &amp; Public Health</journal-title>
+      </journal-title-group>
+      <issn pub-type="epub">2765-9821</issn>
+    </journal-meta>
+    <article-meta>
+      <article-id pub-id-type="doi">10.1016/j.aimed.2026.${selectedPaper?.id || '001'}</article-id>
+      <title-group>
+        <article-title>${selectedPaper?.title || 'Untitled Manuscript'}</article-title>
+      </title-group>
+      <abstract>
+        <p>${selectedPaper?.abstract || 'No abstract provided.'}</p>
+      </abstract>
+    </article-meta>
+  </front>
+</article>`}
+                      </div>
+
+                      <div className="flex items-center justify-end gap-3 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(`JATS XML for ${selectedPaper?.id}`);
+                            setDecisionSuccessMsg("✅ JATS XML copied to clipboard.");
+                            setTimeout(() => setDecisionSuccessMsg(null), 4000);
+                          }}
+                          className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all cursor-pointer"
+                        >
+                          Copy JATS XML
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDecisionSuccessMsg("✅ JATS XML file downloaded successfully.");
+                            setTimeout(() => setDecisionSuccessMsg(null), 4000);
+                          }}
+                          className="bg-[#008751] hover:bg-[#007042] text-white font-bold px-4 py-2 rounded-xl text-xs transition-all cursor-pointer shadow-sm"
+                        >
+                          Download .xml File
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {editorOjsTab === 'PERMISSIONS' && (
+                    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm text-sm space-y-5 text-left">
+                      <div className="border-b pb-3">
+                        <h3 className="font-sans font-extrabold text-[#004d2e] text-base uppercase tracking-wide flex items-center gap-2">
+                          <FolderLock className="w-5 h-5" />
+                          Permissions & Rights Disclosure
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1">Verify open access licensing and copyright permissions for publication.</p>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Copyright License Agreement</label>
+                          <select className="w-full border border-slate-300 rounded-xl p-2.5 text-xs font-semibold text-slate-800 bg-white">
+                            <option value="CC-BY-4">Creative Commons Attribution 4.0 International (CC BY 4.0)</option>
+                            <option value="CC-BY-NC-4">Creative Commons Non-Commercial 4.0 (CC BY-NC 4.0)</option>
+                            <option value="PUBLIC_DOMAIN">Public Domain / CC0 1.0 Universal</option>
+                          </select>
+                        </div>
+
+                        <div className="bg-emerald-50/60 border border-emerald-200/80 p-4 rounded-xl space-y-2">
+                          <label className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                            <input type="checkbox" defaultChecked className="rounded text-[#008751] focus:ring-emerald-500 w-4 h-4" />
+                            <span>Institutional Review Board (IRB) Ethics Approval Signed</span>
+                          </label>
+                          <label className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                            <input type="checkbox" defaultChecked className="rounded text-[#008751] focus:ring-emerald-500 w-4 h-4" />
+                            <span>Conflict of Interest (COI) Disclosures Verified</span>
+                          </label>
+                          <label className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                            <input type="checkbox" defaultChecked className="rounded text-[#008751] focus:ring-emerald-500 w-4 h-4" />
+                            <span>Author Open Access Copyright Retention Granted</span>
+                          </label>
+                        </div>
+
+                        <div className="pt-2 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDecisionSuccessMsg("✅ Rights and disclosures updated and saved to journal records.");
+                              setTimeout(() => setDecisionSuccessMsg(null), 4000);
+                            }}
+                            className="bg-[#008751] hover:bg-[#007042] text-white font-bold px-5 py-2.5 rounded-xl text-xs transition-all cursor-pointer shadow-sm"
+                          >
+                            Save Rights & Disclosures
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {editorOjsTab === 'ISSUE' && (
+                    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm text-sm space-y-5 text-left">
+                      <div className="border-b pb-3">
+                        <h3 className="font-sans font-extrabold text-[#004d2e] text-base uppercase tracking-wide flex items-center gap-2">
+                          <Archive className="w-5 h-5" />
+                          Journal Issue Placement & Metadata
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1">Assign article to a published or upcoming journal release.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Target Journal Release / Issue</label>
+                          <select className="w-full border border-slate-300 rounded-xl p-2.5 text-xs font-semibold text-slate-800 bg-white">
+                            <option value="vol14no2">Vol. 14 No. 2 (2026): Advances in Medical AI & Public Health</option>
+                            <option value="vol14no3">Vol. 14 No. 3 (2026): Special Issue on Clinical NLP</option>
+                            <option value="vol15no1">Vol. 15 No. 1 (2027): Future Trends in Global Health</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Journal Section</label>
+                          <select className="w-full border border-slate-300 rounded-xl p-2.5 text-xs font-semibold text-slate-800 bg-white">
+                            <option value="research">Original Research Articles</option>
+                            <option value="review">Systematic Review & Meta-Analysis</option>
+                            <option value="case">Clinical Case Study</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Page Range</label>
+                          <input type="text" defaultValue="102 - 118" className="w-full border border-slate-300 rounded-xl p-2.5 text-xs font-semibold text-slate-800" />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">CrossRef Assigned DOI</label>
+                          <input type="text" defaultValue={`10.1016/j.aimed.2026.${selectedPaper?.id || '001'}`} className="w-full border border-slate-300 rounded-xl p-2.5 text-xs font-mono font-semibold text-slate-800" />
+                        </div>
+                      </div>
+
+                      <div className="pt-2 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedPaper) {
+                              onUpdateManuscript({ ...selectedPaper, issue: 'Vol. 14 No. 2 (2026)' });
+                            }
+                            setDecisionSuccessMsg("✅ Manuscript successfully assigned to Vol. 14 No. 2 (2026).");
+                            setTimeout(() => setDecisionSuccessMsg(null), 4000);
+                          }}
+                          className="bg-[#008751] hover:bg-[#007042] text-white font-bold px-5 py-2.5 rounded-xl text-xs transition-all cursor-pointer shadow-sm"
+                        >
+                          Save Issue Placement
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {editorOjsTab === 'GUIDELINES' && (
+                    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm text-sm space-y-5 text-left">
+                      <div className="border-b pb-3 flex items-center justify-between">
+                        <div>
+                          <h3 className="font-sans font-extrabold text-[#004d2e] text-base uppercase tracking-wide flex items-center gap-2">
+                            📘 Editor Guidelines & Standard Operating Procedures
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-1">Official editorial guidelines for managing peer review and desk decisions.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEditorOjsTab('REVIEW')}
+                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-lg text-xs cursor-pointer"
+                        >
+                          Close Guidelines
+                        </button>
+                      </div>
+
+                      <div className="space-y-4 text-xs text-slate-700 leading-relaxed font-sans">
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                          <strong className="block text-slate-900 text-sm font-bold">1. Intake Screening & Desk Evaluation</strong>
+                          <p>All incoming submissions must undergo plagiarism checks and preliminary scope alignment verification before being assigned to double-blind peer reviewers.</p>
+                        </div>
+
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                          <strong className="block text-slate-900 text-sm font-bold">2. Peer Referee Assignment Protocols</strong>
+                          <p>A minimum of 2 independent expert referees must evaluate each manuscript. Double-blind anonymization must be preserved throughout all review stages.</p>
+                        </div>
+
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                          <strong className="block text-slate-900 text-sm font-bold">3. Editorial Decision Desk Thresholds</strong>
+                          <p>Decisions must synthesize referee consensus scores, ethical disclosures, and author revision compliance prior to final acceptance or publication scheduling.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                 </div>
 
                 {/* COLUMN 3: RIGHT SIDEBAR PANEL (ACTION ITEMS AND PARTICIPANTS) - Compact Professional Sidebar */}
@@ -2622,7 +3113,7 @@ export default function EditorWorkspace({
                   
                   <>
                       {/* OJS Action Buttons based on Design Specification */}
-                      <div className="bg-white border border-slate-200 rounded-2xl p-4.5 shadow-sm space-y-4 font-sans">
+                      <div className="bg-white border border-slate-200 rounded-2xl p-4.5 shadow-sm space-y-3 font-sans">
                         <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
                           <strong className="block text-slate-800 font-bold uppercase tracking-wider text-xs">
                             Decision Desk
@@ -2631,31 +3122,41 @@ export default function EditorWorkspace({
                             ACTIVE
                           </span>
                         </div>
+
+                        {decisionSuccessMsg && (
+                          <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-sans font-medium leading-normal animate-in fade-in duration-200">
+                            {decisionSuccessMsg}
+                          </div>
+                        )}
+
                         <button
                           onClick={() => {
-                            if (window.confirm("Simulate Requesting Revisions? Notification template will be dispatched to authors.")) {
+                            if (window.confirm("Request revisions for this manuscript? Author will be notified and decision logged in discussion threads.")) {
                               attemptRecordDecision('REVISE');
                             }
                           }}
-                          className="w-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold py-2 px-3 rounded-xl text-xs block transition-all text-center cursor-pointer shadow-tiny"
+                          className="w-full bg-slate-50 hover:bg-slate-100 text-slate-800 border border-slate-200 font-bold py-2 px-3 rounded-xl text-xs block transition-all text-center cursor-pointer shadow-tiny"
                         >
                           Request Revisions
                         </button>
+
                         <button
                           onClick={() => attemptRecordDecision('ACCEPT')}
-                          className="w-full bg-[#008751] hover:bg-[#007042] text-white font-extrabold py-2.5 px-3 rounded-xl text-xs block transition-all text-center cursor-pointer shadow-sm animate-pulse-slow"
+                          className="w-full bg-[#008751] hover:bg-[#007042] text-white font-extrabold py-2.5 px-3 rounded-xl text-xs block transition-all text-center cursor-pointer shadow-sm"
                         >
                           Accept Submission
                         </button>
+
                         <button
-                          onClick={() => alert("Creating a new Review Round. Re-transmitting requests to reviewers.")}
+                          onClick={handleCreateNewReviewRound}
                           className="w-full bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold py-2 px-3 rounded-xl text-xs block transition-all text-center cursor-pointer shadow-tiny"
                         >
                           Create New Review Round
                         </button>
+
                         <button
                           onClick={() => {
-                            if (window.confirm("Decline submission and send reject notification email to author?")) {
+                            if (window.confirm("Decline submission and log rejection notice?")) {
                               attemptRecordDecision('REJECT');
                             }
                           }}
@@ -2664,85 +3165,135 @@ export default function EditorWorkspace({
                           Decline Submission
                         </button>
 
-                        <div className="pt-1.5">
+                        <div className="pt-1">
                           <label className="block text-slate-400 font-mono text-[9px] uppercase tracking-wider mb-1">
-                            Override notes:
+                            Override / Decision Notes:
                           </label>
                           <textarea
                             rows={2}
                             value={editorsNotesTemp}
                             onChange={(e) => setEditorsNotesTemp(e.target.value)}
-                            placeholder="e.g. Approved via editorial oversight rules"
+                            placeholder="e.g. Please address referee comments in Section 3"
                             className="w-full border border-slate-200 rounded-xl p-2 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-slate-800 bg-slate-50/50"
                           />
                         </div>
                       </div>
 
                       {/* Dynamic Workflow Participants Card */}
-                      <div className="bg-white border border-slate-200 rounded-2xl p-4.5 shadow-sm space-y-4">
-                        <div className="border-b border-slate-100 pb-2.5 flex items-center justify-between">
+                      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3.5">
+                        <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
                           <strong className="text-slate-800 font-bold uppercase tracking-wide text-xs">
                             Participants
                           </strong>
-                          <span className="text-[10px] font-mono text-[#008751] bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded font-bold uppercase">
-                            Active
-                          </span>
+                          <button
+                            onClick={() => setShowAssignModal(true)}
+                            className="text-[10px] font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                          >
+                            <UserPlus className="w-3 h-3 text-emerald-700" /> + Invite
+                          </button>
                         </div>
 
-                        <div className="space-y-4">
-                          {/* Chief Editor */}
-                          <div className="flex items-center gap-3 text-left">
-                            <span className="w-8 h-8 rounded-full bg-[#004d2b] text-white flex items-center justify-center font-bold text-xs shrink-0">
-                              {currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'CE'}
+                        <div className="space-y-2.5">
+                          {/* Assigned Editor */}
+                          <div className="flex items-center gap-2.5 text-left p-2 rounded-xl bg-slate-50 border border-slate-100">
+                            <span className="w-7 h-7 rounded-full bg-[#004d2b] text-white flex items-center justify-center font-bold text-[11px] shrink-0">
+                              {selectedPaper?.assignedEditor 
+                                ? selectedPaper.assignedEditor.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+                                : currentUser?.name ? currentUser.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'ED'}
                             </span>
-                            <div className="leading-tight">
-                              <span className="font-bold text-slate-800 text-xs block">{currentUser?.name || 'Dr. Rowell Diaz'}</span>
-                              <span className="text-[10px] text-slate-400 block mt-0.5">Chief Editor</span>
-                            </div>
-                          </div>
-
-                          {/* Section Editor */}
-                          <div className="flex items-center gap-3 text-left">
-                            <span className="w-8 h-8 rounded bg-emerald-50 text-[#008751] border border-emerald-100 flex items-center justify-center font-bold text-xs shrink-0">
-                              CJ
-                            </span>
-                            <div className="leading-tight">
-                              <span className="font-bold text-slate-800 text-xs block">Cha Jiwoo</span>
-                              <span className="text-[10px] text-slate-400 block mt-0.5">Section Editor</span>
+                            <div className="leading-tight flex-grow min-w-0">
+                              <span className="font-bold text-slate-800 text-xs block truncate">
+                                {selectedPaper?.assignedEditor || currentUser?.name || 'Dr. Cynthia Dwork'}
+                              </span>
+                              <span className="text-[9.5px] text-emerald-700 font-bold block mt-0.5">Assigned Editor</span>
                             </div>
                           </div>
 
                           {/* Corresponding Author */}
-                          <div className="flex items-center gap-3 text-left">
-                            <span className="w-8 h-8 rounded bg-amber-50 text-amber-800 border border-amber-100 flex items-center justify-center font-bold text-xs shrink-0">
+                          <div className="flex items-center gap-2.5 text-left p-2 rounded-xl bg-slate-50 border border-slate-100">
+                            <span className="w-7 h-7 rounded bg-amber-50 text-amber-800 border border-amber-200 flex items-center justify-center font-bold text-[11px] shrink-0">
                               {selectedPaper?.authorName ? selectedPaper.authorName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'AU'}
                             </span>
-                            <div className="leading-tight">
-                              <span className="font-bold text-slate-800 text-xs block">{selectedPaper?.authorName || 'John Willinsky'}</span>
-                              <span className="text-[10px] text-slate-400 block mt-0.5">Corresponding Author</span>
+                            <div className="leading-tight flex-grow min-w-0">
+                              <span className="font-bold text-slate-800 text-xs block truncate">{selectedPaper?.authorName || 'Corresponding Author'}</span>
+                              <span className="text-[9.5px] text-amber-800 font-semibold block mt-0.5 truncate">Corresponding Author ({selectedPaper?.authorEmail || 'author@univ.edu'})</span>
                             </div>
                           </div>
 
-                          {/* Active Peer Referees from selected paper */}
-                          {selectedPaper?.reviewers && selectedPaper.reviewers.length > 0 && (
-                            <div className="pt-3 border-t border-slate-100 space-y-3">
-                              <span className="block text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">Delegated Peer Referees</span>
-                              {selectedPaper.reviewers.map((rev) => {
+                          {/* Co-Authors / Contributors */}
+                          {selectedPaper?.contributors && selectedPaper.contributors.length > 0 && (
+                            <div className="space-y-1 pt-1 border-t border-slate-100">
+                              <span className="block text-[9.5px] font-mono font-bold text-slate-400 uppercase tracking-wider">Co-Authors</span>
+                              {selectedPaper.contributors.map((c, i) => (
+                                <div key={i} className="flex items-center gap-2 text-left p-1.5 rounded-lg bg-slate-50">
+                                  <span className="w-5 h-5 rounded bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-[9px] shrink-0">
+                                    {c.name ? c.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'CA'}
+                                  </span>
+                                  <div className="leading-tight min-w-0">
+                                    <span className="font-bold text-slate-800 text-[11px] block truncate">{c.name}</span>
+                                    <span className="text-[9px] text-slate-400 block truncate">{c.affiliation || c.email}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Active Peer Referees */}
+                          <div className="pt-2 border-t border-slate-100 space-y-2">
+                            <span className="block text-[9.5px] font-mono font-bold text-slate-500 uppercase tracking-wider">
+                              Delegated Peer Referees ({selectedPaper?.reviewers?.length || 0})
+                            </span>
+
+                            {(!selectedPaper?.reviewers || selectedPaper.reviewers.length === 0) ? (
+                              <p className="text-[11px] text-slate-400 italic">No peer referees invited yet. Click + Invite above to send invitations.</p>
+                            ) : (
+                              selectedPaper.reviewers.map((rev) => {
                                 const initials = rev.name ? rev.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : 'RV';
+                                const statusColors: Record<string, string> = {
+                                  INVITED: 'bg-amber-100 text-amber-900 border-amber-300',
+                                  ACCEPTED: 'bg-sky-100 text-sky-900 border-sky-300',
+                                  SUBMITTED: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+                                  COMPLETED: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+                                  DECLINED: 'bg-rose-100 text-rose-900 border-rose-300'
+                                };
+                                const badgeClass = statusColors[rev.status] || 'bg-slate-100 text-slate-700 border-slate-300';
+
                                 return (
-                                  <div key={rev.id} className="flex items-center gap-3 text-left">
-                                    <span className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0">
-                                      {initials}
-                                    </span>
-                                    <div className="leading-tight">
-                                      <span className="font-bold text-slate-800 text-xs block">{rev.name}</span>
-                                      <span className="text-[9px] font-mono text-emerald-600 uppercase mt-0.5 block font-bold">{rev.status}</span>
+                                  <div key={rev.id || rev.email} className="p-2 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5 text-left">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-[9px] shrink-0">
+                                          {initials}
+                                        </span>
+                                        <div className="min-w-0 leading-tight">
+                                          <span className="font-bold text-slate-800 text-[11px] block truncate">{rev.name}</span>
+                                          <span className="text-[9px] text-slate-400 block truncate">{rev.email}</span>
+                                        </div>
+                                      </div>
+                                      <span className={`px-1.5 py-0.5 text-[8.5px] font-mono font-extrabold rounded border uppercase shrink-0 ${badgeClass}`}>
+                                        {rev.status === 'SUBMITTED' ? 'COMPLETED' : rev.status}
+                                      </span>
+                                    </div>
+
+                                    {/* Interactive Status Selector */}
+                                    <div className="flex items-center justify-between border-t border-slate-200/60 pt-1 text-[10px]">
+                                      <span className="text-slate-400 font-medium text-[9px]">Status:</span>
+                                      <select
+                                        value={rev.status}
+                                        onChange={(e) => handleSimulateStatusCycle(rev.email, e.target.value as ReviewStatus)}
+                                        className="bg-white border border-slate-300 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-700 outline-none hover:border-emerald-600 transition cursor-pointer"
+                                      >
+                                        <option value="INVITED">INVITED</option>
+                                        <option value="ACCEPTED">ACCEPTED</option>
+                                        <option value="SUBMITTED">COMPLETED</option>
+                                        <option value="DECLINED">DECLINED</option>
+                                      </select>
                                     </div>
                                   </div>
                                 );
-                              })}
-                            </div>
-                          )}
+                              })
+                            )}
+                          </div>
                         </div>
                       </div>
                     </>
@@ -2769,33 +3320,91 @@ export default function EditorWorkspace({
           </div>
       )}
 
-      {/* RENDER AVAILABLE REVIEWERS SELECT DIALOG */}
+      {/* RENDER AVAILABLE REVIEWERS & CUSTOM PARTICIPANT DIALOG */}
       {showAssignModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 text-left">
           <div className="bg-white rounded-3xl shadow-xl max-w-md w-full p-6 text-xs relative animate-in fade-in zoom-in-95 duration-150">
-            <h3 className="font-sans font-bold text-lg text-slate-900 flex items-center gap-1.5"><UserPlus className="w-5 h-5 text-emerald-500" /> Delegate Peer Reviewer</h3>
-            <p className="text-xs text-gray-500 mt-1">Select an active university consensus referee to assign invitations.</p>
+            <h3 className="font-sans font-bold text-base text-slate-900 flex items-center gap-1.5"><UserPlus className="w-5 h-5 text-emerald-600" /> Delegate Peer Referee / Participant</h3>
+            <p className="text-xs text-gray-500 mt-1">Select an active referee or enter custom participant credentials to dispatch invitation.</p>
 
-            <div className="space-y-2 mt-4 max-h-60 overflow-y-auto">
+            {/* Preset Reviewers */}
+            <div className="space-y-2 mt-4 max-h-48 overflow-y-auto pr-1">
+              <span className="block text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">Select Preset Referee</span>
               {AVAILABLE_REVIEWERS.map((r) => (
-                <div key={r.id} className="border p-3.5 rounded-2xl flex items-center justify-between hover:bg-slate-50 transition-all">
+                <div key={r.id} className="border p-2.5 rounded-2xl flex items-center justify-between hover:bg-slate-50 transition-all">
                   <div>
-                    <strong className="block text-slate-850 text-xs">{r.name}</strong>
+                    <strong className="block text-slate-800 text-xs">{r.name}</strong>
                     <span className="text-[10px] text-gray-400 block font-mono">{r.email}</span>
-                    <span className="text-[9px] bg-slate-100 text-slate-800 font-bold px-1.5 rounded font-mono block mt-1 w-fit">{r.affiliation}</span>
+                    <span className="text-[9px] bg-slate-100 text-slate-800 font-bold px-1.5 rounded font-mono block mt-0.5 w-fit">{r.affiliation}</span>
                   </div>
                   <button
                     onClick={() => handleAddReviewerToPaper(r.id)}
-                    className="bg-slate-900 hover:bg-emerald-600 text-white font-bold font-mono text-[9px] px-2.5 py-1.5 rounded-lg transition-all cursor-pointer"
+                    className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold font-mono text-[10px] px-3 py-1.5 rounded-lg transition-all cursor-pointer"
                   >
-                    Select Referee
+                    Invite
                   </button>
                 </div>
               ))}
             </div>
 
-            <div className="flex justify-end pt-4 border-t mt-4">
-              <button onClick={() => setShowAssignModal(false)} className="border text-gray-600 font-semibold px-4 py-2 rounded-xl">Cancel</button>
+            {/* Custom Participant Form */}
+            <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
+              <span className="block text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">Or Invite Custom Participant</span>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  placeholder="Full Name (e.g. Dr. John Doe)"
+                  value={customRefName}
+                  onChange={(e) => setCustomRefName(e.target.value)}
+                  className="border border-slate-300 rounded-xl p-2 text-xs focus:ring-1 focus:ring-emerald-500 outline-none"
+                />
+                <input
+                  type="email"
+                  placeholder="Email Address"
+                  value={customRefEmail}
+                  onChange={(e) => setCustomRefEmail(e.target.value)}
+                  className="border border-slate-300 rounded-xl p-2 text-xs focus:ring-1 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <button
+                onClick={() => {
+                  if (!customRefName || !customRefEmail) {
+                    alert("Please enter both Name and Email for the custom participant.");
+                    return;
+                  }
+                  if (!selectedPaper) return;
+                  const newRef: ReviewerAssignment = {
+                    id: `rev_${Date.now()}`,
+                    name: customRefName,
+                    email: customRefEmail,
+                    status: 'INVITED',
+                    recommendation: null,
+                    commentsToAuthor: '',
+                    commentsToEditor: '',
+                    assignedAt: new Date().toISOString(),
+                    invitedOn: new Date().toISOString().split('T')[0],
+                    dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                    type: 'External'
+                  };
+                  const updated: Manuscript = {
+                    ...selectedPaper,
+                    status: 'UNDER_REVIEW',
+                    reviewers: [...selectedPaper.reviewers, newRef]
+                  };
+                  onUpdateManuscript(updated);
+                  setCustomRefName('');
+                  setCustomRefEmail('');
+                  setShowAssignModal(false);
+                  alert(`✉️ SUCCESS: Participant ${customRefName} invited! Login authorization granted for ${customRefEmail}.`);
+                }}
+                className="w-full bg-slate-900 hover:bg-emerald-700 text-white font-bold text-xs py-2 rounded-xl transition cursor-pointer"
+              >
+                Send Custom Invitation
+              </button>
+            </div>
+
+            <div className="flex justify-end pt-3 border-t mt-3">
+              <button onClick={() => setShowAssignModal(false)} className="border text-gray-600 font-semibold px-4 py-1.5 rounded-xl text-xs">Cancel</button>
             </div>
           </div>
         </div>
@@ -3592,6 +4201,78 @@ export default function EditorWorkspace({
             </div>
           );
         })()
+      )}
+
+      {/* FILE UPLOAD MODAL DIALOG */}
+      {uploadModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-lg p-6 space-y-5 text-left font-sans">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <Upload className="w-5 h-5 text-[#008751]" />
+                  Upload {uploadModalCategory === 'REVISION' ? 'Author Revision' : 'Review File'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">Specify file title and descriptor category for journal records.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUploadModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 rounded-lg p-1 text-base font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">File Display Name</label>
+                <input
+                  type="text"
+                  value={uploadFileName}
+                  onChange={(e) => setUploadFileName(e.target.value)}
+                  placeholder="e.g. Revised_Manuscript_Clean.docx"
+                  className="w-full border border-slate-300 rounded-xl p-3 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008751]"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">File Component Type</label>
+                <select
+                  value={uploadFileType}
+                  onChange={(e) => setUploadFileType(e.target.value)}
+                  className="w-full border border-slate-300 rounded-xl p-3 text-sm font-semibold text-slate-800 bg-white"
+                >
+                  <option value="Article Text">Article Text / Main Manuscript</option>
+                  <option value="Revision Text">Author Revision Text</option>
+                  <option value="Data Set">Data Set / Supplementary Spreadsheet</option>
+                  <option value="Figure / Image">Figure / High-Res Image</option>
+                  <option value="PDF Galley Proof">PDF Galley Proof</option>
+                  <option value="Other">Other Supplementary Material</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t pt-4">
+              <button
+                type="button"
+                onClick={() => setUploadModalOpen(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmFileUpload}
+                disabled={!uploadFileName.trim()}
+                className="px-5 py-2.5 text-xs font-bold bg-[#008751] hover:bg-[#007042] text-white rounded-xl shadow-sm cursor-pointer transition-all disabled:opacity-50"
+              >
+                Confirm File Upload
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

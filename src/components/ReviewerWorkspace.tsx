@@ -3,6 +3,7 @@ import TuliticsLogo from './TuliticsLogo';
 import { Manuscript, ReviewerRecommendation, ReviewStatus } from '../types';
 import { AVAILABLE_REVIEWERS } from '../initialData';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
+import FilePreviewModal from './FilePreviewModal';
 import {
   FileText,
   ShieldCheck,
@@ -39,6 +40,12 @@ export default function ReviewerWorkspace({
 }: ReviewerWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<string>('ACTION_REQUIRED');
   const [feedbackMsg, setFeedbackMsg] = useState('');
+  const [previewFile, setPreviewFile] = useState<{ isOpen: boolean; name: string; type?: string; size?: string }>({
+    isOpen: false,
+    name: '',
+    type: 'Document',
+    size: '2.4 MB'
+  });
 
   // Defaults to Dr. Tim Berners-Lee or custom logged-in user, can switch simulated personas
   const [simulatedReviewerEmail, setSimulatedReviewerEmail] = useState<string>("timbl@w3.org");
@@ -380,7 +387,7 @@ export default function ReviewerWorkspace({
         </div>
       </header>
 
-      <div id="reviewer-console-container" className="max-w-7xl mx-auto px-4 sm:px-6 py-10 w-full flex-grow">
+      <div id="reviewer-console-container" className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 py-8 flex-grow">
       
       {feedbackMsg && (
         <div id="feedback-success-indicator" className="bg-[#f0fdf4] border border-[#bbf7d0]/80 text-[#165b33] p-4 shadow-xs rounded-xl mb-6 text-xs flex items-center justify-between font-semibold animate-fade-in">
@@ -767,7 +774,7 @@ export default function ReviewerWorkspace({
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => alert(`Simulating safe document download: ${m.fileName || 'sanitized_manuscript.pdf'}`)}
+                                    onClick={() => setPreviewFile({ isOpen: true, name: m.fileName || 'sanitized_manuscript.pdf', type: 'Blinded PDF Galley', size: m.fileSize || '3.2 MB' })}
                                     className="text-slate-700 hover:text-[#008751] bg-white hover:bg-emerald-50 border border-slate-200 hover:border-[#bbf7d0]/50 font-sans font-bold text-xs flex items-center gap-1.5 px-4 py-2.5 rounded-xl cursor-pointer transition-all"
                                   >
                                     <Download className="w-4 h-4 shrink-0 text-[#008751]" /> Download PDF Galley Proof ({m.fileSize || '3.2 MB'})
@@ -1389,6 +1396,13 @@ export default function ReviewerWorkspace({
 
       </div>
 
+      <FilePreviewModal
+        isOpen={previewFile.isOpen}
+        onClose={() => setPreviewFile(prev => ({ ...prev, isOpen: false }))}
+        fileName={previewFile.name}
+        fileType={previewFile.type}
+        fileSize={previewFile.size}
+      />
     </div>
     </div>
   );

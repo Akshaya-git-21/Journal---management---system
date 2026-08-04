@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Manuscript, DiscussionMessage, Role } from '../types';
 import { MessagesSquare, Send, Paperclip, Trash2, User, FileText, CheckCircle2 } from 'lucide-react';
+import { syncManuscriptDiscussionsToSupabase } from '../lib/supabase';
 
 interface ManuscriptDiscussionProps {
   manuscript: Manuscript;
@@ -32,7 +33,7 @@ export default function ManuscriptDiscussion({
     currentRole === 'REVIEWER' ? 'grace@cober.org' : 'system@jms-core.org'
   );
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() && !attachedFile) return;
 
@@ -47,12 +48,18 @@ export default function ManuscriptDiscussion({
       fileSize: attachedFile?.size || null
     };
 
+    const updatedDiscussions = [...(manuscript.discussions || []), newMessage];
     const updated: Manuscript = {
       ...manuscript,
-      discussions: [...(manuscript.discussions || []), newMessage]
+      discussions: updatedDiscussions
     };
 
     onUpdateManuscript(updated);
+    try {
+      await syncManuscriptDiscussionsToSupabase(manuscript.id, updatedDiscussions);
+    } catch (err) {
+      console.warn("Could not sync discussion message directly to Supabase:", err);
+    }
     setInputText('');
     setAttachedFile(null);
     setTriggerMention(false);

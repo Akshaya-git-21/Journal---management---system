@@ -34,7 +34,8 @@ import {
   Check,
   HelpCircle,
   Mail,
-  X
+  X,
+  Trash2
 } from 'lucide-react';
 
 import NewSubmissionFlow from './NewSubmissionFlow';
@@ -51,38 +52,7 @@ interface AuthorWorkspaceProps {
 }
 
 // Exact OJS initial papers matching user's screenshots
-const DEFAULT_OJS_MANUSCRIPTS = [
-  {
-    id: "990",
-    author: "Пестерніков",
-    title: "test",
-    stage: "Submission",
-    language: "English",
-    section: "Articles",
-    abstract: "Validation test submission of the OJS system pipeline parameters.",
-    receivedAt: "2026-06-08"
-  },
-  {
-    id: "986",
-    author: "Testdrive et al.",
-    title: "Uji Lari OJS",
-    stage: "Submission",
-    language: "English",
-    section: "Articles",
-    abstract: "Test drive sequence evaluating system stability under concurrent loads.",
-    receivedAt: "2026-06-07"
-  },
-  {
-    id: "985",
-    author: "Testdrive",
-    title: "Test",
-    stage: "Submission",
-    language: "English",
-    section: "Articles",
-    abstract: "Initial template structure verification and submission routing tests.",
-    receivedAt: "2026-06-07"
-  }
-];
+const DEFAULT_OJS_MANUSCRIPTS: any[] = [];
 
 export default function AuthorWorkspace({
   manuscripts,
@@ -119,15 +89,19 @@ export default function AuthorWorkspace({
   // In-memory submissions list synced or populated
   const [papers, setPapers] = useState<any[]>(() => {
     const saved = localStorage.getItem('ojs_author_papers_state');
+    let loadedPapers: any[] = [];
     if (saved) {
       try {
-        return JSON.parse(saved);
+        loadedPapers = JSON.parse(saved);
       } catch (e) {
         console.error("Local parse error", e);
       }
     }
-    return DEFAULT_OJS_MANUSCRIPTS;
+    return loadedPapers;
   });
+
+  // Track recently submitted IDs to avoid race-condition auto-deletion during parent state updates
+  const recentlySubmittedIds = React.useRef<Set<string>>(new Set());
 
   // Keep papers state persistent
   useEffect(() => {
@@ -139,27 +113,21 @@ export default function AuthorWorkspace({
     setPapers((prevPapers) => {
       // Create a map of existing papers in local state to preserve key custom OJS properties
       const paperMap = new Map<string, any>();
-      
-      // Seed with DEFAULT_OJS_MANUSCRIPTS first, then overwrite with any local state
-      DEFAULT_OJS_MANUSCRIPTS.forEach((p) => {
-        paperMap.set(p.id, p);
-      });
-      prevPapers.forEach((p) => {
-        paperMap.set(p.id, p);
-      });
 
       // Map/synchronize centralized manuscripts into the OJS list
       manuscripts.forEach((m) => {
         const cleanId = m.id.replace('JMS-', '').replace('OJS-', '');
         
         // Find if this manuscript is already represented
-        const existing = paperMap.get(cleanId) || paperMap.get(m.id);
+        const existing = prevPapers.find(p => p.id === cleanId || p.id === m.id);
 
         let stage = 'Submission';
         if (m.status === 'DRAFT') {
           stage = 'Incomplete';
         } else if (m.status === 'SUBMITTED') {
           stage = 'Submission';
+        } else if (m.status === 'REVISION_REQUESTED') {
+          stage = 'Revisions Requested';
         } else if (m.status === 'UNDER_REVIEW') {
           if ((m.editorsNotes || '').includes('[Editorial Decision - REVISE]') || (m.editorsNotes || '').includes('[Editorial Decision - MINOR_REVISIONS]')) {
             // Check if user uploaded a revision (detected via discussions thread posts or notes update)
@@ -220,6 +188,13 @@ export default function AuthorWorkspace({
         paperMap.set(cleanId, mergedPaper);
       });
 
+      // Keep recently submitted papers in state even if the parent state update hasn't propagated to manuscripts yet
+      prevPapers.forEach((p) => {
+        if (!paperMap.has(p.id) && (recentlySubmittedIds.current.has(p.id) || recentlySubmittedIds.current.has(`OJS-${p.id}`))) {
+          paperMap.set(p.id, p);
+        }
+      });
+
       return Array.from(paperMap.values());
     });
   }, [manuscripts]);
@@ -245,6 +220,10 @@ export default function AuthorWorkspace({
 
   // Handle new submission creation from the premium NewSubmissionFlow wizard
   const handleCreateSubmissionFromWizard = (paperObj: any) => {
+    // Add to recently submitted IDs to avoid race-condition auto-deletion during parent state updates
+    recentlySubmittedIds.current.add(paperObj.id);
+    recentlySubmittedIds.current.add(`OJS-${paperObj.id}`);
+
     const updatedPapers = [paperObj, ...papers];
     setPapers(updatedPapers);
 
@@ -286,7 +265,9 @@ export default function AuthorWorkspace({
       authorName: authorName,
       authorEmail: authorEmail,
       submissionStep: 9,
-      editorsNotes: ""
+      editorsNotes: "",
+      assignedEditor: "Unassigned",
+      assignedEditorEmail: null
     };
 
     onSaveManuscript(parentManuscript);
@@ -566,6 +547,8 @@ export default function AuthorWorkspace({
       setSelectedQueue('PUBLISHED');
     } else if (tabId === 'DECLINED') {
       setSelectedQueue('REJECTED');
+    } else if (tabId === 'INCOMPLETE_SUBMISSIONS') {
+      setSelectedQueue('INCOMPLETE');
     }
   };
 
@@ -588,6 +571,8 @@ export default function AuthorWorkspace({
       setActiveTab('PUBLISHED');
     } else if (queueId === 'REJECTED') {
       setActiveTab('DECLINED');
+    } else if (queueId === 'INCOMPLETE') {
+      setActiveTab('INCOMPLETE_SUBMISSIONS');
     }
   };
 
@@ -716,8 +701,40 @@ export default function AuthorWorkspace({
         updatedNotes = updatedNotes ? `${updatedNotes}\n[revision uploaded]` : '[revision uploaded]';
       }
 
+      let updatedRevisions = matchManuscript.revisions ? [...matchManuscript.revisions] : [];
+      const newFileObj = {
+        id: `file_${Date.now()}`,
+        name: fileName || 'revised_manuscript.docx',
+        type: 'Author Revision Document',
+        size: '1.8 MB',
+        date: new Date().toISOString().split('T')[0]
+      };
+
+      if (updatedRevisions.length > 0) {
+        const lastIdx = updatedRevisions.length - 1;
+        const lastRev = updatedRevisions[lastIdx];
+        updatedRevisions[lastIdx] = {
+          ...lastRev,
+          status: 'REVISION_SUBMITTED',
+          uploadedFiles: [...(lastRev.uploadedFiles || []), newFileObj]
+        };
+      } else {
+        updatedRevisions.push({
+          id: `rev_${Date.now()}`,
+          revisionNumber: 1,
+          requestedBy: "Editor",
+          requestedAt: new Date().toISOString(),
+          decisionLetter: matchManuscript.editorsNotes || "Revisions requested.",
+          status: 'REVISION_SUBMITTED',
+          uploadedFiles: [newFileObj]
+        });
+      }
+
       onSaveManuscript({
         ...matchManuscript,
+        status: 'UNDER_REVIEW',
+        revisions: updatedRevisions,
+        uploadedFiles: [...(matchManuscript.uploadedFiles || []), newFileObj],
         discussions: mappedMsgs,
         fileName: fileName || matchManuscript.fileName,
         editorsNotes: updatedNotes
@@ -744,6 +761,8 @@ export default function AuthorWorkspace({
           return status === 'PUBLISHED' || p.stage === 'Published';
         case 'REJECTED':
           return status === 'REJECTED' || p.stage === 'Declined';
+        case 'INCOMPLETE':
+          return p.stage === 'Incomplete' || status === 'DRAFT';
         default:
           return true;
       }
@@ -804,24 +823,20 @@ export default function AuthorWorkspace({
                   </span>
                 </div>
                 <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
-                  <div className="px-4 py-2.5 hover:bg-slate-50 transition">
-                    <p className="text-slate-700 font-normal leading-relaxed">
-                      Submission <span className="font-semibold text-slate-900">#990</span> was assigned to the Editorial review panel.
-                    </p>
-                    <span className="text-[9px] text-gray-400 block mt-1 font-mono">Today, 11:24 AM</span>
-                  </div>
-                  <div className="px-4 py-2.5 hover:bg-slate-50 transition">
-                    <p className="text-slate-700 font-normal leading-relaxed">
-                      Submission <span className="font-semibold text-slate-900">#986</span> passed double-blind structure validations.
-                    </p>
-                    <span className="text-[9px] text-gray-400 block mt-1 font-mono">Yesterday, 04:15 PM</span>
-                  </div>
-                  <div className="px-4 py-2.5 hover:bg-slate-50 transition">
-                    <p className="text-slate-700 font-normal leading-relaxed">
-                      Submission <span className="font-semibold text-slate-900">#985</span> initialized successfully in state <span className="text-[#008751] font-bold">Submission</span>.
-                    </p>
-                    <span className="text-[9px] text-gray-400 block mt-1 font-mono">June 07, 2026</span>
-                  </div>
+                  {papers.length > 0 ? (
+                    papers.slice(0, 5).map((paper) => (
+                      <div key={paper.id} className="px-4 py-2.5 hover:bg-slate-50 transition">
+                        <p className="text-slate-700 font-normal leading-relaxed">
+                          Submission <span className="font-semibold text-slate-900">#{paper.id}</span> is synced.
+                        </p>
+                        <span className="text-[9px] text-gray-400 block mt-1 font-mono">Stage: {paper.stage}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="px-4 py-4 text-center text-gray-400">
+                      No active task alerts.
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -889,7 +904,7 @@ export default function AuthorWorkspace({
       </header>
 
       {/* ----------------- 2. CONTENT VIEW CONTAINER ----------------- */}
-      <div className="flex-grow w-full max-w-ffffff mx-auto flex flex-col md:flex-row items-stretch">
+      <div className="flex-grow w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-stretch">
         
         {/* =============== C. LEFT OJS NAVIGATION SIDEBAR =============== */}
         {!selectedPaper && (
@@ -1455,7 +1470,10 @@ export default function AuthorWorkspace({
                                   const isRejected = rawStatus === 'REJECTED';
                                   let label = paper.stage;
                                   let badgeClass = 'bg-emerald-50 text-[#008751] border-emerald-100';
-                                  if (rawStatus === 'UNDER_REVIEW') {
+                                  if (rawStatus === 'REVISION_REQUESTED' || paper.stage === 'Revisions Requested') {
+                                    label = 'Revision Requested';
+                                    badgeClass = 'bg-amber-50 text-amber-800 border-amber-200';
+                                  } else if (rawStatus === 'UNDER_REVIEW') {
                                     if (paper.stage === 'Revisions Requested') {
                                       label = 'Revision Required';
                                       badgeClass = 'bg-amber-50 text-amber-700 border-amber-100';
@@ -1587,6 +1605,14 @@ export default function AuthorWorkspace({
                                       Respond
                                     </button>
                                   )}
+                                  <button
+                                    onClick={() => handleDeletePaper(paper.id)}
+                                    className="px-2 py-1 bg-white hover:bg-rose-50 hover:text-rose-600 border border-slate-200 hover:border-rose-200 text-slate-700 rounded-md shadow-tiny transition flex items-center gap-1 cursor-pointer font-bold"
+                                    title="Delete Submission"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                    Delete
+                                  </button>
                                 </div>
                               </td>
 

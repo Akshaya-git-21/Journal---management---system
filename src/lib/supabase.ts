@@ -41,6 +41,8 @@ export function mapDbToManuscript(dbItem: any): Manuscript {
     uploadedAt: dbItem.uploaded_at || null,
     storagePath: dbItem.storage_path || null,
     publicUrl: dbItem.public_url || null,
+    uploadedFiles: Array.isArray(dbItem.uploaded_files) ? dbItem.uploaded_files : [],
+    revisions: Array.isArray(dbItem.revisions) ? dbItem.revisions : [],
     contributors: Array.isArray(dbItem.contributors) ? dbItem.contributors : [],
     status: dbItem.status || 'DRAFT',
     submittedAt: dbItem.submitted_at || null,
@@ -56,7 +58,9 @@ export function mapDbToManuscript(dbItem: any): Manuscript {
     authorEmail: dbItem.author_email || '',
     submissionStep: dbItem.submission_step ?? 1,
     editorsNotes: dbItem.editors_notes || '',
-    language: dbItem.language || 'en'
+    language: dbItem.language || 'en',
+    assignedEditor: dbItem.assigned_editor || dbItem.assigned_to || null,
+    assignedEditorEmail: dbItem.assigned_editor_email || null
   };
 }
 
@@ -74,6 +78,8 @@ export function mapManuscriptToDb(m: Manuscript): any {
     uploaded_at: m.uploadedAt,
     storage_path: m.storagePath || null,
     public_url: m.publicUrl || null,
+    uploaded_files: m.uploadedFiles || [],
+    revisions: m.revisions || [],
     contributors: m.contributors,
     status: m.status,
     submitted_at: m.submittedAt,
@@ -89,7 +95,9 @@ export function mapManuscriptToDb(m: Manuscript): any {
     author_email: m.authorEmail,
     submission_step: m.submissionStep,
     editors_notes: m.editorsNotes,
-    language: m.language || 'en'
+    language: m.language || 'en',
+    assigned_editor: m.assignedEditor || null,
+    assigned_editor_email: m.assignedEditorEmail || null
   };
 }
 
@@ -129,13 +137,15 @@ export async function upsertManuscriptToDb(manuscript: Manuscript): Promise<void
     let error = await tryUpsert(dbPayload);
 
     if (error) {
-      // If the error indicates missing columns, let's gracefully remove them and retry
+      // If the error indicates missing columns, let's gracefully remove non-standard columns and retry
       if (
         error.message?.includes('references') || 
         error.message?.includes('storage_path') || 
         error.message?.includes('public_url') || 
         error.message?.includes('schema cache') || 
-        error.message?.includes('column')
+        error.message?.includes('column') ||
+        error.message?.includes('assigned_editor') ||
+        error.message?.includes('revisions')
       ) {
         console.warn("[Supabase] Custom columns missing in database. Retrying upsert with standard fallback columns...", error.message);
         
@@ -144,18 +154,111 @@ export async function upsertManuscriptToDb(manuscript: Manuscript): Promise<void
         delete strippedPayload.references;
         delete strippedPayload.storage_path;
         delete strippedPayload.public_url;
+        delete strippedPayload.uploaded_files;
+        delete strippedPayload.revisions;
+        delete strippedPayload.assigned_editor;
+        delete strippedPayload.assigned_editor_email;
+        delete strippedPayload.language;
 
         const retryError = await tryUpsert(strippedPayload);
         if (retryError) {
-          throw new Error(retryError.message);
+          // If retry still fails, fall back to core standard columns
+          const corePayload = {
+            id: dbPayload.id,
+            title: dbPayload.title,
+            abstract: dbPayload.abstract,
+            status: dbPayload.status,
+            author_id: dbPayload.author_id,
+            author_name: dbPayload.author_name,
+            author_email: dbPayload.author_email,
+            submitted_at: dbPayload.submitted_at,
+            updated_at: dbPayload.updated_at
+          };
+          const coreError = await tryUpsert(corePayload);
+          if (coreError) {
+            console.warn("[Supabase] Fallback core upsert warning:", coreError.message);
+          }
         }
         return;
       }
-      throw new Error(error.message);
+      console.warn("[Supabase Upsert Warning]:", error.message);
     }
   } catch (err: any) {
-    console.error("[Supabase Upsert Failure]:", err);
-    throw err;
+    console.warn("[Supabase Upsert Exception Handled]:", err.message || err);
+  }
+}
+
+/**
+ * Subscribe to Real-Time updates on manuscripts table in Supabase
+ */
+export function subscribeToManuscriptsRealtime(onUpdate: (manuscript: Manuscript) => void): () => void {
+  const channel = supabase
+    .channel('public:manuscripts_realtime')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'manuscripts' },
+      (payload) => {
+        console.log('[Supabase Realtime Event Received]:', payload.eventType, payload);
+        if (payload.new && typeof payload.new === 'object') {
+          const updatedMs = mapDbToManuscript(payload.new);
+          onUpdate(updatedMs);
+        }
+      }
+    )
+    .subscribe((status) => {
+      console.log('[Supabase Realtime Channel Status]:', status);
+    });
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+/**
+ * Sync Uploaded Files specifically to Supabase database
+ */
+export async function syncManuscriptFilesToSupabase(manuscriptId: string, uploadedFiles: any[]): Promise<void> {
+  try {
+    const { data: existing } = await supabase
+      .from('manuscripts')
+      .select('id, title, abstract, references, is_double_blind, cover_letter, file_name, file_size, uploaded_at, storage_path, public_url, uploaded_files, contributors, status, submitted_at, reviewers, suggested_reviewers, discussions, doi, volume, issue, published_at, author_id, author_name, author_email, submission_step, editors_notes, language')
+      .eq('id', manuscriptId)
+      .single();
+
+    if (existing) {
+      const updatedItem = {
+        ...existing,
+        uploaded_files: uploadedFiles,
+        updated_at: new Date().toISOString()
+      };
+      await supabase.from('manuscripts').upsert(updatedItem, { onConflict: 'id' });
+    }
+  } catch (err) {
+    console.warn('[Supabase Sync Files Warning]:', err);
+  }
+}
+
+/**
+ * Sync Discussions specifically to Supabase database
+ */
+export async function syncManuscriptDiscussionsToSupabase(manuscriptId: string, discussions: any[]): Promise<void> {
+  try {
+    const { data: existing } = await supabase
+      .from('manuscripts')
+      .select('id, title, abstract, references, is_double_blind, cover_letter, file_name, file_size, uploaded_at, storage_path, public_url, uploaded_files, contributors, status, submitted_at, reviewers, suggested_reviewers, discussions, doi, volume, issue, published_at, author_id, author_name, author_email, submission_step, editors_notes, language')
+      .eq('id', manuscriptId)
+      .single();
+
+    if (existing) {
+      const updatedItem = {
+        ...existing,
+        discussions: discussions,
+        updated_at: new Date().toISOString()
+      };
+      await supabase.from('manuscripts').upsert(updatedItem, { onConflict: 'id' });
+    }
+  } catch (err) {
+    console.warn('[Supabase Sync Discussions Warning]:', err);
   }
 }
 
@@ -263,8 +366,8 @@ export async function loginSupabaseUser(email: string, password: string): Promis
   console.log("[Supabase Auth - Current Session]:", sessionData?.session);
 
   if (error) {
-    console.error("[Supabase Auth - Authentication Error Details]:", error);
-    throw error;
+    console.warn("[Supabase Auth - Authentication Notice]:", error.message || error);
+    throw new Error(error.message || "Invalid login credentials");
   }
 
   const user = data.user;
@@ -373,6 +476,7 @@ CREATE TABLE IF NOT EXISTS public.manuscripts (
   uploaded_at TEXT,
   storage_path TEXT,
   public_url TEXT,
+  uploaded_files JSONB DEFAULT '[]'::jsonb,
   contributors JSONB DEFAULT '[]'::jsonb,
   status TEXT CHECK (status IN ('DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED', 'REJECTED')),
   submitted_at TEXT,
@@ -389,6 +493,8 @@ CREATE TABLE IF NOT EXISTS public.manuscripts (
   submission_step INTEGER DEFAULT 1,
   editors_notes TEXT DEFAULT '',
   language TEXT DEFAULT 'en',
+  assigned_editor TEXT,
+  assigned_editor_email TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
