@@ -7,8 +7,13 @@
   --font-serif: "Playfair Display", Georgia, Cambria, "Times New Roman", Times, serif;
 }
 
+html {
+  font-size: 15px;
+}
+
 body {
   font-family: var(--font-sans);
+  font-size: 0.95rem;
   background-color: #f8fafc; /* Tailwind's slate-50 */
   color: #1e293b; /* slate-800 */
   -webkit-font-smoothing: antialiased;

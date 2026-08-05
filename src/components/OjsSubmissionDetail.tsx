@@ -920,14 +920,14 @@ export default function OjsSubmissionDetail({
             {/* Top Header Row with dynamic/stat values matching screenshot */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-emerald-200 gap-4">
               <div className="text-left">
-                <h1 className="text-[32px] font-black text-black tracking-tight leading-none">Submission</h1>
+                <h1 className="text-[24px] font-black text-black tracking-tight leading-none">Submission</h1>
                 <p className="text-[14px] text-[#005e38] mt-1.5 font-medium">Track and manage your manuscript submission.</p>
               </div>
               <div className="flex items-center gap-3">
                 {/* + New Submission Button */}
                 <button
                   onClick={() => alert("Simulating launching a new academic manuscript submission workflow in TULITICS Author Workspace.")}
-                  className="bg-[#008751] hover:bg-[#007043] text-white text-[15px] font-bold px-5 py-2.5 rounded-full flex items-center gap-1.5 transition duration-150 shadow-md cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+                  className="bg-[#008751] hover:bg-[#007043] text-white text-[14px] font-bold px-5 py-2.5 rounded-full flex items-center gap-1.5 transition duration-150 shadow-md cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
                 >
                   <Plus className="w-4 h-4 text-white font-bold stroke-[3]" />
                   <span>New Submission</span>
@@ -963,7 +963,7 @@ export default function OjsSubmissionDetail({
                     <span className="text-emerald-200 text-[13px] font-medium uppercase tracking-widest block font-mono">
                       Manuscript ID: #{paper.id || "N/A"}
                     </span>
-                    <h2 className="text-white text-[28px] font-black font-sans tracking-tight leading-snug drop-shadow-xs">
+                    <h2 className="text-white text-[24px] font-black font-sans tracking-tight leading-snug drop-shadow-xs">
                       {paper.title || "Artificial Intelligence in Healthcare: Opportunities and Challenges"}
                     </h2>
                     
@@ -1093,7 +1093,7 @@ export default function OjsSubmissionDetail({
 
                 {/* Submission Workflow horizontal stepper */}
                 <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-6 shadow-xs text-left">
-                  <h3 className="text-black text-[20px] font-black tracking-tight mb-6">Submission Workflow</h3>
+                  <h3 className="text-black text-[18px] font-black tracking-tight mb-6">Submission Workflow</h3>
                   
                   <div className="relative flex items-center justify-between">
                     {/* Background connecting line */}
@@ -1160,7 +1160,7 @@ export default function OjsSubmissionDetail({
                       />
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3 border-emerald-100">
                         <div className="flex items-center gap-2">
-                          <h3 className="text-black text-[20px] font-black tracking-tight">Uploaded Files</h3>
+                          <h3 className="text-black text-[18px] font-black tracking-tight">Uploaded Files</h3>
                           <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
                             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                             Supabase Connected
@@ -1284,7 +1284,7 @@ export default function OjsSubmissionDetail({
                         <div className="flex items-center justify-between shrink-0">
                           <div className="flex items-center gap-2">
                             <span className="w-3 h-3 rounded-full bg-[#008751]"></span>
-                            <h3 className="text-black text-[20px] font-black tracking-tight">
+                            <h3 className="text-black text-[18px] font-black tracking-tight">
                               Discussions
                             </h3>
                             <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
@@ -2019,7 +2019,7 @@ export default function OjsSubmissionDetail({
                 
                 {/* Submission Timeline */}
                 <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left">
-                  <h3 className="text-black text-[20px] font-black tracking-tight mb-5 border-b pb-3 border-emerald-100">Submission Timeline</h3>
+                  <h3 className="text-black text-[18px] font-black tracking-tight mb-5 border-b pb-3 border-emerald-100">Submission Timeline</h3>
                   
                   <div className="relative pl-5 ml-2.5 space-y-6 text-xs border-l-2 border-emerald-100">
                     {[
@@ -2069,7 +2069,7 @@ export default function OjsSubmissionDetail({
 
                 {/* Recent Activity */}
                 <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left space-y-4">
-                  <h3 className="text-black text-[20px] font-black tracking-tight border-b pb-3 border-emerald-100">Recent Activity</h3>
+                  <h3 className="text-black text-[18px] font-black tracking-tight border-b pb-3 border-emerald-100">Recent Activity</h3>
                   
                   <div className="space-y-3.5 text-xs">
                     {[
@@ -2096,7 +2096,7 @@ export default function OjsSubmissionDetail({
 
                 {/* Need Help? */}
                 <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left space-y-3">
-                  <h3 className="text-black text-[20px] font-black tracking-tight border-b pb-3 border-emerald-100">Need Help?</h3>
+                  <h3 className="text-black text-[18px] font-black tracking-tight border-b pb-3 border-emerald-100">Need Help?</h3>
                   <p className="text-[14px] text-slate-950 leading-relaxed font-bold">
                     If you have any questions, please contact the editorial office.
                   </p>
@@ -2160,7 +2160,7 @@ export default function OjsSubmissionDetail({
 
             <div className="space-y-1">
               <div className="flex items-center gap-2.5">
-                <span className="text-3xl font-bold text-emerald-200 tracking-tight font-sans">
+                <span className="text-2xl font-bold text-emerald-200 tracking-tight font-sans">
                   {paper.id || "N/A"}
                 </span>
                 <h1 className="text-xl font-bold tracking-tight text-white line-clamp-1">

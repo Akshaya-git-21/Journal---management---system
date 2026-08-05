@@ -177,19 +177,19 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
               <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Submitted</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{statusCounts.submitted}</p>
+              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.submitted}</p>
             </div>
             <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
               <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Under Review</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{statusCounts.underReview}</p>
+              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.underReview}</p>
             </div>
             <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
               <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Awaiting Decision</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{statusCounts.awaitingDecision}</p>
+              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.awaitingDecision}</p>
             </div>
             <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
               <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Revisions</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{statusCounts.revisionRequested}</p>
+              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.revisionRequested}</p>
             </div>
           </div>
         </div>
@@ -272,7 +272,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                 ].map((item) => (
                   <div key={item.label} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
                     <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">{item.label}</p>
-                    <p className="mt-3 text-3xl font-black text-slate-900">{item.count}</p>
+                    <p className="mt-3 text-2xl font-black text-slate-900">{item.count}</p>
                   </div>
                 ))}
               </div>
