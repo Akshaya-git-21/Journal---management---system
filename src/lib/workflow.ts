@@ -203,6 +203,203 @@ export async function getMyNotifications(unreadOnly: boolean = false): Promise<N
   return data ?? [];
 }
 
+// ------------------------------------------
+// Manuscripts, contributors, suggested reviewers, discussions, profile pickers
+// ------------------------------------------
+
+export interface ManuscriptRow {
+  id: string;
+  title: string;
+  abstract: string;
+  references: string;
+  is_double_blind: boolean;
+  cover_letter: string;
+  language: string;
+  status: ManuscriptStatus;
+  author_id: string;
+  author_name: string;
+  author_email: string;
+  assigned_editor_id: string | null;
+  submission_step: number;
+  editors_notes: string;
+  doi: string | null;
+  volume: string | null;
+  issue: string | null;
+  submitted_at: string | null;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContributorRow {
+  id: string;
+  manuscript_id: string;
+  name: string;
+  email: string;
+  affiliation: string;
+  contributor_role: string;
+  position: number;
+}
+
+export interface SuggestedReviewerRow {
+  id: string;
+  manuscript_id: string;
+  suggested_by: 'AUTHOR' | 'EDITOR';
+  suggested_by_user: string | null;
+  name: string;
+  email: string;
+  note: string;
+  created_at: string;
+}
+
+export interface DiscussionRow {
+  id: string;
+  manuscript_id: string;
+  sender_id: string;
+  message: string;
+  file_name: string | null;
+  file_size: string | null;
+  created_at: string;
+}
+
+export interface ProfileRow {
+  id: string;
+  name: string;
+  email: string;
+  role: string | null;
+  status: string;
+}
+
+export interface RevisionRow {
+  id: string;
+  manuscript_id: string;
+  revision_number: number;
+  requested_by: string | null;
+  decision_letter: string;
+  status: string;
+  requested_at: string;
+  submitted_at: string | null;
+}
+
+/** RLS scopes this to whatever the caller is allowed to see: their own
+ * manuscripts (Author), assigned ones (Editor/Reviewer), or all (Coordinator). */
+export async function listManuscripts(): Promise<ManuscriptRow[]> {
+  const { data, error } = await supabase.from('manuscripts').select('*').order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getManuscript(id: string): Promise<ManuscriptRow | null> {
+  const { data, error } = await supabase.from('manuscripts').select('*').eq('id', id).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function getContributors(manuscriptId: string): Promise<ContributorRow[]> {
+  const { data, error } = await supabase.from('manuscript_contributors').select('*').eq('manuscript_id', manuscriptId).order('position', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getSuggestedReviewers(manuscriptId: string): Promise<SuggestedReviewerRow[]> {
+  const { data, error } = await supabase.from('manuscript_suggested_reviewers').select('*').eq('manuscript_id', manuscriptId).order('created_at', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getDiscussions(manuscriptId: string): Promise<DiscussionRow[]> {
+  const { data, error } = await supabase.from('manuscript_discussions').select('*').eq('manuscript_id', manuscriptId).order('created_at', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function postDiscussionMessage(manuscriptId: string, senderId: string, message: string): Promise<void> {
+  const { error } = await supabase.from('manuscript_discussions').insert({ manuscript_id: manuscriptId, sender_id: senderId, message });
+  if (error) throw new Error(error.message);
+}
+
+export async function getRevisions(manuscriptId: string): Promise<RevisionRow[]> {
+  const { data, error } = await supabase.from('manuscript_revisions').select('*').eq('manuscript_id', manuscriptId).order('revision_number', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/** Active accounts for a given role -- used by Coordinator's editor/reviewer pickers. */
+export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER'): Promise<ProfileRow[]> {
+  const { data, error } = await supabase.from('profiles').select('id, name, email, role, status').eq('role', role).eq('status', 'ACTIVE').order('name', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getProfilesByIds(ids: string[]): Promise<Record<string, ProfileRow>> {
+  if (ids.length === 0) return {};
+  const { data, error } = await supabase.from('profiles').select('id, name, email, role, status').in('id', Array.from(new Set(ids)));
+  if (error) throw new Error(error.message);
+  const map: Record<string, ProfileRow> = {};
+  (data ?? []).forEach((p) => { map[p.id] = p; });
+  return map;
+}
+
+export interface DraftManuscriptInput {
+  title: string;
+  abstract: string;
+  references: string;
+  isDoubleBlind: boolean;
+  coverLetter: string;
+  language: string;
+  contributors: { name: string; email: string; affiliation: string; role: string }[];
+  suggestedReviewers: { name: string; email: string; note?: string }[];
+}
+
+/** Creates a DRAFT manuscript (id auto-generated) with its contributors and
+ * author-suggested reviewers, ready for submit_manuscript() to submit. */
+export async function createDraftManuscript(input: DraftManuscriptInput): Promise<string> {
+  const id = `JMS-${new Date().getFullYear()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  const { error: insertErr } = await supabase.from('manuscripts').insert({
+    id,
+    title: input.title,
+    abstract: input.abstract,
+    references: input.references,
+    is_double_blind: input.isDoubleBlind,
+    cover_letter: input.coverLetter,
+    language: input.language,
+    status: 'DRAFT'
+  });
+  if (insertErr) throw new Error(insertErr.message);
+
+  if (input.contributors.length > 0) {
+    const { error } = await supabase.from('manuscript_contributors').insert(
+      input.contributors.map((c, i) => ({
+        manuscript_id: id, name: c.name, email: c.email, affiliation: c.affiliation, contributor_role: c.role, position: i
+      }))
+    );
+    if (error) throw new Error(error.message);
+  }
+
+  if (input.suggestedReviewers.length > 0) {
+    const { data: userData } = await supabase.auth.getUser();
+    const { error } = await supabase.from('manuscript_suggested_reviewers').insert(
+      input.suggestedReviewers.map((r) => ({
+        manuscript_id: id, suggested_by: 'AUTHOR' as const, suggested_by_user: userData.user?.id ?? null,
+        name: r.name, email: r.email, note: r.note ?? ''
+      }))
+    );
+    if (error) throw new Error(error.message);
+  }
+
+  return id;
+}
+
+export function subscribeToManuscripts(onChange: () => void): () => void {
+  const channel = supabase
+    .channel('manuscripts-workflow-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscripts' }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'editor_assignments' }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'reviewer_assignments' }, onChange)
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
+}
+
 export async function markNotificationRead(notificationId: string): Promise<void> {
   const { error } = await supabase.from('workflow_notifications').update({ read_at: new Date().toISOString() }).eq('id', notificationId);
   if (error) throw new Error(error.message);

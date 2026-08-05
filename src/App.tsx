@@ -4,8 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Role, Manuscript } from './types';
-import { INITIAL_MANUSCRIPTS } from './initialData';
+import { Role } from './types';
 import RoleSelector from './components/RoleSelector';
 import TuliticsLogo from './components/TuliticsLogo';
 import RequireRole from './components/RequireRole';
@@ -15,16 +14,8 @@ import ReviewerWorkspace from './components/ReviewerWorkspace';
 import PublisherWorkspace from './components/PublisherWorkspace';
 import CoordinatorWorkspace from './components/CoordinatorWorkspace';
 import AuthPortals from './components/AuthPortals';
-import NewSubmissionFlow from './components/NewSubmissionFlow';
-import { CheckCircle2, LogOut, Info, Layers, BookOpen, User, AlertTriangle, Check, Copy } from 'lucide-react';
-import {
-  checkSupabaseConnection,
-  getManuscriptsFromDb,
-  upsertManuscriptToDb,
-  deleteManuscriptFromDb,
-  getSupabaseSQLScript,
-  subscribeToManuscriptsRealtime
-} from './lib/supabase';
+import { CheckCircle2, LogOut, User, AlertTriangle } from 'lucide-react';
+import { checkSupabaseConnection } from './lib/supabase';
 import { restoreSession, onAuthChange, logoutAccount } from './lib/auth';
 
 export default function App() {
@@ -50,101 +41,14 @@ export default function App() {
   });
   const [sessionChecked, setSessionChecked] = useState(false);
 
-  // Load manuscripts state from localStorage or load default initial data
-  const [manuscripts, setManuscripts] = useState<Manuscript[]>(() => {
-    const saved = localStorage.getItem('jms_sim_manuscripts');
-    const blacklistedIds = ['990', '986', '985', 'OJS-990', 'OJS-986', 'OJS-985'];
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.filter((m: Manuscript) => !blacklistedIds.includes(m.id) && !blacklistedIds.includes(m.id.replace('OJS-', '')));
-        }
-      } catch (e) {
-        console.error("Failed to parse manuscripts local storage", e);
-      }
-    }
-    return INITIAL_MANUSCRIPTS.filter((m: Manuscript) => !blacklistedIds.includes(m.id) && !blacklistedIds.includes(m.id.replace('OJS-', '')));
-  });
-
   const [notification, setNotification] = useState<string>('');
 
   // Supabase Connection States
   const [supabaseStatus, setSupabaseStatus] = useState<{ connected: boolean; schemaExists: boolean; error?: string } | null>(null);
-  const [showSqlScript, setShowSqlScript] = useState(false);
-  const [copied, setCopied] = useState(false);
 
-  // Load/Seed database on startup if active
   useEffect(() => {
-    // Completely remove the ojs_deleted_paper_ids local storage mechanism as requested
-    localStorage.removeItem('ojs_deleted_paper_ids');
-
-    async function initSupabase() {
-      const status = await checkSupabaseConnection();
-      setSupabaseStatus(status);
-      
-      if (status.connected && status.schemaExists) {
-        try {
-          const dbManuscripts = await getManuscriptsFromDb();
-          
-          // Proactively clean up any default/hardcoded OJS submissions from Supabase if found!
-          const blacklistedIds = ['990', '986', '985', 'OJS-990', 'OJS-986', 'OJS-985'];
-          const defaultOjsToCleanup = dbManuscripts.filter(m => blacklistedIds.includes(m.id) || blacklistedIds.includes(m.id.replace('OJS-', '')));
-          for (const m of defaultOjsToCleanup) {
-            console.log(`Cleaning up blacklisted default manuscript ${m.id} from Supabase...`);
-            try {
-              await deleteManuscriptFromDb(m.id);
-            } catch (err) {
-              console.warn(`Failed to delete blacklisted manuscript ${m.id} from DB:`, err);
-            }
-          }
-          
-          // Exclude any blacklisted IDs from the list loaded into memory
-          const cleanDbManuscripts = dbManuscripts.filter(m => !blacklistedIds.includes(m.id) && !blacklistedIds.includes(m.id.replace('OJS-', '')));
-
-          if (cleanDbManuscripts.length === 0) {
-            // Seed the Supabase database with default entries for immediate rich dashboard content
-            console.log("Supabase database empty. Seeding INITIAL_MANUSCRIPTS...");
-            for (const m of INITIAL_MANUSCRIPTS) {
-              await upsertManuscriptToDb(m);
-            }
-            const reloaded = await getManuscriptsFromDb();
-            const cleanReloaded = reloaded.filter(m => !blacklistedIds.includes(m.id) && !blacklistedIds.includes(m.id.replace('OJS-', '')));
-            setManuscripts(cleanReloaded);
-          } else {
-            // Set clean database manuscripts as the absolute source of truth
-            setManuscripts(cleanDbManuscripts);
-          }
-        } catch (err) {
-          console.error("Failed to load or seed Supabase manuscripts", err);
-        }
-      }
-    }
-    initSupabase();
-
-    // Subscribe to Realtime changes across manuscripts table
-    const unsubscribe = subscribeToManuscriptsRealtime((updatedMs) => {
-      setManuscripts((prev) => {
-        const index = prev.findIndex((m) => m.id === updatedMs.id);
-        if (index >= 0) {
-          const next = [...prev];
-          next[index] = updatedMs;
-          return next;
-        } else {
-          return [updatedMs, ...prev];
-        }
-      });
-    });
-
-    return () => {
-      unsubscribe();
-    };
+    checkSupabaseConnection().then(setSupabaseStatus);
   }, []);
-
-  // Synchronize state changes to Local Storage
-  useEffect(() => {
-    localStorage.setItem('jms_sim_manuscripts', JSON.stringify(manuscripts));
-  }, [manuscripts]);
 
   // Re-validate the session against Supabase Auth -- this is the real
   // authorization check; the cached loggedInUser above is only a UI hint
@@ -193,7 +97,7 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const pathname = window.location.pathname.toLowerCase();
-    
+
     const isSubmitPath = pathname.includes('submit') || pathname.includes('publish');
     const isAuthPath = pathname.includes('auth') || pathname.includes('login') || pathname.includes('signup') || pathname.includes('register');
 
@@ -214,66 +118,6 @@ export default function App() {
     }
   }, []);
 
-  const handleUpdateManuscript = async (updated: Manuscript) => {
-    setManuscripts((prev) =>
-      prev.map((m) => (m.id === updated.id ? updated : m))
-    );
-    try {
-      await upsertManuscriptToDb(updated);
-    } catch (err) {
-      console.warn("Could not upsert manuscript update to Supabase, local cache preserved:", err);
-    }
-  };
-
-  const handleDeleteManuscript = async (manuscriptId: string) => {
-    setManuscripts((prev) => prev.filter((m) => m.id !== manuscriptId));
-    try {
-      await deleteManuscriptFromDb(manuscriptId);
-    } catch (err) {
-      console.warn("Could not delete manuscript from Supabase, local cache updated:", err);
-    }
-    setNotification(`SUCCESS: Manuscript ${manuscriptId} deleted successfully.`);
-    setTimeout(() => {
-      setNotification('');
-    }, 4000);
-  };
-
-  const handleSaveDraftManuscript = async (draft: Manuscript) => {
-    setManuscripts((prev) => {
-      const exists = prev.some((m) => m.id === draft.id);
-      if (exists) {
-        return prev.map((m) => (m.id === draft.id ? draft : m));
-      } else {
-        return [...prev, draft];
-      }
-    });
-    try {
-      await upsertManuscriptToDb(draft);
-    } catch (err) {
-      console.warn("Could not upsert manuscript draft to Supabase, local cache preserved:", err);
-    }
-  };
-
-  const handleSubmitManuscript = async (manuscriptId: string) => {
-    // Find the manuscript and trigger status change
-    const m = manuscripts.find((item) => item.id === manuscriptId);
-    if (m) {
-      const updated: Manuscript = {
-        ...m,
-        status: 'SUBMITTED',
-        submittedAt: new Date().toISOString(),
-        assignedEditor: m.assignedEditor || 'Unassigned',
-        assignedEditorEmail: m.assignedEditorEmail || null
-      };
-      await handleUpdateManuscript(updated);
-    }
-
-    setNotification(`SUCCESS: Manuscript proposal ${manuscriptId} successfully initialized and dispatched to Editor review queue.`);
-    setTimeout(() => {
-      setNotification('');
-    }, 6000);
-  };
-
   const handleSignOut = async () => {
     await logoutAccount();
     setLoggedInUser(null);
@@ -284,69 +128,26 @@ export default function App() {
     setTimeout(() => setNotification(''), 4000);
   };
 
-  // Compute live telemetry counts for indicators matching specified statuses
-  const unassignedCount = manuscripts.filter((m) => m.status === 'SUBMITTED').length;
-  const inReviewCount = manuscripts.filter(
-    (m) => m.status === 'UNDER_REVIEW' || m.status === 'AWAITING_DECISION'
-  ).length;
-  const inProductionCount = manuscripts.filter((m) => m.status === 'ACCEPTED').length;
-
   return (
-    <div id="jms-application-root" className="min-h-screen bg-slate-50 flex flex-col text-slate-800">
-      
-      {/* Supabase Connection Helper Widget */}
-      {supabaseStatus && (!supabaseStatus.connected || !supabaseStatus.schemaExists) && (
-        <div id="supabase-status-helper" className="bg-[#fff9e6] border-b border-[#ffe0b2] text-[#5c3e00] p-4 shrink-0 transition-all">
-          <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-[#f57c00] shrink-0 mt-0.5" />
-              <div className="text-xs font-sans text-left">
-                <p className="font-extrabold uppercase tracking-wider text-[#b26a00]">
-                  {supabaseStatus.connected ? '🔌 SUPABASE CONNECTED (MIGRATION REQUIRED)' : '⚠️ SUPABASE CONNECTION ERROR'}
-                </p>
-                <p className="text-[#5c3e00] font-medium mt-1">
-                  {supabaseStatus.connected 
-                    ? `Connected to Supabase project 'uqevcpokthdqlispnxyz', but the required database tables or buckets are not initialized.`
-                    : `Could not reach your Supabase endpoint: ${supabaseStatus.error || 'Connection timed out'}. Please double check your environment keys.`}
-                </p>
-              </div>
-            </div>
-            
-            {supabaseStatus.connected && (
-              <div className="flex items-center gap-3 self-end md:self-auto">
-                <button
-                  onClick={() => setShowSqlScript(!showSqlScript)}
-                  className="px-4 py-2 bg-[#ffb74d] hover:bg-[#ffa726] text-[#5c3e00] font-mono text-[10px] font-black uppercase tracking-wider rounded-lg shadow-xs transition cursor-pointer"
-                >
-                  {showSqlScript ? 'Hide SQL Script' : 'Reveal SQL Setup Script'}
-                </button>
-              </div>
-            )}
-          </div>
+    <div
+      id="jms-application-root"
+      className={`bg-slate-50 flex flex-col text-slate-800 ${
+        currentScreen === 'WORKSPACE' && loggedInUser?.role === 'COORDINATOR' ? 'h-screen overflow-hidden' : 'min-h-screen'
+      }`}
+    >
 
-          {showSqlScript && (
-            <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 mt-4 animate-fade-in text-left">
-              <div className="bg-slate-900 text-slate-300 p-4 rounded-xl border border-slate-800 relative shadow-inner">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
-                  <span className="text-[10px] font-mono font-bold uppercase text-slate-500">SQL Schema & Storage Policies Setup</span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(getSupabaseSQLScript());
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white font-sans text-[10px] font-bold rounded-lg transition"
-                  >
-                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copied ? 'Copied!' : 'Copy SQL Script'}</span>
-                  </button>
-                </div>
-                <pre className="font-mono text-[10px] overflow-x-auto max-h-60 text-slate-400 leading-normal select-all">
-                  {getSupabaseSQLScript()}
-                </pre>
-              </div>
+      {/* Supabase Connection Helper Widget */}
+      {supabaseStatus && !supabaseStatus.connected && (
+        <div id="supabase-status-helper" className="bg-[#fff9e6] border-b border-[#ffe0b2] text-[#5c3e00] p-4 shrink-0 transition-all">
+          <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-[#f57c00] shrink-0 mt-0.5" />
+            <div className="text-xs font-sans text-left">
+              <p className="font-extrabold uppercase tracking-wider text-[#b26a00]">⚠️ SUPABASE CONNECTION ERROR</p>
+              <p className="text-[#5c3e00] font-medium mt-1">
+                Could not reach your Supabase endpoint: {supabaseStatus.error || 'Connection timed out'}. Please double check your environment keys.
+              </p>
             </div>
-          )}
+          </div>
         </div>
       )}
 
@@ -456,84 +257,20 @@ export default function App() {
             </div>
           </header>
 
-          {/* Main Wizard Area */}
-          <div className="flex-grow w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 py-8">
-            <NewSubmissionFlow
-              currentUser={loggedInUser}
-              onCancel={() => {
-                if (loggedInUser) {
-                  setCurrentScreen('WORKSPACE');
-                } else {
-                  if (confirm("Reset current draft progress?")) {
-                    localStorage.removeItem('ojs_submission_cached_draft');
-                    window.location.reload();
-                  }
-                }
-              }}
-              onSubmit={(paperObj) => {
-                const primaryContact = paperObj.contributors?.find((c: any) => c.isPrincipalContact) || paperObj.contributors?.[0];
-                const authorName = primaryContact ? `${primaryContact.firstName} ${primaryContact.lastName}` : "Dr. Ada Lovelace";
-                const authorEmail = primaryContact ? primaryContact.email : "author@stanford.edu";
-
-                const parentManuscript: Manuscript = {
-                  id: `OJS-${paperObj.id}`,
-                  title: paperObj.title,
-                  abstract: paperObj.abstract,
-                  references: "",
-                  isDoubleBlind: true,
-                  coverLetter: paperObj.coverLetter || "Confidential Cover Letter.",
-                  fileName: paperObj.fileName || paperObj.uploadedFileNames?.[0] || 'manuscript_submission.pdf',
-                  fileSize: paperObj.fileSize || "2.4 MB",
-                  uploadedAt: new Date().toISOString(),
-                  storagePath: paperObj.storagePath || null,
-                  publicUrl: paperObj.publicUrl || null,
-                  contributors: (paperObj.contributors || []).map((c: any) => ({
-                    id: c.id,
-                    name: `${c.firstName} ${c.lastName}`,
-                    email: c.email,
-                    affiliation: c.affiliation,
-                    role: c.role
-                  })),
-                  status: 'SUBMITTED',
-                  submittedAt: new Date().toISOString(),
-                  reviewers: [],
-                  suggestedReviewers: (paperObj.reviewerSuggestions || []).map((r: any) => ({
-                    id: r.id,
-                    name: r.name,
-                    email: r.email,
-                    approved: false
-                  })),
-                  discussions: [],
-                  doi: null,
-                  volume: null,
-                  issue: null,
-                  publishedAt: null,
-                  authorId: loggedInUser ? "auth_ada" : `guest_${paperObj.id}`,
-                  authorName: authorName,
-                  authorEmail: authorEmail,
-                  submissionStep: 9,
-                  editorsNotes: ""
-                };
-
-                handleSaveDraftManuscript(parentManuscript);
-                
-                if (!loggedInUser) {
-                  setNotification(`SUCCESS: Manuscript "${paperObj.title}" received! Please Sign Up / Register or Log In to open your profile and track submission status.`);
-                  setTimeout(() => {
-                    setNotification('');
-                    setAuthRole('AUTHOR');
-                    setAuthMode('REGISTER');
-                    setCurrentScreen('AUTH');
-                  }, 4000);
-                } else {
-                  setNotification(`SUCCESS: Manuscript "${paperObj.title}" successfully dispatched to the peer review queue.`);
-                  setTimeout(() => {
-                    setNotification('');
-                    setCurrentScreen('WORKSPACE');
-                  }, 4000);
-                }
-              }}
-            />
+          {/* Landing call-to-action: real submission now happens inside the
+              Author workspace against a real account, so this screen's job
+              is just to route people to sign up / log in. */}
+          <div className="flex-grow w-full max-w-2xl mx-auto px-6 py-20 text-center">
+            <h1 className="text-2xl font-black text-slate-900 mb-3">Submit Your Manuscript</h1>
+            <p className="text-sm text-slate-500 mb-8">
+              Create an Author account (or log in) to submit a manuscript and track it through peer review.
+            </p>
+            <button
+              onClick={() => { setAuthRole('AUTHOR'); setAuthMode('REGISTER'); setCurrentScreen('AUTH'); }}
+              className="px-6 py-3 bg-[#008751] hover:bg-[#007043] text-white rounded-lg text-sm font-bold transition cursor-pointer shadow-md"
+            >
+              Get Started
+            </button>
           </div>
         </div>
       )}
@@ -558,94 +295,59 @@ export default function App() {
         />
       )}
 
-      {currentScreen === 'WORKSPACE' && (
-        <div className="flex-grow flex flex-col">
+      {currentScreen === 'WORKSPACE' && (() => {
+        // Coordinator uses a fixed dashboard shell (sidebar + internally
+        // scrolling content, like a desktop app) -- everything else uses
+        // ordinary page scrolling. Only Coordinator gets the bounded/
+        // overflow-hidden treatment; forcing it on the others would clip
+        // their content, since they're built assuming the page itself grows
+        // and scrolls (min-h-screen), not a fixed-height shell.
+        const isShell = loggedInUser?.role === 'COORDINATOR';
+        const shellClass = isShell ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-grow flex flex-col';
+        return (
+        <div className={shellClass}>
           {/* Workspace chrome for every role except Author (whose workspace has its own header) */}
           {loggedInUser && loggedInUser.role !== 'AUTHOR' && (
             <RoleSelector
               activeRole={loggedInUser.role}
-              unassignedCount={unassignedCount}
-              inReviewCount={inReviewCount}
-              inProductionCount={inProductionCount}
+              unassignedCount={0}
+              inReviewCount={0}
+              inProductionCount={0}
               loggedInUser={loggedInUser}
               onSignOut={handleSignOut}
             />
           )}
 
-          <main id="jms-workspace-main" className="flex-grow flex flex-col">
-            <div className="animate-fade-in duration-300 flex-grow flex flex-col">
+          <main id="jms-workspace-main" className={shellClass}>
+            <div className={`animate-fade-in duration-300 ${shellClass}`}>
               {/* The workspace rendered is always exactly the authenticated
                   user's own role -- there is no client-side role switch. */}
               <RequireRole role={loggedInUser?.role} allowed={['AUTHOR', 'EDITOR', 'REVIEWER', 'PUBLISHER', 'COORDINATOR']}>
                 {loggedInUser?.role === 'AUTHOR' && (
-                  <AuthorWorkspace
-                    manuscripts={manuscripts}
-                    onSaveManuscript={handleSaveDraftManuscript}
-                    onSubmitManuscript={handleSubmitManuscript}
-                    onDeleteManuscript={handleDeleteManuscript}
-                    currentUser={loggedInUser}
-                    onSignOut={handleSignOut}
-                  />
+                  <AuthorWorkspace currentUser={loggedInUser} onSignOut={handleSignOut} />
                 )}
 
                 {loggedInUser?.role === 'EDITOR' && (
-                  <EditorWorkspace
-                    manuscripts={manuscripts}
-                    onUpdateManuscript={handleUpdateManuscript}
-                    onDeleteManuscript={handleDeleteManuscript}
-                    currentUser={loggedInUser}
-                  />
+                  <EditorWorkspace currentUser={loggedInUser} />
                 )}
 
                 {loggedInUser?.role === 'REVIEWER' && (
-                  <ReviewerWorkspace
-                    manuscripts={manuscripts}
-                    onUpdateManuscript={handleUpdateManuscript}
-                    currentUser={loggedInUser}
-                  />
+                  <ReviewerWorkspace currentUser={loggedInUser} />
                 )}
 
                 {loggedInUser?.role === 'PUBLISHER' && (
-                  <PublisherWorkspace
-                    manuscripts={manuscripts}
-                    onUpdateManuscript={handleUpdateManuscript}
-                    currentUser={loggedInUser}
-                  />
+                  <PublisherWorkspace manuscripts={[]} onUpdateManuscript={() => {}} currentUser={loggedInUser} />
                 )}
 
                 {loggedInUser?.role === 'COORDINATOR' && (
-                  <CoordinatorWorkspace
-                    manuscripts={manuscripts}
-                    onUpdateManuscript={handleUpdateManuscript}
-                  />
+                  <CoordinatorWorkspace />
                 )}
               </RequireRole>
             </div>
           </main>
         </div>
-      )}
-
-      {/* Static premium workspace info footer */}
-      {currentScreen !== 'AUTH' && (
-        <footer id="jms-platform-footer" className="bg-slate-900 text-slate-400 py-4 border-t border-slate-800 px-6 shrink-0 text-left">
-          <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 flex flex-col md:flex-row items-center justify-between gap-4 text-[11px] font-mono">
-            <div className="space-y-1">
-              <p className="font-bold text-white uppercase tracking-wider text-xs">
-                Journal of Artificial Intelligence in Medicine & Public Health
-              </p>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-1">
-                <p className="text-slate-400">
-                  JMS™ Specialized OJS-Style Multi-Tenant Enterprise System
-                </p>
-                <div className="bg-slate-950 p-1 px-2 rounded-lg border border-slate-850 shrink-0 w-fit self-start sm:self-auto">
-                  <TuliticsLogo iconSize={18} showText={false} usePng={true} />
-                </div>
-              </div>
-            </div>
-            <p className="text-slate-500 text-right">© {new Date().getFullYear()} JMS. All rights reserved.</p>
-          </div>
-        </footer>
-      )}
+        );
+      })()}
 
     </div>
   );

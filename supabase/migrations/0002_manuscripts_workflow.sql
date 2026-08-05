@@ -124,6 +124,7 @@ alter table public.editor_assignments add column if not exists manuscript_id tex
 alter table public.editor_assignments add column if not exists editor_id uuid references public.profiles(id);
 alter table public.editor_assignments add column if not exists assigned_by uuid references public.profiles(id);
 alter table public.editor_assignments add column if not exists status text not null default 'INVITED';
+alter table public.editor_assignments alter column status set default 'INVITED';
 alter table public.editor_assignments add column if not exists assigned_at timestamptz not null default timezone('utc', now());
 alter table public.editor_assignments add column if not exists responded_at timestamptz;
 alter table public.editor_assignments add column if not exists scientific_merit int;
@@ -138,6 +139,7 @@ alter table public.editor_assignments add column if not exists weaknesses text;
 alter table public.editor_assignments add column if not exists mandatory_revisions text;
 alter table public.editor_assignments add column if not exists comments_to_coordinator text;
 alter table public.editor_assignments add column if not exists assessment_status text not null default 'NOT_STARTED';
+alter table public.editor_assignments alter column assessment_status set default 'NOT_STARTED';
 alter table public.editor_assignments add column if not exists assessment_submitted_at timestamptz;
 alter table public.editor_assignments add column if not exists recommendation text;
 alter table public.editor_assignments add column if not exists recommendation_submitted_at timestamptz;
@@ -170,6 +172,7 @@ alter table public.reviewer_assignments add column if not exists manuscript_id t
 alter table public.reviewer_assignments add column if not exists reviewer_id uuid references public.profiles(id);
 alter table public.reviewer_assignments add column if not exists assigned_by uuid references public.profiles(id);
 alter table public.reviewer_assignments add column if not exists status text not null default 'INVITED';
+alter table public.reviewer_assignments alter column status set default 'INVITED';
 alter table public.reviewer_assignments add column if not exists invited_at timestamptz not null default timezone('utc', now());
 alter table public.reviewer_assignments add column if not exists responded_at timestamptz;
 alter table public.reviewer_assignments add column if not exists due_date date;
@@ -505,8 +508,8 @@ begin
   if m.id is null then raise exception 'Manuscript not found'; end if;
   if m.status is distinct from 'SUBMITTED' then raise exception 'Manuscript is not awaiting editor assignment (status=%)', m.status; end if;
 
-  insert into public.editor_assignments (manuscript_id, editor_id, assigned_by)
-  values (p_manuscript_id, p_editor_id, auth.uid());
+  insert into public.editor_assignments (manuscript_id, editor_id, assigned_by, status, assessment_status)
+  values (p_manuscript_id, p_editor_id, auth.uid(), 'INVITED', 'NOT_STARTED');
 
   update public.manuscripts set assigned_editor_id = p_editor_id, status = 'EDITOR_REVIEW', updated_at = timezone('utc', now())
   where id = p_manuscript_id returning * into m;
@@ -622,8 +625,8 @@ begin
     if not exists (select 1 from public.profiles where id = rid and role = 'REVIEWER' and status = 'ACTIVE') then
       raise exception 'Reviewer % is not an active reviewer account', rid;
     end if;
-    insert into public.reviewer_assignments (manuscript_id, reviewer_id, assigned_by)
-    values (p_manuscript_id, rid, auth.uid());
+    insert into public.reviewer_assignments (manuscript_id, reviewer_id, assigned_by, status)
+    values (p_manuscript_id, rid, auth.uid(), 'INVITED');
     perform public._notify(rid, 'REVIEW_INVITATION', p_manuscript_id, 'You are invited to review: ' || m.title);
   end loop;
 
