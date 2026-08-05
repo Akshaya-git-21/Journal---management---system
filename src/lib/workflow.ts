@@ -267,6 +267,7 @@ export interface ProfileRow {
   name: string;
   email: string;
   role: string | null;
+  requested_role?: string | null;
   status: string;
 }
 
@@ -329,6 +330,19 @@ export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER'): Pro
   const { data, error } = await supabase.from('profiles').select('id, name, email, role, status').eq('role', role).eq('status', 'ACTIVE').order('name', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+export async function listPendingApprovals(): Promise<ProfileRow[]> {
+  const { data, error } = await supabase.from('profiles').select('id, name, email, role, requested_role, status').eq('status', 'PENDING_APPROVAL').order('created_at', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function approveUserRole(targetId: string, approve: boolean): Promise<ProfileRow> {
+  const decision = approve ? 'APPROVE' : 'REJECT';
+  const { data, error } = await supabase.rpc('approve_user_role', { target_id: targetId, decision });
+  if (error) throw new Error(error.message);
+  return data as ProfileRow;
 }
 
 export async function getProfilesByIds(ids: string[]): Promise<Record<string, ProfileRow>> {

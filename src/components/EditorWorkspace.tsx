@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Role, ManuscriptStatus, ReviewerRecommendation } from '../types';
 import {
-  ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow,
-  listManuscripts, getEditorAssignments, getReviewerAssignments, subscribeToManuscripts,
+  ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow,
+  listManuscripts, getEditorAssignments, getReviewerAssignments, getRevisions, subscribeToManuscripts,
   respondToEditorAssignment, submitEditorAssessment, submitEditorRecommendation
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
@@ -41,6 +41,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const load = async () => {
     try {
@@ -56,6 +57,23 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const filteredRows = rows.filter((row) => {
+    const query = searchTerm.toLowerCase();
+    return (
+      row.manuscript.title.toLowerCase().includes(query) ||
+      row.manuscript.id.toLowerCase().includes(query) ||
+      row.assignment.status.toLowerCase().includes(query)
+    );
+  });
+
+  const assignmentCounts = {
+    total: rows.length,
+    invited: rows.filter((r) => r.assignment.status === 'INVITED').length,
+    accepted: rows.filter((r) => r.assignment.status === 'ACCEPTED').length,
+    submitted: rows.filter((r) => r.assignment.assessment_status === 'SUBMITTED').length,
+    pending: rows.filter((r) => r.assignment.assessment_status === 'NOT_STARTED').length,
   };
 
   useEffect(() => {
@@ -74,12 +92,50 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
       </header>
 
       <main className="flex-1 w-full max-w-5xl mx-auto px-6 py-8">
+        <div className="bg-white border border-slate-200 rounded-3xl p-6 mb-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Editor Dashboard</p>
+              <h2 className="text-xl font-black text-slate-900 mt-2">Assigned manuscripts</h2>
+            </div>
+            <div className="relative w-full max-w-md">
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search manuscripts or status"
+                className="w-full rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
+              />
+            </div>
+          </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
+              <p className="uppercase tracking-[0.24em] text-slate-500">Total Assignments</p>
+              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.total}</p>
+            </div>
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
+              <p className="uppercase tracking-[0.24em] text-slate-500">Invited</p>
+              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.invited}</p>
+            </div>
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
+              <p className="uppercase tracking-[0.24em] text-slate-500">Accepted</p>
+              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.accepted}</p>
+            </div>
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
+              <p className="uppercase tracking-[0.24em] text-slate-500">Evaluated</p>
+              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.submitted}</p>
+            </div>
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
+              <p className="uppercase tracking-[0.24em] text-slate-500">Pending</p>
+              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.pending}</p>
+            </div>
+          </div>
+        </div>
         {loading ? (
           <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>
         ) : selected ? (
           <AssignmentDetail row={selected} onBack={() => setSelectedManuscriptId(null)} onChanged={load} />
         ) : (
-          <AssignmentList rows={rows} onOpen={setSelectedManuscriptId} />
+          <AssignmentList rows={filteredRows} onOpen={setSelectedManuscriptId} />
         )}
       </main>
     </div>
@@ -119,11 +175,13 @@ function AssignmentList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
 function AssignmentDetail({ row, onBack, onChanged }: { row: Row; onBack: () => void; onChanged: () => void }) {
   const { manuscript, assignment } = row;
   const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>([]);
+  const [revisions, setRevisions] = useState<RevisionRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     getReviewerAssignments(manuscript.id).then(setReviewerAssignments);
+    getRevisions(manuscript.id).then(setRevisions);
   }, [manuscript.id]);
 
   const respond = async (accept: boolean) => {

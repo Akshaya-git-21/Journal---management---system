@@ -40,6 +40,7 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const load = async () => {
     try {
@@ -55,6 +56,23 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
     } finally {
       setLoading(false);
     }
+  };
+
+  const filteredRows = rows.filter((row) => {
+    const query = searchTerm.toLowerCase();
+    return (
+      row.manuscript.title.toLowerCase().includes(query) ||
+      row.manuscript.id.toLowerCase().includes(query) ||
+      row.assignment.status.toLowerCase().includes(query)
+    );
+  });
+
+  const counts = {
+    total: rows.length,
+    invited: rows.filter((r) => r.assignment.status === 'INVITED').length,
+    accepted: rows.filter((r) => r.assignment.status === 'ACCEPTED').length,
+    submitted: rows.filter((r) => r.assignment.status === 'SUBMITTED').length,
+    declined: rows.filter((r) => r.assignment.status === 'DECLINED').length,
   };
 
   useEffect(() => {
@@ -73,12 +91,50 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
       </header>
 
       <main className="flex-1 w-full max-w-4xl mx-auto px-6 py-8">
+        <div className="bg-white border border-slate-200 rounded-3xl p-6 mb-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Reviewer Dashboard</p>
+              <h2 className="text-xl font-black text-slate-900 mt-2">Your review tasks</h2>
+            </div>
+            <div className="relative w-full max-w-sm">
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search manuscripts or assignments"
+                className="w-full rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
+              />
+            </div>
+          </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
+              <p className="uppercase tracking-[0.24em] text-slate-500">Total Invitations</p>
+              <p className="mt-3 text-3xl font-black text-slate-900">{counts.total}</p>
+            </div>
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
+              <p className="uppercase tracking-[0.24em] text-slate-500">Accepted</p>
+              <p className="mt-3 text-3xl font-black text-slate-900">{counts.accepted}</p>
+            </div>
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
+              <p className="uppercase tracking-[0.24em] text-slate-500">Submitted</p>
+              <p className="mt-3 text-3xl font-black text-slate-900">{counts.submitted}</p>
+            </div>
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
+              <p className="uppercase tracking-[0.24em] text-slate-500">Invited</p>
+              <p className="mt-3 text-3xl font-black text-slate-900">{counts.invited}</p>
+            </div>
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
+              <p className="uppercase tracking-[0.24em] text-slate-500">Declined</p>
+              <p className="mt-3 text-3xl font-black text-slate-900">{counts.declined}</p>
+            </div>
+          </div>
+        </div>
         {loading ? (
           <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>
         ) : selected ? (
           <InvitationDetail row={selected} onBack={() => setSelectedManuscriptId(null)} onChanged={load} />
         ) : (
-          <InvitationList rows={rows} onOpen={setSelectedManuscriptId} />
+          <InvitationList rows={filteredRows} onOpen={setSelectedManuscriptId} />
         )}
       </main>
     </div>
