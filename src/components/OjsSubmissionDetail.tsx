@@ -560,6 +560,20 @@ export default function OjsSubmissionDetail({
     return []; // Empty list per typical default empty state
   });
 
+  // Keep uploaded files in sync with the latest selected paper
+  useEffect(() => {
+    if (Array.isArray(paper?.uploadedFiles) && paper.uploadedFiles.length > 0) {
+      setUploadedFiles(paper.uploadedFiles);
+    }
+  }, [paper?.uploadedFiles]);
+
+  // Keep discussions in sync with the latest selected paper
+  useEffect(() => {
+    if (Array.isArray(paper?.discussions) && paper.discussions.length > 0) {
+      setDiscussionThreads(paper.discussions);
+    }
+  }, [paper?.discussions]);
+
   // Real-time synchronization of uploaded files to Supabase
   useEffect(() => {
     if (paper?.id) {
