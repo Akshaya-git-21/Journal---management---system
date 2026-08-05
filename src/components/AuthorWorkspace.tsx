@@ -48,7 +48,6 @@ interface AuthorWorkspaceProps {
   onDeleteManuscript?: (manuscriptId: string) => void;
   currentUser?: { name: string; email: string; role: Role } | null;
   onSignOut?: () => void;
-  onRoleChange?: (role: Role) => void;
 }
 
 // Exact OJS initial papers matching user's screenshots
@@ -60,8 +59,7 @@ export default function AuthorWorkspace({
   onSubmitManuscript,
   onDeleteManuscript,
   currentUser,
-  onSignOut,
-  onRoleChange
+  onSignOut
 }: AuthorWorkspaceProps) {
   
   // Tab states matching OJS categories

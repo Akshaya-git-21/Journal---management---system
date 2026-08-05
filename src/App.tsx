@@ -8,24 +8,24 @@ import { Role, Manuscript } from './types';
 import { INITIAL_MANUSCRIPTS } from './initialData';
 import RoleSelector from './components/RoleSelector';
 import TuliticsLogo from './components/TuliticsLogo';
+import RequireRole from './components/RequireRole';
 import AuthorWorkspace from './components/AuthorWorkspace';
 import EditorWorkspace from './components/EditorWorkspace';
 import ReviewerWorkspace from './components/ReviewerWorkspace';
 import PublisherWorkspace from './components/PublisherWorkspace';
-import ArchitectWorkspace from './components/ArchitectWorkspace';
 import CoordinatorWorkspace from './components/CoordinatorWorkspace';
 import AuthPortals from './components/AuthPortals';
 import NewSubmissionFlow from './components/NewSubmissionFlow';
 import { CheckCircle2, LogOut, Info, Layers, BookOpen, User, AlertTriangle, Check, Copy } from 'lucide-react';
-import { 
-  supabase, 
-  checkSupabaseConnection, 
-  getManuscriptsFromDb, 
-  upsertManuscriptToDb, 
+import {
+  checkSupabaseConnection,
+  getManuscriptsFromDb,
+  upsertManuscriptToDb,
   deleteManuscriptFromDb,
   getSupabaseSQLScript,
   subscribeToManuscriptsRealtime
 } from './lib/supabase';
+import { restoreSession, onAuthChange, logoutAccount } from './lib/auth';
 
 export default function App() {
   // Screen routing state: 'SUBMISSION' | 'AUTH' | 'WORKSPACE'
@@ -35,24 +35,20 @@ export default function App() {
     return val;
   });
 
-  // Authentication specific roles & modes
-  const [authRole, setAuthRole] = useState<Role>(() => {
-    const saved = localStorage.getItem('jms_sim_active_role');
-    const val = (saved as Role) || 'AUTHOR';
-    return val === 'ARCHITECT' ? 'AUTHOR' : val;
-  });
+  // Authentication specific roles & modes (authRole only presets which
+  // AuthPortals tab/label is shown -- it has no bearing on the role actually
+  // granted, which always comes from the authenticated account's profile)
+  const [authRole, setAuthRole] = useState<Role>('AUTHOR');
   const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER'>('REGISTER');
 
+  // loggedInUser seeded from localStorage only as an optimistic UI cache to
+  // avoid a flash of the auth screen -- the effect below always re-validates
+  // it against the real Supabase session and clears it if that check fails.
   const [loggedInUser, setLoggedInUser] = useState<{ name: string; email: string; role: Role } | null>(() => {
     const saved = localStorage.getItem('jms_sim_logged_in_user');
     return saved ? JSON.parse(saved) : null;
   });
-
-  // Current active workspace role
-  const [activeRole, setActiveRole] = useState<Role>(() => {
-    const saved = localStorage.getItem('jms_sim_active_role');
-    return (saved as Role) || 'AUTHOR';
-  });
+  const [sessionChecked, setSessionChecked] = useState(false);
 
   // Load manuscripts state from localStorage or load default initial data
   const [manuscripts, setManuscripts] = useState<Manuscript[]>(() => {
@@ -150,9 +146,27 @@ export default function App() {
     localStorage.setItem('jms_sim_manuscripts', JSON.stringify(manuscripts));
   }, [manuscripts]);
 
+  // Re-validate the session against Supabase Auth -- this is the real
+  // authorization check; the cached loggedInUser above is only a UI hint
+  // until this resolves. Also reacts to sign-out happening elsewhere.
   useEffect(() => {
-    localStorage.setItem('jms_sim_active_role', activeRole);
-  }, [activeRole]);
+    let active = true;
+
+    restoreSession().then((user) => {
+      if (!active) return;
+      setLoggedInUser(user);
+      setSessionChecked(true);
+    });
+
+    const unsubscribe = onAuthChange((user) => {
+      if (!user) setLoggedInUser(null);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('jms_sim_current_screen', currentScreen);
@@ -166,12 +180,14 @@ export default function App() {
     }
   }, [loggedInUser]);
 
-  // Safeguard: Do not allow direct access to Workspace (profile) unless authenticated
+  // Safeguard: Do not allow direct access to Workspace (profile) unless authenticated.
+  // Gated on sessionChecked so a stale localStorage cache isn't trusted before
+  // the real Supabase session has been validated.
   useEffect(() => {
-    if (currentScreen === 'WORKSPACE' && !loggedInUser) {
+    if (sessionChecked && currentScreen === 'WORKSPACE' && !loggedInUser) {
       setCurrentScreen('AUTH');
     }
-  }, [currentScreen, loggedInUser]);
+  }, [currentScreen, loggedInUser, sessionChecked]);
 
   // Check for external link routing to Login/Signup directly (e.g. from tulitics.vercel.app)
   useEffect(() => {
@@ -197,11 +213,6 @@ export default function App() {
       setCurrentScreen('AUTH');
     }
   }, []);
-
-  const handleRoleChange = (role: Role) => {
-    setActiveRole(role);
-    setNotification(''); 
-  };
 
   const handleUpdateManuscript = async (updated: Manuscript) => {
     setManuscripts((prev) =>
@@ -263,7 +274,8 @@ export default function App() {
     }, 6000);
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    await logoutAccount();
     setLoggedInUser(null);
     setAuthRole('AUTHOR');
     setAuthMode('LOGIN');
@@ -361,28 +373,28 @@ export default function App() {
                 <span className="text-slate-650">|</span>
                 <span>OJS v3.4 COMPATIBLE</span>
               </div>
-              <div className="flex items-center gap-4 text-slate-400">
-                <button 
-                  onClick={() => {
-                    setAuthRole('EDITOR');
-                    setAuthMode('LOGIN');
-                    setCurrentScreen('AUTH');
-                  }}
-                  className="hover:text-white transition cursor-pointer font-bold font-mono text-[10px] uppercase"
-                >
-                  Editor Log In
-                </button>
-                <span>•</span>
-                <button 
-                  onClick={() => {
-                    setAuthRole('REVIEWER');
-                    setAuthMode('LOGIN');
-                    setCurrentScreen('AUTH');
-                  }}
-                  className="hover:text-white transition cursor-pointer font-bold font-mono text-[10px] uppercase"
-                >
-                  Reviewer Log In
-                </button>
+              <div className="flex items-center gap-3 sm:gap-4 text-slate-400 flex-wrap justify-center">
+                {([
+                  { role: 'AUTHOR' as Role, label: 'Author Log In' },
+                  { role: 'EDITOR' as Role, label: 'Editor Log In' },
+                  { role: 'REVIEWER' as Role, label: 'Reviewer Log In' },
+                  { role: 'PUBLISHER' as Role, label: 'Publisher Log In' },
+                  { role: 'COORDINATOR' as Role, label: 'Coordinator Log In' },
+                ]).map(({ role, label }, idx) => (
+                  <React.Fragment key={role}>
+                    {idx > 0 && <span>•</span>}
+                    <button
+                      onClick={() => {
+                        setAuthRole(role);
+                        setAuthMode('LOGIN');
+                        setCurrentScreen('AUTH');
+                      }}
+                      className="hover:text-white transition cursor-pointer font-bold font-mono text-[10px] uppercase"
+                    >
+                      {label}
+                    </button>
+                  </React.Fragment>
+                ))}
               </div>
             </div>
           </div>
@@ -399,10 +411,7 @@ export default function App() {
                   <>
                     <button
                       id="btn-nav-my-profile"
-                      onClick={() => {
-                        setActiveRole(loggedInUser.role);
-                        setCurrentScreen('WORKSPACE');
-                      }}
+                      onClick={() => setCurrentScreen('WORKSPACE')}
                       className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-md flex items-center gap-1"
                     >
                       <User className="w-3.5 h-3.5" />
@@ -533,7 +542,6 @@ export default function App() {
         <AuthPortals
           activeRole={authRole}
           initialMode={authMode}
-          manuscripts={manuscripts}
           onBackToLanding={() => {
             if (loggedInUser) {
               setCurrentScreen('WORKSPACE');
@@ -543,7 +551,6 @@ export default function App() {
           }}
           onSuccessAuth={(user) => {
             setLoggedInUser(user);
-            setActiveRole(user.role);
             setCurrentScreen('WORKSPACE');
             setNotification(`Successfully logged in as ${user.name}`);
             setTimeout(() => setNotification(''), 4000);
@@ -553,69 +560,66 @@ export default function App() {
 
       {currentScreen === 'WORKSPACE' && (
         <div className="flex-grow flex flex-col">
-          {/* Dynamic Role Multi-Tenant Persona Simulator Selector */}
-          {activeRole !== 'AUTHOR' && (
+          {/* Workspace chrome for every role except Author (whose workspace has its own header) */}
+          {loggedInUser && loggedInUser.role !== 'AUTHOR' && (
             <RoleSelector
-              activeRole={activeRole}
-              onRoleChange={handleRoleChange}
+              activeRole={loggedInUser.role}
               unassignedCount={unassignedCount}
               inReviewCount={inReviewCount}
               inProductionCount={inProductionCount}
-              loggedInRole={loggedInUser?.role}
               loggedInUser={loggedInUser}
               onSignOut={handleSignOut}
             />
           )}
 
-          <main id="jms-workspace-main" className="flex-grow">
-            <div className="animate-fade-in duration-300">
-              
-              {activeRole === 'AUTHOR' && (
-                <AuthorWorkspace
-                  manuscripts={manuscripts}
-                  onSaveManuscript={handleSaveDraftManuscript}
-                  onSubmitManuscript={handleSubmitManuscript}
-                  onDeleteManuscript={handleDeleteManuscript}
-                  currentUser={loggedInUser}
-                  onSignOut={handleSignOut}
-                  onRoleChange={handleRoleChange}
-                />
-              )}
+          <main id="jms-workspace-main" className="flex-grow flex flex-col">
+            <div className="animate-fade-in duration-300 flex-grow flex flex-col">
+              {/* The workspace rendered is always exactly the authenticated
+                  user's own role -- there is no client-side role switch. */}
+              <RequireRole role={loggedInUser?.role} allowed={['AUTHOR', 'EDITOR', 'REVIEWER', 'PUBLISHER', 'COORDINATOR']}>
+                {loggedInUser?.role === 'AUTHOR' && (
+                  <AuthorWorkspace
+                    manuscripts={manuscripts}
+                    onSaveManuscript={handleSaveDraftManuscript}
+                    onSubmitManuscript={handleSubmitManuscript}
+                    onDeleteManuscript={handleDeleteManuscript}
+                    currentUser={loggedInUser}
+                    onSignOut={handleSignOut}
+                  />
+                )}
 
-              {activeRole === 'EDITOR' && (
-                <EditorWorkspace
-                  manuscripts={manuscripts}
-                  onUpdateManuscript={handleUpdateManuscript}
-                  onDeleteManuscript={handleDeleteManuscript}
-                  currentUser={loggedInUser}
-                />
-              )}
+                {loggedInUser?.role === 'EDITOR' && (
+                  <EditorWorkspace
+                    manuscripts={manuscripts}
+                    onUpdateManuscript={handleUpdateManuscript}
+                    onDeleteManuscript={handleDeleteManuscript}
+                    currentUser={loggedInUser}
+                  />
+                )}
 
-              {activeRole === 'REVIEWER' && (
-                <ReviewerWorkspace
-                  manuscripts={manuscripts}
-                  onUpdateManuscript={handleUpdateManuscript}
-                  currentUser={loggedInUser}
-                />
-              )}
+                {loggedInUser?.role === 'REVIEWER' && (
+                  <ReviewerWorkspace
+                    manuscripts={manuscripts}
+                    onUpdateManuscript={handleUpdateManuscript}
+                    currentUser={loggedInUser}
+                  />
+                )}
 
-              {activeRole === 'PUBLISHER' && (
-                <PublisherWorkspace
-                  manuscripts={manuscripts}
-                  onUpdateManuscript={handleUpdateManuscript}
-                  currentUser={loggedInUser}
-                />
-              )}
+                {loggedInUser?.role === 'PUBLISHER' && (
+                  <PublisherWorkspace
+                    manuscripts={manuscripts}
+                    onUpdateManuscript={handleUpdateManuscript}
+                    currentUser={loggedInUser}
+                  />
+                )}
 
-              {activeRole === 'ARCHITECT' && <ArchitectWorkspace />}
-
-              {activeRole === 'COORDINATOR' && (
-                <CoordinatorWorkspace
-                  manuscripts={manuscripts}
-                  onUpdateManuscript={handleUpdateManuscript}
-                />
-              )}
-
+                {loggedInUser?.role === 'COORDINATOR' && (
+                  <CoordinatorWorkspace
+                    manuscripts={manuscripts}
+                    onUpdateManuscript={handleUpdateManuscript}
+                  />
+                )}
+              </RequireRole>
             </div>
           </main>
         </div>

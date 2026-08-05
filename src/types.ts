@@ -1,9 +1,12 @@
-export type Role = 'AUTHOR' | 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'ARCHITECT' | 'COORDINATOR';
+export type Role = 'AUTHOR' | 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'COORDINATOR';
+
+export type ProfileStatus = 'ACTIVE' | 'PENDING_APPROVAL' | 'REJECTED';
 
 export type ManuscriptStatus =
   | 'DRAFT'
   | 'SUBMITTED'       // Unassigned (waiting for Editor)
-  | 'UNDER_REVIEW'    // In Review
+  | 'EDITOR_REVIEW'   // Assigned to an Editor: accept/decline, evaluate, suggest reviewers
+  | 'UNDER_REVIEW'    // In Review (2 reviewers assigned and invited)
   | 'REVISION_REQUESTED' // Editor requested author revisions
   | 'AWAITING_DECISION'
   | 'ACCEPTED'        // In Production

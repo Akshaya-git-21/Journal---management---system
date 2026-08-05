@@ -1,25 +1,22 @@
 import React, { useState } from 'react';
 import { Role } from '../types';
-import { registerSupabaseUser, loginSupabaseUser } from '../lib/supabase';
+import { registerAccount, loginAccount, requestPasswordReset } from '../lib/auth';
 import TuliticsLogo from './TuliticsLogo';
-import { AVAILABLE_REVIEWERS } from '../initialData';
-import { 
-  Shield, 
-  Key, 
-  Mail, 
-  Globe, 
-  ArrowLeft, 
-  Loader2, 
-  Sparkles, 
-  AlertCircle, 
-  CheckCircle, 
-  User, 
-  Building, 
-  Phone, 
-  BookOpen, 
-  Sliders, 
-  Award, 
-  FileText 
+import {
+  Key,
+  Mail,
+  Globe,
+  ArrowLeft,
+  Loader2,
+  AlertCircle,
+  CheckCircle,
+  User,
+  Building,
+  Phone,
+  BookOpen,
+  Sliders,
+  Award,
+  FileText
 } from 'lucide-react';
 
 interface AuthPortalsProps {
@@ -27,62 +24,34 @@ interface AuthPortalsProps {
   initialMode: 'LOGIN' | 'REGISTER';
   onBackToLanding: () => void;
   onSuccessAuth: (user: { name: string; email: string; role: Role }) => void;
-  manuscripts?: any[];
 }
 
-export default function AuthPortals({ activeRole, initialMode, onBackToLanding, onSuccessAuth, manuscripts }: AuthPortalsProps) {
+export default function AuthPortals({ activeRole, initialMode, onBackToLanding, onSuccessAuth }: AuthPortalsProps) {
+  // localRole only picks which REGISTER field-set/label to show. It has no
+  // bearing on login -- login always resolves the real role from the account.
   const [localRole, setLocalRole] = useState<Role>(activeRole);
   const [mode, setMode] = useState<'LOGIN' | 'REGISTER'>(initialMode);
 
-  const getPresetEmail = (role: Role) => {
-    if (role === 'AUTHOR') return 'author@stanford.edu';
-    if (role === 'REVIEWER') return 'neumann@ias.edu';
-    if (role === 'EDITOR') return 'editor@stanford.edu';
-    if (role === 'PUBLISHER') return 'publisher@stanford.edu';
-    if (role === 'COORDINATOR') return 'coordinator-triage@jms-journal.org';
-    return '';
-  };
-
-  const [email, setEmail] = useState(() => {
-    if (initialMode === 'LOGIN') {
-      return getPresetEmail(activeRole);
-    }
-    return '';
-  });
-
-  const [password, setPassword] = useState(() => {
-    if (initialMode === 'LOGIN') return 'password123';
-    return '';
-  });
-
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
   // Sync props to state dynamically when parent screen triggers
   React.useEffect(() => {
     setLocalRole(activeRole);
     setMode(initialMode);
-    if (initialMode === 'LOGIN') {
-      setEmail(getPresetEmail(activeRole));
-      setPassword('password123');
-    } else {
-      setEmail('');
-      setPassword('');
-      setConfirmPassword('');
-    }
+    setEmail('');
+    setPassword('');
+    setConfirmPassword('');
   }, [activeRole, initialMode]);
 
   const handleRoleSelect = (role: Role) => {
     setLocalRole(role);
-    if (mode === 'LOGIN') {
-      setEmail(getPresetEmail(role));
-      setPassword('password123');
-    } else {
-      setEmail('');
-      setPassword('');
-      setConfirmPassword('');
-    }
+    setEmail('');
+    setPassword('');
+    setConfirmPassword('');
   };
-  
+
   // Specific Registration Fields
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -202,42 +171,40 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
   const textareaStyle = `w-full bg-white text-slate-900 placeholder-slate-400 border border-emerald-100/80 rounded-lg pl-9 pr-3 py-1.5 focus:ring-2 focus:outline-none ${colors.focusBorder} font-sans font-semibold text-sm transition-all duration-200 shadow-xs`;
   const selectStyle = `w-full bg-white text-slate-900 border border-emerald-100/80 rounded-lg pl-9 pr-9 py-1.5 focus:ring-2 focus:outline-none ${colors.focusBorder} font-sans font-semibold text-sm transition-all duration-200 shadow-xs appearance-none`;
 
-  const handleSimulateSubmit = async (e: React.FormEvent) => {
+  const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
-    
-    // Simulate validators:
+
     if (mode === 'REGISTER') {
       if (!email) {
-        setErrorMsg('First-class email identifier required.');
+        setErrorMsg('Email address is required.');
         return;
       }
       if (password !== confirmPassword) {
-        setErrorMsg('Confirm Password coordinates mismatch.');
+        setErrorMsg('Passwords do not match.');
         return;
       }
       if (password.length < 6) {
-        setErrorMsg('Credential security requires at least 6 characters.');
+        setErrorMsg('Password must be at least 6 characters.');
         return;
       }
     } else {
       if (!email || !password) {
-        setErrorMsg('Email and Password vectors must be defined.');
+        setErrorMsg('Email and password are required.');
         return;
       }
     }
 
     setLoading(true);
-    
-    // Compute registered user full name
-    let computedName = 'Simulated User';
+
+    let computedName = '';
     if (localRole === 'AUTHOR') {
-      computedName = firstName ? `${firstName} ${lastName}` : 'Ada Lovelace';
+      computedName = firstName ? `${firstName} ${lastName}` : '';
     } else if (localRole === 'PUBLISHER') {
-      computedName = contactPerson || publisherName || 'Simulated Publisher';
+      computedName = contactPerson || publisherName || '';
     } else {
-      computedName = fullName || 'Simulated Staff';
+      computedName = fullName || '';
     }
 
     try {
@@ -263,114 +230,37 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
           mobile_number: mobileNumber
         };
 
-        const res = await registerSupabaseUser(email, password, computedName, localRole, meta);
-        setSuccessMsg(`SUCCESS: Account registered for ${computedName} in Supabase Auth!`);
-        setTimeout(() => {
-          onSuccessAuth({
-            name: computedName,
-            email: email,
-            role: localRole
-          });
-        }, 1500);
+        const result = await registerAccount(email, password, computedName, localRole, meta);
+
+        if (result.requiresEmailConfirmation) {
+          setSuccessMsg('Account created. Check your inbox to confirm your email before logging in.');
+          setMode('LOGIN');
+          setEmail('');
+          setPassword('');
+        } else if (result.pendingApproval) {
+          setSuccessMsg(`Account request submitted. A Coordinator must approve ${localRole.toLowerCase()} access before you can log in.`);
+          setMode('LOGIN');
+          setEmail('');
+          setPassword('');
+        } else if (result.user) {
+          setSuccessMsg(`Welcome, ${result.user.name}! Your account is active.`);
+          setTimeout(() => {
+            onSuccessAuth({ name: result.user!.name, email: result.user!.email, role: result.user!.role });
+          }, 1000);
+        }
       } else {
-        // Mode is LOGIN -> Support Development Login bypass
         const cleanEmail = email.trim().toLowerCase();
-        
-        // Helper to resolve user name from email across system presets & manuscripts
-        let resolvedName = '';
-        const KNOWN_USERS: Record<string, string> = {
-          'editor@stanford.edu': 'Dr. Cynthia Dwork',
-          'elizabeth.vance@medai.edu': 'Dr. Elizabeth Vance',
-          'hiroshi.tanaka@medai.jp': 'Dr. Hiroshi Tanaka',
-          'arjun.patel@iitd.ac.in': 'Prof. Arjun Patel',
-          'maria.garcia@nih.gov': 'Dr. Maria Garcia',
-          'james.wilson@bioinfo.org': 'Dr. James Wilson',
-          'coordinator-triage@jms-journal.org': 'Sarah Jenkins, MSc',
-          'author@stanford.edu': 'Dr. Ada Lovelace',
-          'ada@computing.org': 'Dr. Ada Lovelace',
-          'neumann@ias.edu': 'Prof. John von Neumann',
-          'reviewer@stanford.edu': 'Dr. Stanford Reviewer'
-        };
-
-        if (KNOWN_USERS[cleanEmail]) {
-          resolvedName = KNOWN_USERS[cleanEmail];
-        } else {
-          // Check manuscripts for author, editor, or reviewer name match
-          for (const m of (manuscripts || [])) {
-            if (m.authorEmail && m.authorEmail.toLowerCase() === cleanEmail) {
-              resolvedName = m.authorName || resolvedName;
-            }
-            if (m.assignedEditorEmail && m.assignedEditorEmail.toLowerCase() === cleanEmail) {
-              resolvedName = m.assignedEditor || resolvedName;
-            }
-            if (m.reviewers) {
-              const rev = m.reviewers.find((r: any) => r.email && r.email.toLowerCase() === cleanEmail);
-              if (rev) resolvedName = rev.name || resolvedName;
-            }
-          }
-        }
-
-        if (!resolvedName) {
-          // Derive clean name from email prefix
-          const prefix = cleanEmail.split('@')[0] || 'User';
-          resolvedName = prefix.split(/[._-]/).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
-          if (localRole === 'EDITOR' || localRole === 'REVIEWER') {
-            resolvedName = `Dr. ${resolvedName}`;
-          }
-        }
-
-        // Try Supabase authentication first, but fall back gracefully for Dev Login
-        try {
-          const authUser = await loginSupabaseUser(cleanEmail, password);
-          if (authUser && authUser.name) {
-            resolvedName = authUser.name;
-          }
-        } catch (supabaseErr) {
-          console.log("[Dev Login Mode]: Supabase password check bypassed for testing:", supabaseErr);
-        }
-
-        setSuccessMsg(`⚡ DEV LOGIN SUCCESS: Authenticated as ${resolvedName} (${cleanEmail}). Password check bypassed.`);
+        const user = await loginAccount(cleanEmail, password);
+        setSuccessMsg(`Signed in as ${user.name}.`);
         setTimeout(() => {
-          onSuccessAuth({
-            name: resolvedName,
-            email: cleanEmail,
-            role: localRole
-          });
-        }, 1200);
-        return;
+          onSuccessAuth({ name: user.name, email: user.email, role: user.role });
+        }, 600);
       }
     } catch (err: any) {
-      console.error("[Supabase Auth Error Captured in AuthPortals]:", err);
-      // Display the actual, unhidden error details to the user
-      setErrorMsg(`Authentication Failure: ${err.message || err.toString() || 'Unknown error occurred.'}`);
+      setErrorMsg(err.message || 'Authentication failed. Please try again.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const simulateOAuth = (provider: 'GOOGLE' | 'ORCID') => {
-    setErrorMsg('');
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      const computedName = localRole === 'AUTHOR' ? 'Dr. Ada Lovelace' : 
-                           localRole === 'REVIEWER' ? 'Prof. Grace Hopper' : 
-                           localRole === 'EDITOR' ? 'Dr. Alan Turing' : 
-                           localRole === 'COORDINATOR' ? 'Sarah Jenkins, MSc' : 'Digital Press Center';
-      const computedEmail = localRole === 'AUTHOR' ? 'ada@computing.org' : 
-                            localRole === 'REVIEWER' ? 'grace@cober.org' : 
-                            localRole === 'EDITOR' ? 'turing@enigma.labs' : 
-                            localRole === 'COORDINATOR' ? 'coordinator-triage@jms-journal.org' : 'press@jms-digital.org';
-      
-      setSuccessMsg(`SUCCESS: Connected OAuth from ${provider}. Resolved metadata parameters for ${computedName}.`);
-      setTimeout(() => {
-        onSuccessAuth({
-          name: computedName,
-          email: computedEmail,
-          role: localRole
-        });
-      }, 1500);
-    }, 1000);
   };
 
   return (
@@ -452,8 +342,8 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
               type="button"
               onClick={() => {
                 setMode('LOGIN');
-                setEmail(getPresetEmail(localRole));
-                setPassword('password123');
+                setEmail('');
+                setPassword('');
               }}
               className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold text-center transition-all duration-200 cursor-pointer ${
                 mode === 'LOGIN'
@@ -468,12 +358,12 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
             <div>
               <h2 className="font-sans font-black text-lg text-slate-900 tracking-tight leading-none">
-                {mode === 'LOGIN' ? 'Separate Secure Login' : 'Independent Portal Sign Up'}
+                {mode === 'LOGIN' ? colors.label : 'Portal Registration'}
               </h2>
               <p className="text-xs text-slate-500 font-semibold mt-1">
-                {mode === 'LOGIN' 
-                  ? `Enter credentials to access your persistent journal dashboard.` 
-                  : `Build a peer profile index associated with our multi-tenant database.`}
+                {mode === 'LOGIN'
+                  ? `Enter your credentials to access your journal dashboard.`
+                  : `Create a peer profile in the journal's account system.`}
               </p>
             </div>
             <span className="bg-[#f0fdf4] border border-[#bbf7d0] text-[#155e42] font-sans text-[11px] px-2.5 py-1 rounded-md font-normal capitalize shrink-0 self-start shadow-xs">
@@ -496,7 +386,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
             </div>
           )}
 
-          <form onSubmit={handleSimulateSubmit} className="space-y-3">
+          <form onSubmit={handleAuthSubmit} className="space-y-3">
             
             {/* REGISTER PORTAL FORMS */}
             {mode === 'REGISTER' && (
@@ -961,10 +851,14 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
               )}
             </div>
 
-            {/* SELECT ROLE TO LOGIN/REGISTER SECTION */}
+            {/* Portal picker. On REGISTER this genuinely chooses the role being
+                requested. On LOGIN it only switches the portal branding/copy
+                below -- it never determines what the login grants. The
+                account's own stored role (resolved server-side after
+                signInWithPassword) is what's actually authoritative. */}
             <div className="space-y-1.5 py-1">
               <label className="block text-[10px] font-sans font-medium uppercase tracking-wider text-slate-500 select-none">
-                Select Portal Access Gate
+                {mode === 'REGISTER' ? 'Register As' : 'Portal'}
               </label>
               <div className="grid grid-cols-5 gap-1">
                 {[
@@ -993,18 +887,41 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                   );
                 })}
               </div>
+              {mode === 'REGISTER' && localRole !== 'AUTHOR' && (
+                <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 font-semibold">
+                  {localRole.charAt(0) + localRole.slice(1).toLowerCase()} accounts require Coordinator approval before login.
+                </p>
+              )}
+              {mode === 'LOGIN' && (
+                <p className="text-[10px] text-slate-400 font-semibold px-0.5">
+                  This selects the portal look only -- your account's own role decides what you can access.
+                </p>
+              )}
             </div>
 
-            {/* FORGOT PASSWORD GATES */}
+            {/* FORGOT PASSWORD */}
             {mode === 'LOGIN' && (
               <div className="flex items-center justify-between text-sm pt-1">
-                <a
-                  href="#"
-                  onClick={(e) => { e.preventDefault(); alert("Dispatching simulated password reset mail guidelines to: " + (email || "your inbox")); }}
-                  className="text-[#008751] hover:text-[#007043] font-bold transition-colors hover:underline"
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setErrorMsg('');
+                    setSuccessMsg('');
+                    if (!email) {
+                      setErrorMsg('Enter your email address first.');
+                      return;
+                    }
+                    try {
+                      await requestPasswordReset(email);
+                      setSuccessMsg(`Password reset email sent to ${email}.`);
+                    } catch (err: any) {
+                      setErrorMsg(err.message || 'Could not send reset email.');
+                    }
+                  }}
+                  className="text-[#008751] hover:text-[#007043] font-bold transition-colors hover:underline cursor-pointer"
                 >
                   Forgot Password?
-                </a>
+                </button>
               </div>
             )}
 
@@ -1028,51 +945,6 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
             </button>
 
           </form>
-
-          {/* SIMULATED SOCIAL OAUTH FOR EVERY SYSTEM REGISTRATION */}
-          <div className="space-y-2 pt-3 border-t border-slate-100">
-            <div className="relative flex items-center justify-center">
-              <div className="absolute inset-0 flex items-center">
-                <div id="oauth-divider-line" className="w-full border-t border-slate-100"></div>
-              </div>
-              <span className="relative bg-white px-4 font-mono text-[8px] font-black uppercase tracking-widest text-slate-400 select-none">
-                Alternative OAuth Registries
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <button
-                id="btn-oauth-google"
-                type="button"
-                onClick={() => simulateOAuth('GOOGLE')}
-                className="flex items-center justify-center gap-2 border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 py-1.5 px-3 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs"
-              >
-                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                  <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.66 1.54 14.98 1 12 1 7.35 1 3.37 3.67 1.39 7.56l3.85 2.99c.92-2.77 3.51-4.51 6.76-4.51z"/>
-                  <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.35H12v4.51h6.46c-.29 1.48-1.14 2.73-2.4 3.58l3.74 2.9c2.19-2.02 3.49-4.99 3.49-8.64z"/>
-                  <path fill="#FBBC05" d="M5.24 14.59c-.25-.75-.39-1.55-.39-2.39s.14-1.64.39-2.39L1.39 6.82C.5 8.62 0 10.62 0 12.7c0 2.08.5 4.08 1.39 5.88l3.85-2.99z"/>
-                  <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.9l-3.74-2.9c-1.1.74-2.52 1.18-4.22 1.18-3.25 0-5.84-1.74-6.76-4.51L1.39 16.8C3.37 20.69 7.35 23 12 23z"/>
-                </svg>
-                Continue with Google
-              </button>
-
-              {localRole !== 'PUBLISHER' ? (
-                <button
-                  id="btn-oauth-orcid"
-                  type="button"
-                  onClick={() => simulateOAuth('ORCID')}
-                  className="flex items-center justify-center gap-2 border border-[#bbf7d0] bg-[#f0fdf4] hover:bg-[#e6f4ea] text-[#165b33] py-1.5 px-3 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs"
-                >
-                  <span className="w-4 h-4 rounded-full bg-[#a6e22e] text-white flex items-center justify-center font-bold text-[9px] select-none">iD</span>
-                  Continue with ORCID ID
-                </button>
-              ) : (
-                <div className="bg-slate-50 border border-dashed border-slate-200 text-slate-400 p-1.5 text-center rounded-lg font-mono text-[8px] flex items-center justify-center font-bold">
-                  ORCID omitted for Publisher
-                </div>
-              )}
-            </div>
-          </div>
 
           {/* TOGGLE GATES SCREEN */}
           <div className="text-center pt-3 text-sm border-t border-slate-100">
@@ -1101,8 +973,8 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                   type="button"
                   onClick={() => {
                     setMode('LOGIN');
-                    setEmail(getPresetEmail(localRole));
-                    setPassword('password123');
+                    setEmail('');
+                    setPassword('');
                   }}
                   className="font-black underline text-[#008751] hover:text-[#007043] transition-colors cursor-pointer"
                 >

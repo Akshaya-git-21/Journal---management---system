@@ -1,23 +1,14 @@
 import { Role } from '../types';
 import TuliticsLogo from './TuliticsLogo';
-import { 
-  Shield, 
-  FileText, 
-  CheckSquare, 
-  Settings, 
-  Database, 
-  Activity, 
-  User, 
+import {
+  Shield,
+  FileText,
+  CheckSquare,
+  Settings,
   Users,
-  Lock, 
-  Layers, 
   LogOut,
-  Sparkles,
-  Info,
   Sun,
-  Tv,
   Bell,
-  BookOpen,
   ChevronDown,
   Search,
   Mail
@@ -25,22 +16,18 @@ import {
 
 interface RoleSelectorProps {
   activeRole: Role;
-  onRoleChange: (role: Role) => void;
   unassignedCount: number;
   inReviewCount: number;
   inProductionCount: number;
-  loggedInRole?: Role;
   loggedInUser?: { name: string; email: string; role: Role } | null;
   onSignOut?: () => void;
 }
 
 export default function RoleSelector({
   activeRole,
-  onRoleChange,
   unassignedCount,
   inReviewCount,
   inProductionCount,
-  loggedInRole,
   loggedInUser,
   onSignOut,
 }: RoleSelectorProps) {
@@ -76,14 +63,6 @@ export default function RoleSelector({
       color: 'text-teal-700 bg-teal-50 border-teal-150',
       desc: 'Galley file ingestion, DOI registration pipelines, production volume binding.',
       user: 'publisher-service@jms-press.org'
-    },
-    {
-      val: 'ARCHITECT',
-      label: 'Architect',
-      icon: Database,
-      color: 'text-slate-700 bg-slate-50 border-slate-250',
-      desc: 'View structural specifications, JSON schemas, and transition state-machines.',
-      user: 'Platform Architect Console'
     },
     {
       val: 'COORDINATOR',
@@ -156,10 +135,10 @@ export default function RoleSelector({
               {/* Profile card dropdown */}
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-emerald-500 text-white font-black flex items-center justify-center text-xs select-none shadow-md border border-emerald-400">
-                  JA
+                  {(loggedInUser?.name || 'C').charAt(0).toUpperCase()}
                 </div>
                 <div className="hidden sm:flex flex-col text-left leading-none">
-                  <span className="text-[11px] font-black text-white font-sans">Dr. Akshay</span>
+                  <span className="text-[11px] font-black text-white font-sans">{loggedInUser?.name || 'Coordinator'}</span>
                   <span className="text-[10px] text-emerald-200/60 font-bold mt-1">Active User</span>
                 </div>
                 <ChevronDown className="w-3.5 h-3.5 text-emerald-200/50" />
@@ -173,16 +152,13 @@ export default function RoleSelector({
         {/* 2. SECONDARY CONTEXT & TELEMETRY STRIP */}
         <div className="bg-white border-b border-slate-200 px-6 py-2.5 text-left">
           <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 flex flex-col md:flex-row items-center justify-between gap-3 text-[11px] text-slate-500">
-            
-            {/* Simulated Session Persona Status */}
+
+            {/* Session Persona Status */}
             <div className="flex items-center gap-2 flex-wrap text-left justify-center md:justify-start">
-              <span className="px-2 py-0.5 bg-[#e8f6f0] text-[#008751] rounded text-[9px] font-mono font-black tracking-wider uppercase border border-[#a3cfbb]/50 select-none leading-none">
-                SIMULATED PERSONA
-              </span>
               <span className="font-sans text-[11px] font-semibold text-slate-600">
-                Acting as <strong className="text-slate-900 font-mono text-[11px] font-black">coordinator-triage@jms-journal.org</strong>
+                Signed in as <strong className="text-slate-900 font-mono text-[11px] font-black">{loggedInUser?.email || 'coordinator'}</strong>
               </span>
-              
+
               <span className="flex items-center gap-1 bg-[#fef7e0] text-[#b06000] border border-[#fde8c3] px-2 py-0.5 rounded text-[10px] font-black leading-none select-none tracking-wide uppercase">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#ff8f00] animate-pulse"></span>
                 STRICT WORKFLOW LOCK
@@ -248,63 +224,33 @@ export default function RoleSelector({
           </div>
         )}
 
-        {/* Sandbox Role Switcher or Display */}
+        {/* Signed-in user & sign-out */}
         <div className="flex items-center gap-4 self-end md:self-auto ml-auto">
-          {activeRole === 'EDITOR' ? (
-            /* Exactly replica the top-right Simulated Staff */
-            <div className="flex items-center gap-3">
-              <div className="text-right flex flex-col justify-center leading-tight">
-                <span className="text-[10px] font-bold text-slate-400">
-                  Simulated Staff
-                </span>
-                <span className="text-[11px] font-extrabold text-slate-600 font-mono mt-0.5">
-                  akshay@jgmail.com
-                </span>
-              </div>
-              
-              {/* Avatar circle */}
-              <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-500 uppercase font-mono shadow-inner select-none leading-none">
-                S
-              </div>
-
-              <span className="h-4 w-[1px] bg-slate-200" />
-
-              <button
-                onClick={onSignOut}
-                className="flex items-center gap-1 text-[#b02a37] hover:text-red-750 font-sans text-xs font-bold cursor-pointer transition-colors p-1"
-                title="Logout session"
-              >
-                <LogOut className="w-3.5 h-3.5 stroke-[2.2]" />
-                <span className="text-[11px] font-black">Log Out</span>
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              {loggedInUser ? (
-                <div className="flex items-center gap-3">
-                  <div className="text-right flex flex-col justify-center leading-tight">
-                    <span className="text-[10px] font-bold text-slate-400">Active User</span>
-                    <span className="text-[11px] font-extrabold text-slate-600 font-mono mt-0.5">{loggedInUser.email}</span>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-500 uppercase font-mono select-none">
-                    {loggedInUser.name.charAt(0)}
-                  </div>
-                  <span className="h-4 w-[1px] bg-slate-200" />
-                  <button onClick={onSignOut} className="flex items-center gap-1 text-red-600 font-sans text-xs font-bold transition-colors p-1">
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span className="text-[11px] font-black">Log Out</span>
-                  </button>
+          <div className="flex items-center gap-3">
+            {loggedInUser ? (
+              <div className="flex items-center gap-3">
+                <div className="text-right flex flex-col justify-center leading-tight">
+                  <span className="text-[10px] font-bold text-slate-400">Active User</span>
+                  <span className="text-[11px] font-extrabold text-slate-600 font-mono mt-0.5">{loggedInUser.email}</span>
                 </div>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <button onClick={onSignOut} className="flex items-center gap-1 text-red-600 font-sans text-xs font-bold transition-colors p-1">
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span className="text-[11px] font-black">Log Out</span>
-                  </button>
+                <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-500 uppercase font-mono select-none">
+                  {loggedInUser.name.charAt(0)}
                 </div>
-              )}
-            </div>
-          )}
+                <span className="h-4 w-[1px] bg-slate-200" />
+                <button onClick={onSignOut} className="flex items-center gap-1 text-red-600 font-sans text-xs font-bold transition-colors p-1">
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="text-[11px] font-black">Log Out</span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <button onClick={onSignOut} className="flex items-center gap-1 text-red-600 font-sans text-xs font-bold transition-colors p-1">
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="text-[11px] font-black">Log Out</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -312,15 +258,12 @@ export default function RoleSelector({
       <div className="bg-[#fcfdfe] border-t border-gray-150 px-6 py-2.5">
         <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 flex flex-col md:flex-row items-center justify-between gap-3 text-xs md:text-sm text-slate-500">
           
-          {/* Simulated Session Persona Status */}
+          {/* Session Persona Status */}
           <div className="flex items-center gap-2 flex-wrap text-left justify-center md:justify-start">
-            <span className="px-2 py-0.5 bg-slate-200/70 text-slate-600 rounded text-[11px] font-mono font-bold tracking-wider uppercase border border-slate-300/40 select-none leading-none">
-              SIMULATED PERSONA
-            </span>
             <span className="font-sans text-xs md:text-sm font-bold text-slate-600">
-              Acting as <strong className="text-slate-800 font-mono text-xs md:text-sm font-extrabold">{activeRoleInfo?.user || 'chief-editor@jms-journal.org'}</strong>
+              Signed in as <strong className="text-slate-800 font-mono text-xs md:text-sm font-extrabold">{loggedInUser?.email || activeRoleInfo?.user}</strong>
             </span>
-            
+
             <span className="flex items-center gap-1 bg-[#fff3cd] text-[#664d03] border border-[#ffecb5] px-2 py-0.5 rounded-[5px] text-xs font-extrabold leading-none select-none">
               <span className="w-1.5 h-1.5 rounded-full bg-[#664d03] animate-pulse"></span>
               strict workflow lock

@@ -1,13 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
-import { Manuscript, Role } from '../types';
+import { Manuscript } from '../types';
 
-// Supabase Connection Credentials (hardcoded from requested parameters as fail-safe, and supports env variables)
-const SUPABASE_PROJECT_ID = 'uqevcpokthdqlispnxyz';
-const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || `https://${SUPABASE_PROJECT_ID}.supabase.co`;
-const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'sb_publishable_8rW2Vf6u40k0rdZHd7H7UQ_l8tzw8Ho';
+const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
 
-console.log("[Supabase Init] URL:", SUPABASE_URL);
-console.log("[Supabase Init] Anon Key Loaded:", SUPABASE_ANON_KEY ? `Yes (length: ${SUPABASE_ANON_KEY.length}, starting with: ${SUPABASE_ANON_KEY.substring(0, 15)}...)` : "No");
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  throw new Error(
+    'Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY. Set them in your .env file (see .env.example).'
+  );
+}
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -277,131 +278,6 @@ export async function deleteManuscriptFromDb(id: string): Promise<void> {
 }
 
 /**
- * Register a user via Supabase Auth and save role in the profiles table
- */
-export async function registerSupabaseUser(
-  email: string,
-  password: string,
-  fullName: string,
-  role: Role,
-  metaData: Record<string, any> = {}
-): Promise<{ user: any; profile: any }> {
-  console.log("[Supabase Auth - Register Request]");
-  console.log("- Supabase URL:", SUPABASE_URL);
-  console.log("- Register Email ID:", email);
-  console.log("- Register Password Length:", password ? password.length : 0);
-  console.log("- Register Full Name:", fullName);
-  console.log("- Register Selected Role:", role);
-
-  // 1. Sign up the user in Supabase Auth
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        full_name: fullName,
-        role: role
-      }
-    }
-  });
-
-  console.log("[Supabase Auth - Register Response]");
-  console.log("- Response Data:", authData);
-  console.log("- Response Error:", authError);
-
-  if (authError) {
-    console.error("[Supabase Auth - Registration Error Details]:", authError);
-    throw authError;
-  }
-
-  const user = authData.user;
-  if (!user) {
-    throw new Error('Sign up completed but user session is null.');
-  }
-
-  // 2. Insert into profiles table
-  const profilePayload = {
-    id: user.id,
-    email: email,
-    name: fullName,
-    role: role,
-    metadata: metaData,
-    created_at: new Date().toISOString()
-  };
-
-  const { data: profileData, error: profileError } = await supabase
-    .from('profiles')
-    .upsert(profilePayload)
-    .select()
-    .single();
-
-  // If table doesn't exist, we log but don't fail, since role metadata is stored in auth.users user_metadata as well!
-  if (profileError) {
-    console.warn('Profiles table insert failed (probably schema not created yet):', profileError.message);
-  }
-
-  return { user, profile: profileData || profilePayload };
-}
-
-/**
- * Login a user via Supabase Auth and load their role
- */
-export async function loginSupabaseUser(email: string, password: string): Promise<{ name: string; email: string; role: Role }> {
-  console.log("[Supabase Auth - Login Request]");
-  console.log("- Supabase URL:", SUPABASE_URL);
-  console.log("- Supplying Email ID:", email);
-  console.log("- Supplying Password Length:", password ? password.length : 0);
-
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password
-  });
-
-  console.log("[Supabase Auth - Login Response]");
-  console.log("- Response Data:", data);
-  console.log("- Response Error:", error);
-
-  // Retrieve and print current session details
-  const { data: sessionData } = await supabase.auth.getSession();
-  console.log("[Supabase Auth - Current Session]:", sessionData?.session);
-
-  if (error) {
-    console.warn("[Supabase Auth - Authentication Notice]:", error.message || error);
-    throw new Error(error.message || "Invalid login credentials");
-  }
-
-  const user = data.user;
-  if (!user) {
-    throw new Error('User logged in but session is null.');
-  }
-
-  // Print the authenticated user ID in the browser console
-  console.log("[Supabase Auth] Authenticated User ID:", user.id);
-
-  // Determine user role and name
-  let role: Role = (user.user_metadata?.role as Role) || 'AUTHOR';
-  let name = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
-
-  // Double-check with profiles table if available
-  try {
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('name, role')
-      .eq('id', user.id)
-      .single();
-
-    if (!profileError && profile) {
-      if (profile.role) role = profile.role as Role;
-      if (profile.name) name = profile.name;
-    }
-  } catch (err) {
-    console.warn('Could not load profile from table:', err);
-  }
-
-  return { name, email: user.email || email, role };
-}
-
-/**
  * Upload a file to Supabase storage 'manuscripts' bucket
  */
 export async function uploadManuscriptFile(file: File, manuscriptId: string): Promise<{ path: string; publicUrl: string }> {
@@ -440,28 +316,13 @@ export function getSupabaseSQLScript(): string {
 -- Paste this script into your Supabase SQL Editor
 -- ==========================================
 
--- 1. Create profiles table linked to Auth users
-CREATE TABLE IF NOT EXISTS public.profiles (
-  id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
-  email TEXT NOT NULL,
-  name TEXT,
-  role TEXT CHECK (role IN ('AUTHOR', 'EDITOR', 'REVIEWER', 'PUBLISHER', 'ARCHITECT', 'COORDINATOR')),
-  metadata JSONB DEFAULT '{}'::jsonb,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-
--- Enable RLS on profiles
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
--- Profiles policies
-CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles
-  FOR SELECT USING (true);
-
-CREATE POLICY "Users can insert their own profile" ON public.profiles
-  FOR INSERT WITH CHECK (auth.uid() = id);
-
-CREATE POLICY "Users can update their own profile" ON public.profiles
-  FOR UPDATE USING (auth.uid() = id);
+-- 1. Profiles, roles, and approval workflow.
+--    Run supabase/migrations/0001_profiles_rbac.sql for this part -- it is
+--    NOT duplicated here because it must stay idempotent against a
+--    profiles table that may already exist from an earlier version of this
+--    app, and keeping the same SQL in two places is exactly how that goes
+--    stale (ALTER TABLE ... ADD COLUMN IF NOT EXISTS, backfills, and the
+--    handle_new_user() trigger / approve_user_role() RPC all live there).
 
 -- 2. Create manuscripts table
 CREATE TABLE IF NOT EXISTS public.manuscripts (
