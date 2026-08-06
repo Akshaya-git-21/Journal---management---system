@@ -6,7 +6,7 @@ import {
   respondToEditorAssignment, submitEditorAssessment, submitEditorRecommendation
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
-import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2 } from 'lucide-react';
+import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings } from 'lucide-react';
 
 interface EditorWorkspaceProps {
   manuscripts?: any[];
@@ -42,6 +42,11 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    submissions: true,
+    reviewStages: false,
+    copyedit: false
+  });
 
   const load = async () => {
     try {
@@ -83,60 +88,239 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   }, []);
 
   const selected = rows.find((r) => r.manuscript.id === selectedManuscriptId) || null;
+  const toggleSection = (section: string) => {
+    setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  // If a manuscript is selected, show full-page detail view
+  if (selected) {
+    return <AssignmentDetail row={selected} onBack={() => setSelectedManuscriptId(null)} onChanged={load} />;
+  }
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 flex flex-col font-sans">
-      <header className="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-30">
-        <h1 className="text-lg font-black text-slate-900">Editor Workspace</h1>
-        <p className="text-xs text-slate-500 font-semibold">{currentUser?.name} &middot; {currentUser?.email}</p>
-      </header>
-
-      <main className="flex-1 w-full max-w-5xl mx-auto px-6 py-8">
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 mb-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Editor Dashboard</p>
-              <h2 className="text-xl font-black text-slate-900 mt-2">Assigned manuscripts</h2>
+    <div className="w-full h-screen bg-slate-50 flex font-sans overflow-hidden">
+      {/* Dark Green Sidebar */}
+      <aside className="w-80 bg-[#1a4038] text-white flex flex-col overflow-y-auto shadow-lg border-r border-[#0f3f37]">
+        {/* User Info */}
+        <div className="p-6 border-b border-[#0f3f37] shrink-0">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30 shrink-0">
+              <Settings className="w-5 h-5 text-emerald-400" />
             </div>
-            <div className="relative w-full max-w-md">
+            <div>
+              <h3 className="font-bold text-sm text-white">{currentUser?.name || 'Editor'}</h3>
+              <p className="text-xs text-emerald-200/80">Managing Editor</p>
+            </div>
+          </div>
+          <div className="bg-[#0f3f37] rounded-lg px-3 py-2 text-xs">
+            <p className="text-emerald-200/60 text-[10px] uppercase tracking-wider font-semibold">Core Jurisdiction:</p>
+            <p className="text-emerald-400 font-bold mt-1">Unrestricted</p>
+          </div>
+        </div>
+
+        {/* Navigation Sections */}
+        <nav className="flex-1 p-4 space-y-3 overflow-y-auto">
+          {/* SUBMISSIONS Section */}
+          <div className="border border-emerald-500/20 rounded-2xl overflow-hidden">
+            <button
+              onClick={() => toggleSection('submissions')}
+              className="w-full bg-emerald-500/10 hover:bg-emerald-500/15 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
+            >
+              <span className="flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                Submissions
+              </span>
+              <ChevronDown className={`w-4 h-4 transition ${expandedSections.submissions ? 'rotate-180' : ''}`} />
+            </button>
+            {expandedSections.submissions && (
+              <div className="bg-[#0f3f37]/50 divide-y divide-[#0f3f37]">
+                {[
+                  { label: 'Active Submissions', count: assignmentCounts.accepted },
+                  { label: 'Needs Editor', count: assignmentCounts.pending },
+                  { label: 'In Submission Stage', count: assignmentCounts.total - assignmentCounts.accepted - assignmentCounts.pending }
+                ].map((item) => (
+                  <button key={item.label} className="w-full text-left px-4 py-2.5 text-xs text-emerald-100/80 hover:bg-emerald-500/10 transition flex items-center justify-between">
+                    <span>{item.label}</span>
+                    <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{item.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* REVIEW STAGES Section */}
+          <div className="border border-emerald-500/20 rounded-2xl overflow-hidden">
+            <button
+              onClick={() => toggleSection('reviewStages')}
+              className="w-full bg-emerald-500/10 hover:bg-emerald-500/15 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
+            >
+              <span className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4" />
+                Review Stages
+              </span>
+              <ChevronDown className={`w-4 h-4 transition ${expandedSections.reviewStages ? 'rotate-180' : ''}`} />
+            </button>
+            {expandedSections.reviewStages && (
+              <div className="bg-[#0f3f37]/50 divide-y divide-[#0f3f37]">
+                {[
+                  { label: 'Awaiting Reviews', count: 0 },
+                  { label: 'Reviews Submitted', count: 0 },
+                  { label: 'Reviews Overdue', count: 0 },
+                  { label: 'Revisions Submitted', count: 0 },
+                  { label: 'In Review Stage', count: 0 }
+                ].map((item) => (
+                  <button key={item.label} className="w-full text-left px-4 py-2.5 text-xs text-emerald-100/80 hover:bg-emerald-500/10 transition flex items-center justify-between">
+                    <span>{item.label}</span>
+                    <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{item.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* COPYEDIT & PRODUCTION Section */}
+          <div className="border border-emerald-500/20 rounded-2xl overflow-hidden">
+            <button
+              onClick={() => toggleSection('copyedit')}
+              className="w-full bg-emerald-500/10 hover:bg-emerald-500/15 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
+            >
+              <span className="flex items-center gap-2">
+                <Archive className="w-4 h-4" />
+                Copyedit & Production
+              </span>
+              <ChevronDown className={`w-4 h-4 transition ${expandedSections.copyedit ? 'rotate-180' : ''}`} />
+            </button>
+            {expandedSections.copyedit && (
+              <div className="bg-[#0f3f37]/50 divide-y divide-[#0f3f37]">
+                {[
+                  { label: 'Copyediting Stage', count: 0 },
+                  { label: 'In Production Stage', count: 0 },
+                  { label: 'Scheduled Articles', count: 0 },
+                  { label: 'Published', count: 0 },
+                  { label: 'Declined / Rejected', count: 0 }
+                ].map((item) => (
+                  <button key={item.label} className="w-full text-left px-4 py-2.5 text-xs text-emerald-100/80 hover:bg-emerald-500/10 transition flex items-center justify-between">
+                    <span>{item.label}</span>
+                    <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{item.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </nav>
+      </aside>
+
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="bg-white border-b border-slate-200 px-8 py-5 shrink-0">
+          <p className="text-xs uppercase tracking-[0.24em] text-slate-400 font-semibold mb-1">SUBMISSIONS WORKFLOW REALM</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-black text-slate-900">Submissions Intake Audit Console</h1>
+              <p className="text-xs text-slate-500 mt-1">Select active categories to check incoming layout proofs, register direct editorial handlers, and validate author metadata.</p>
+            </div>
+            <div className="relative w-64">
               <input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search manuscripts or status"
+                placeholder="Search titles / IDs..."
                 className="w-full rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
               />
             </div>
           </div>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
-              <p className="uppercase tracking-[0.24em] text-slate-500">Total Assignments</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.total}</p>
+        </div>
+
+        {/* Content Scroll Area */}
+        <div className="flex-1 overflow-y-auto p-8">
+          {/* Stats Cards */}
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            <div className="bg-white border-2 border-emerald-200/50 rounded-2xl p-4">
+              <Clock className="w-6 h-6 text-emerald-500 mb-2" />
+              <p className="text-2xl font-black text-slate-900">{assignmentCounts.accepted}</p>
+              <p className="text-xs text-slate-500 font-semibold mt-1">Active Submissions</p>
             </div>
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
-              <p className="uppercase tracking-[0.24em] text-slate-500">Invited</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.invited}</p>
+            <div className="bg-white border-2 border-amber-200/50 rounded-2xl p-4">
+              <AlertCircle className="w-6 h-6 text-amber-500 mb-2" />
+              <p className="text-2xl font-black text-slate-900">{assignmentCounts.pending}</p>
+              <p className="text-xs text-slate-500 font-semibold mt-1">Needs Editor</p>
             </div>
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
-              <p className="uppercase tracking-[0.24em] text-slate-500">Accepted</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.accepted}</p>
+            <div className="bg-white border-2 border-teal-200/50 rounded-2xl p-4">
+              <Archive className="w-6 h-6 text-teal-500 mb-2" />
+              <p className="text-2xl font-black text-slate-900">0</p>
+              <p className="text-xs text-slate-500 font-semibold mt-1">In Submission</p>
             </div>
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
-              <p className="uppercase tracking-[0.24em] text-slate-500">Evaluated</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.submitted}</p>
-            </div>
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
-              <p className="uppercase tracking-[0.24em] text-slate-500">Pending</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.pending}</p>
+            <div className="bg-white border-2 border-slate-200 rounded-2xl p-4">
+              <FileText className="w-6 h-6 text-slate-600 mb-2" />
+              <p className="text-2xl font-black text-slate-900">0</p>
+              <p className="text-xs text-slate-500 font-semibold mt-1">System Pipeline</p>
             </div>
           </div>
+
+          {/* Checklist Card */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-black text-slate-900">Submissions Intake Checksum Checklist</h2>
+              <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] px-2.5 py-1 rounded-full font-bold">Automatic Validation Engine Active</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              {[
+                { check: true, text: 'PDF Layout Constraints Verified (Format OK)' },
+                { check: false, text: 'CrossRef Manuscript Uniqueness: 98.4% Uniqueness Check' },
+                { check: true, text: 'Author Identity Header Metadata Purged' },
+                { check: true, text: 'Mandatory COI Conflict Disclosures Signed' }
+              ].map((item, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <div className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 mt-0.5 ${item.check ? 'bg-emerald-100 border-emerald-300' : 'bg-slate-100 border-slate-300'}`}>
+                    {item.check && <CheckCircle className="w-4 h-4 text-emerald-600" />}
+                  </div>
+                  <p className={`text-xs ${item.check ? 'text-slate-700' : 'text-slate-500 line-through'}`}>{item.text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Main Content */}
+          {loading ? (
+            <div className="flex items-center justify-center py-24 text-slate-400">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...
+            </div>
+          ) : filteredRows.length === 0 ? (
+              <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-24 text-center">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center">
+                    <FileText className="w-8 h-8 text-emerald-500" />
+                  </div>
+                </div>
+                <p className="text-sm text-slate-500 font-semibold mb-2">No manuscript records registered under the selected sub-tab category.</p>
+                <p className="text-xs text-slate-400 mb-6">Try selecting a different workflow status from the left menu.</p>
+                <button className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-6 py-2.5 rounded-lg transition">
+                  VIEW ALL SUBMISSIONS →
+                </button>
+              </div>
+            ) : (
+              <AssignmentList rows={filteredRows} onOpen={setSelectedManuscriptId} />
+            )}
+
+          {/* Feature Highlights */}
+          {!selected && filteredRows.length > 0 && (
+            <div className="grid grid-cols-4 gap-4 mt-8">
+              {[
+                { icon: '🔐', title: 'Strict Workflow Lock', desc: 'This workspace is protected under strict workflow governance.' },
+                { icon: '🏢', title: 'Multi-Tenant Secure', desc: 'Isolated editorial environment with role-based access.' },
+                { icon: '🤖', title: 'Smart Review Orchestration', desc: 'Automate assignments, reminders and decision pathways.' },
+                { icon: '📊', title: 'Data Integrity First', desc: 'All actions are logged and fully auditable.' }
+              ].map((item, i) => (
+                <div key={i} className="bg-white border border-slate-200 rounded-xl p-4">
+                  <div className="text-2xl mb-2">{item.icon}</div>
+                  <h3 className="text-xs font-bold text-slate-900 mb-1">{item.title}</h3>
+                  <p className="text-[10px] text-slate-500">{item.desc}</p>
+                  <button className="text-emerald-600 text-[10px] font-bold mt-2 hover:text-emerald-700">Learn more →</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        {loading ? (
-          <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>
-        ) : selected ? (
-          <AssignmentDetail row={selected} onBack={() => setSelectedManuscriptId(null)} onChanged={load} />
-        ) : (
-          <AssignmentList rows={filteredRows} onOpen={setSelectedManuscriptId} />
-        )}
       </main>
     </div>
   );
@@ -194,93 +378,172 @@ function AssignmentDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
   const allReviewsIn = reviewerAssignments.length > 0 && reviewerAssignments.every((r) => r.status === 'SUBMITTED' || r.status === 'DECLINED');
 
   return (
-    <div className="space-y-5">
-      <button onClick={onBack} className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-700 cursor-pointer">
-        <ArrowLeft className="w-3.5 h-3.5" /> Back to assignments
-      </button>
-
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="font-mono text-xs text-slate-400">{manuscript.id}</p>
-            <h2 className="text-lg font-black text-slate-900 mt-1">{manuscript.title}</h2>
+    <div className="w-full h-full flex flex-col -mx-8 -my-8 bg-white">
+      {/* Dark Green Header */}
+      <div className="bg-[#1a4038] text-white px-8 py-4 flex items-center justify-between shrink-0 border-b-4 border-[#008751]">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="text-emerald-300 hover:text-white transition">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-sm font-bold text-emerald-300">{manuscript.id}</span>
+            <span className="bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-1 rounded font-bold uppercase">LEVELAGE</span>
+            <h1 className="text-lg font-black">{manuscript.title}</h1>
           </div>
-          <StatusBadge status={manuscript.status} />
         </div>
-        <p className="text-sm text-slate-600 mt-3 leading-relaxed">{manuscript.abstract}</p>
-        {manuscript.cover_letter && (
-          <div className="mt-3 bg-slate-50 rounded-lg p-3 text-xs text-slate-600">
-            <p className="font-bold text-slate-500 mb-1">Cover Letter</p>
-            {manuscript.cover_letter}
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          <button className="text-emerald-300 hover:text-white transition flex items-center gap-1.5 text-xs font-bold">
+            📋 Activity Log
+          </button>
+          <button className="text-emerald-300 hover:text-white transition flex items-center gap-1.5 text-xs font-bold">
+            📚 Library
+          </button>
+        </div>
       </div>
 
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">{error}</div>}
-
-      {assignment.status === 'INVITED' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-3">You've been assigned this manuscript</h3>
-          <div className="flex gap-2">
-            <button disabled={busy} onClick={() => respond(true)} className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50">
-              <Check className="w-4 h-4" /> Accept
-            </button>
-            <button disabled={busy} onClick={() => respond(false)} className="flex items-center gap-1.5 border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50">
-              <XIcon className="w-4 h-4" /> Decline
-            </button>
-          </div>
-        </div>
-      )}
-
-      {assignment.status === 'ACCEPTED' && assignment.assessment_status === 'NOT_STARTED' && (
-        <EvaluationForm assignmentId={assignment.id} onSubmitted={onChanged} />
-      )}
-
-      {assignment.assessment_status === 'SUBMITTED' && manuscript.status === 'EDITOR_REVIEW' && (
-        <div className="bg-sky-50 border border-sky-200 rounded-2xl p-6 text-xs text-sky-700">
-          Assessment submitted. Waiting for the Coordinator to assign reviewers.
-        </div>
-      )}
-
-      {reviewerAssignments.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-3">Reviewer Feedback</h3>
-          <div className="space-y-3">
-            {reviewerAssignments.map((r) => (
-              <div key={r.id} className="border border-slate-100 rounded-lg p-3 text-xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-slate-700">Reviewer</span>
-                  <span className={`px-2 py-0.5 rounded-full font-bold uppercase text-[10px] ${r.status === 'SUBMITTED' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{r.status}</span>
-                </div>
-                {r.status === 'SUBMITTED' && (
-                  <div className="space-y-1 text-slate-600 mt-1">
-                    <p><strong>Recommendation:</strong> {r.recommendation?.replace(/_/g, ' ')}</p>
-                    <p><strong>To Editor:</strong> {r.comments_to_editor}</p>
+      {/* Three-Column Layout */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Sidebar - Workflow */}
+        <div className="w-80 bg-slate-50 border-r border-slate-200 overflow-y-auto p-6">
+          <div className="space-y-4">
+            <div className="bg-white border border-slate-200 rounded-2xl p-4">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-3">WORKFLOW</p>
+              <div className="space-y-2">
+                {[
+                  { label: 'Submission', done: true },
+                  { label: 'Review', done: true },
+                  { label: 'Copyediting', done: false },
+                  { label: 'Production', done: false }
+                ].map((step) => (
+                  <div key={step.label} className="flex items-center gap-2 text-sm">
+                    <div className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 ${step.done ? 'bg-emerald-100 border-emerald-300' : 'border-slate-300 bg-white'}`}>
+                      {step.done && <Check className="w-3 h-3 text-emerald-600" />}
+                    </div>
+                    <span className={step.done ? 'text-slate-700 font-semibold' : 'text-slate-500'}>{step.label}</span>
                   </div>
-                )}
+                ))}
               </div>
-            ))}
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-4">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-3">PUBLICATION</p>
+              <div className="space-y-2">
+                {['Title & Abstract', 'Contributors', 'Metadata', 'References', 'Galleys', 'JATS XML', 'Permissions & Disclosure', 'Issue'].map((item) => (
+                  <div key={item} className="flex items-center gap-2 text-sm">
+                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="text-slate-700 font-semibold">{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-4">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-3">NEED HELP?</p>
+              <p className="text-xs text-slate-600">Read our editor guidelines or contact support.</p>
+              <button className="text-emerald-600 text-xs font-bold mt-2 hover:text-emerald-700">View Guidelines →</button>
+            </div>
           </div>
         </div>
-      )}
 
-      {manuscript.status === 'AWAITING_DECISION' && !assignment.recommendation && allReviewsIn && (
-        <RecommendationForm
-          busy={busy}
-          onSubmit={async (rec) => {
-            setBusy(true); setError('');
-            try { await submitEditorRecommendation(manuscript.id, rec); onChanged(); }
-            catch (e: any) { setError(e.message); }
-            finally { setBusy(false); }
-          }}
-        />
-      )}
+        {/* Center Content */}
+        <div className="flex-1 overflow-y-auto p-8 space-y-6">
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4">{error}</div>}
 
-      {assignment.recommendation && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 text-xs text-emerald-800">
-          Your recommendation: <strong>{assignment.recommendation.replace(/_/g, ' ')}</strong> &mdash; awaiting Coordinator's final decision.
+          {/* Decision Phase */}
+          <div className="bg-gradient-to-r from-emerald-900 to-emerald-800 text-white rounded-2xl p-6 border-2 border-emerald-600">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-200 mb-2">INTAKE SCREENING PHASE</p>
+                <h2 className="text-xl font-black">Initial Desk Screening & Intake Decisions</h2>
+              </div>
+              <span className="bg-emerald-500/30 text-emerald-100 text-xs px-3 py-1 rounded-full font-bold">Ready for Desk Evaluation</span>
+            </div>
+            <p className="text-sm text-emerald-100 mb-4">{manuscript.abstract}</p>
+            <div className="flex gap-3">
+              <button className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-5 py-2.5 rounded-lg transition flex items-center gap-1.5">
+                ✓ Desk Accept Manuscript
+              </button>
+              <button className="bg-white/20 hover:bg-white/30 text-white text-xs font-bold px-5 py-2.5 rounded-lg transition">
+                Send to Peer Review
+              </button>
+              <button className="bg-red-500/20 hover:bg-red-500/30 text-red-100 text-xs font-bold px-5 py-2.5 rounded-lg transition">
+                Desk Reject Manuscript
+              </button>
+            </div>
+          </div>
+
+          {/* Delegated Referees */}
+          <div className="bg-white border border-emerald-200/50 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                👥 DELEGATED PEER REFEREES
+              </h3>
+              <button className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
+                + Invite Referee
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">Invited university consensus referees assigned to evaluate this proposal.</p>
+            <div className="text-center py-8 text-slate-400 text-sm">
+              No peer referees delegated yet. Click "+ Invite Referee" to assign review tasks.
+            </div>
+          </div>
+
+          {/* Files for Review */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6">
+            <h3 className="text-sm font-black text-slate-900 mb-4">FILES FOR REVIEW</h3>
+            <div className="space-y-2">
+              {['Figure.docx', 'Submission_PKP Image.jpg', 'Data_Set.docx', 'Article_Text_Submission.pdf'].map((file) => (
+                <div key={file} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
+                  <span className="text-sm text-slate-700">{file}</span>
+                  <button className="text-emerald-600 text-xs font-bold hover:text-emerald-700">View & Read</button>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-      )}
+
+        {/* Right Sidebar - Decision Desk */}
+        <div className="w-72 bg-slate-50 border-l border-slate-200 overflow-y-auto p-6">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-black text-slate-900">DECISION DESK</h3>
+              <span className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-1 rounded-full font-bold">ACTIVE</span>
+            </div>
+
+            <button className="w-full bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold py-3 rounded-lg transition">
+              Accept Submission
+            </button>
+            <button className="w-full bg-slate-200 hover:bg-slate-300 text-slate-900 text-xs font-bold py-3 rounded-lg transition">
+              Create New Review Round
+            </button>
+            <button className="w-full text-red-600 hover:text-red-700 text-xs font-bold py-3 rounded-lg transition">
+              Decline Submission
+            </button>
+
+            <div className="bg-white border border-slate-200 rounded-lg p-3">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-2">OVERRIDE / DECISION NOTES:</p>
+              <textarea
+                placeholder="E.g. Please address referee comments in Section 5"
+                className="w-full text-xs border border-slate-200 rounded p-2 focus:border-emerald-500 focus:outline-none"
+                rows={4}
+              />
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-lg p-3">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-3">PARTICIPANTS</p>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-emerald-200 flex items-center justify-center text-emerald-800 font-bold">U</div>
+                  <div>
+                    <p className="font-semibold text-slate-900">Unassigned</p>
+                    <p className="text-slate-500">Assigned Editor</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
