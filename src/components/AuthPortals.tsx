@@ -137,16 +137,16 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
         };
       case 'COORDINATOR':
         return {
-          primary: 'black',
-          bg: 'bg-black',
-          hover: 'hover:bg-slate-900',
-          ring: 'focus:ring-black',
-          border: 'border-black',
-          text: 'text-black',
-          labelText: 'text-black',
-          labelBg: 'bg-slate-50 border border-black',
+          primary: 'emerald',
+          bg: 'bg-[#008751]',
+          hover: 'hover:bg-[#007043]',
+          ring: 'focus:ring-[#008751]',
+          border: 'border-slate-200',
+          text: 'text-[#008751]',
+          labelText: 'text-[#008751]',
+          labelBg: 'bg-[#f0fdf4] border border-[#bbf7d0]/60',
           label: 'Project Coordinator Console',
-          focusBorder: 'focus:border-black focus:ring-black',
+          focusBorder: 'focus:border-[#008751] focus:ring-[#008751]',
         };
       default:
         return {

@@ -738,17 +738,27 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
         
         {/* Header Indicator Header Banner */}
         <div className="bg-gradient-to-r from-[#004d2b] to-[#008751] text-white px-6 py-6.5 flex items-center justify-between border-b border-emerald-800/20 relative overflow-hidden">
-          
+
           {/* Subtle grid backdrop decoration */}
           <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px] opacity-10 pointer-events-none" />
 
-          <div className="relative z-10">
-            <span className="text-[10px] font-mono tracking-widest text-[#a7f3d0] uppercase font-black block">
-              Step {currentStep} of 9
-            </span>
-            <h2 className="text-2xl font-black text-white tracking-tight mt-1 font-sans">
-              {STEPS[currentStep - 1]?.label}
-            </h2>
+          <div className="relative z-10 flex items-center gap-4">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="text-white hover:bg-white/20 active:bg-white/30 p-2 rounded-lg transition flex items-center justify-center"
+              title="Back to all submissions"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+            <div>
+              <span className="text-[10px] font-mono tracking-widest text-[#a7f3d0] uppercase font-black block">
+                Step {currentStep} of 9
+              </span>
+              <h2 className="text-2xl font-black text-white tracking-tight mt-1 font-sans">
+                {STEPS[currentStep - 1]?.label}
+              </h2>
+            </div>
           </div>
 
           <button 

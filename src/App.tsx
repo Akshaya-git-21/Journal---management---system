@@ -164,82 +164,84 @@ export default function App() {
 
       {/* RENDER CONTROLLER */}
       {currentScreen === 'SUBMISSION' && (
-        <div className="flex-grow flex flex-col min-h-screen bg-slate-50">
-          {/* Top Editorial Ribbon */}
-          <div className="bg-[#0f172a] text-slate-300 py-2.5 px-4 sm:px-6 border-b border-slate-800 text-xs">
-            <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 flex flex-col sm:flex-row items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-slate-400 font-mono">
-                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>SYSTEM STATUS: ONLINE</span>
-                <span className="text-slate-650">|</span>
-                <span>OJS v3.4 COMPATIBLE</span>
+        <div className="min-h-screen md:h-screen w-full bg-white flex flex-col md:flex-row relative overflow-y-auto md:overflow-hidden animate-fade-in">
+          {/* Left Decorative Sidebar - Green */}
+          <div className="w-full md:w-[42%] bg-[#1a4038] text-white p-6 md:p-8 lg:p-10 flex flex-col justify-center relative md:h-screen shrink-0 md:overflow-hidden select-none">
+            <div className="absolute inset-0 bg-[radial-gradient(#10b981_0.7px,transparent_0.7px)] [background-size:24px_24px] opacity-10 pointer-events-none z-0" />
+            <div className="absolute -left-12 -top-12 w-64 h-64 bg-emerald-800/20 rounded-full blur-2xl pointer-events-none z-0" />
+
+            <div className="relative z-10 space-y-6 my-auto max-w-xl md:ml-auto w-full">
+              <div className="space-y-3">
+                <h2 className="text-2xl lg:text-3xl font-sans font-extrabold tracking-tight text-white leading-tight">
+                  Unlock your growth potential with our insights
+                </h2>
+                <p className="text-emerald-100/90 text-xs sm:text-sm leading-relaxed font-semibold">
+                  Sign up to get reports, industry news and resources for your business in your inbox—sourced from Euromonitor experts and our market research knowledge hub, Passport.
+                </p>
+                <p className="text-emerald-100/90 text-xs sm:text-sm leading-relaxed font-semibold">
+                  Each month, you can expect a curated roundup of market, consumer and economic insights. Our goal: to help you navigate challenges and explore new pathways to growth.
+                </p>
               </div>
-              <div className="flex items-center gap-3 sm:gap-4 text-slate-400 flex-wrap justify-center">
-                {([
-                  { role: 'AUTHOR' as Role, label: 'Author Log In' },
-                  { role: 'EDITOR' as Role, label: 'Editor Log In' },
-                  { role: 'REVIEWER' as Role, label: 'Reviewer Log In' },
-                  { role: 'PUBLISHER' as Role, label: 'Publisher Log In' },
-                  { role: 'COORDINATOR' as Role, label: 'Coordinator Log In' },
-                ]).map(({ role, label }, idx) => (
-                  <React.Fragment key={role}>
-                    {idx > 0 && <span>•</span>}
-                    <button
-                      onClick={() => {
-                        setAuthRole(role);
-                        setAuthMode('LOGIN');
-                        setCurrentScreen('AUTH');
-                      }}
-                      className="hover:text-white transition cursor-pointer font-bold font-mono text-[10px] uppercase"
-                    >
-                      {label}
-                    </button>
-                  </React.Fragment>
-                ))}
+
+              <div className="space-y-3 pt-4 border-t border-emerald-800/40">
+                <h3 className="text-lg lg:text-xl font-sans font-extrabold tracking-tight text-white">
+                  Why Tulitics?
+                </h3>
+                <ul className="space-y-2 text-xs sm:text-sm text-emerald-100/90 list-none">
+                  <li className="flex items-start gap-2">
+                    <span className="text-emerald-400 shrink-0 mt-0.5">•</span>
+                    <span>Stay updated on industry trends, consumer preferences and economic shifts</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-emerald-400 shrink-0 mt-0.5">•</span>
+                    <span>Access free reports and strategic resources from our research experts</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-emerald-400 shrink-0 mt-0.5">•</span>
+                    <span>Get insights and data to inspire your strategy</span>
+                  </li>
+                </ul>
+                <p className="text-emerald-200/80 text-[11px] sm:text-xs italic pt-1">
+                  Whatever stage you're at in your organisation, we'll help you stay in the know.
+                </p>
               </div>
             </div>
           </div>
 
-          {/* Main Navigation Header */}
-          <header className="bg-white border-b border-[#e2e8f0] px-4 sm:px-6 py-2.5 shadow-xs sticky top-0 z-50">
-            <div className="w-full max-w-[1920px] mx-auto px-6 sm:px-8 lg:px-10 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <TuliticsLogo iconSize={32} showText={true} textColorClass="text-[#155e42]" subTitle="PORTAL" usePng={true} />
+          {/* Right Content Side - White */}
+          <div className="w-full md:w-[58%] bg-slate-50/50 p-4 md:p-6 lg:p-8 flex flex-col justify-center items-center relative overflow-y-auto md:overflow-hidden md:h-screen shrink-0">
+            <div className="max-w-lg w-full mx-auto my-auto space-y-6 py-4 px-5 sm:px-7 md:px-8 bg-white border border-slate-100 rounded-2xl shadow-xl md:shadow-[0_8px_30px_rgb(0,0,0,0.06)] md:max-h-[calc(100vh-3rem)] overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-200/80 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
+              <div>
+                <h2 className="font-sans font-black text-2xl text-slate-900 tracking-tight leading-none">
+                  Submit Your Manuscript
+                </h2>
+                <p className="text-xs text-slate-500 font-semibold mt-2">
+                  Create an account or log in to submit a manuscript and track it through peer review.
+                </p>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 {loggedInUser ? (
                   <>
                     <button
                       id="btn-nav-my-profile"
                       onClick={() => setCurrentScreen('WORKSPACE')}
-                      className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-md flex items-center gap-1"
+                      className="px-4 py-3 bg-[#008751] hover:bg-[#007043] text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-md flex items-center justify-center gap-2 w-full"
                     >
-                      <User className="w-3.5 h-3.5" />
-                      My Profile
+                      <User className="w-4 h-4" />
+                      Go to My Profile
                     </button>
                     <button
                       id="btn-nav-sign-out"
                       onClick={handleSignOut}
-                      className="px-4 py-2 border border-[#cbd8df] text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-bold transition cursor-pointer shadow-sm flex items-center gap-1"
+                      className="px-4 py-3 border border-[#cbd8df] text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-bold transition cursor-pointer shadow-sm flex items-center justify-center gap-2 w-full"
                     >
-                      <LogOut className="w-3.5 h-3.5" />
+                      <LogOut className="w-4 h-4" />
                       Sign Out
                     </button>
                   </>
                 ) : (
                   <>
-                    <button
-                      id="btn-nav-sign-in"
-                      onClick={() => {
-                        setAuthRole('AUTHOR');
-                        setAuthMode('LOGIN');
-                        setCurrentScreen('AUTH');
-                      }}
-                      className="px-4 py-2 border border-[#cbd8df] text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-bold transition cursor-pointer shadow-sm"
-                    >
-                      Sign In / Login
-                    </button>
                     <button
                       id="btn-nav-register"
                       onClick={() => {
@@ -247,30 +249,49 @@ export default function App() {
                         setAuthMode('REGISTER');
                         setCurrentScreen('AUTH');
                       }}
-                      className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-md shadow-emerald-50/85"
+                      className="px-6 py-3 bg-[#008751] hover:bg-[#007043] text-white rounded-lg text-sm font-bold transition cursor-pointer shadow-md shadow-emerald-50/85 w-full"
                     >
-                      Sign Up / Register
+                      Create Author Account
+                    </button>
+                    <button
+                      id="btn-nav-sign-in"
+                      onClick={() => {
+                        setAuthRole('AUTHOR');
+                        setAuthMode('LOGIN');
+                        setCurrentScreen('AUTH');
+                      }}
+                      className="px-6 py-3 border border-[#008751] text-[#008751] hover:bg-emerald-50 rounded-lg text-sm font-bold transition cursor-pointer shadow-sm w-full"
+                    >
+                      Sign In / Login
                     </button>
                   </>
                 )}
               </div>
-            </div>
-          </header>
 
-          {/* Landing call-to-action: real submission now happens inside the
-              Author workspace against a real account, so this screen's job
-              is just to route people to sign up / log in. */}
-          <div className="flex-grow w-full max-w-2xl mx-auto px-6 py-20 text-center">
-            <h1 className="text-2xl font-black text-slate-900 mb-3">Submit Your Manuscript</h1>
-            <p className="text-sm text-slate-500 mb-8">
-              Create an Author account (or log in) to submit a manuscript and track it through peer review.
-            </p>
-            <button
-              onClick={() => { setAuthRole('AUTHOR'); setAuthMode('REGISTER'); setCurrentScreen('AUTH'); }}
-              className="px-6 py-3 bg-[#008751] hover:bg-[#007043] text-white rounded-lg text-sm font-bold transition cursor-pointer shadow-md"
-            >
-              Get Started
-            </button>
+              <div className="border-t border-slate-100 pt-4">
+                <p className="text-xs text-slate-600 font-semibold mb-3">Other Portal Access:</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { role: 'EDITOR' as Role, label: 'Editor' },
+                    { role: 'REVIEWER' as Role, label: 'Reviewer' },
+                    { role: 'PUBLISHER' as Role, label: 'Publisher' },
+                    { role: 'COORDINATOR' as Role, label: 'Coordinator' },
+                  ]).map(({ role, label }) => (
+                    <button
+                      key={role}
+                      onClick={() => {
+                        setAuthRole(role);
+                        setAuthMode('LOGIN');
+                        setCurrentScreen('AUTH');
+                      }}
+                      className="px-3 py-2 border border-slate-200 hover:border-[#008751] text-slate-700 hover:text-[#008751] rounded-lg text-xs font-bold transition cursor-pointer hover:bg-emerald-50"
+                    >
+                      {label} Login
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

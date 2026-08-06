@@ -10,6 +10,7 @@ import {
 } from '../lib/workflow';
 import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
+import AuthorRevisionRequest from './AuthorRevisionRequest';
 import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, BookOpen, Globe, Settings, BarChart, AlertCircle } from 'lucide-react';
 
 interface AuthorWorkspaceProps {
@@ -194,51 +195,49 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           </div>
         </div>
 
-      <main className={`flex-1 w-full ${view === 'detail' ? 'max-w-full px-0' : 'max-w-5xl mx-auto px-6'} py-8`}>
+      <main className={`flex-1 w-full ${view === 'detail' ? 'max-w-full px-0' : 'max-w-7xl mx-auto px-4'} py-6`}>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">{error}</div>}
 
         {view === 'list' && (
-          <div className="grid grid-cols-12 gap-6">
-            <aside className="col-span-12 xl:col-span-3 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
-              <div className="flex items-center justify-between mb-6">
+          <div className="grid grid-cols-12 gap-4">
+            <aside className="col-span-12 lg:col-span-2 bg-gradient-to-b from-emerald-50 to-emerald-25 border-2 border-emerald-200 rounded-2xl p-5 shadow-sm h-fit sticky top-20">
+              <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">My Submissions as Author</p>
-                  <h2 className="text-xl font-black text-slate-900 mt-2">Dashboard</h2>
+                  <h2 className="text-lg font-semibold text-emerald-900">Dashboard</h2>
                 </div>
-                <span className="inline-flex h-9 min-w-[2.25rem] items-center justify-center rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">{items.length}</span>
+                <span className="inline-flex h-8 min-w-[2rem] items-center justify-center rounded-full bg-emerald-600 text-white text-xs font-semibold">{items.length}</span>
               </div>
-              <nav className="space-y-2">
+              <nav className="space-y-1">
                 {[
-                  { label: 'Active submissions', count: items.length, icon: Inbox },
-                  { label: 'Revisions requested', count: statusCounts.revisionRequested, icon: AlertCircle },
-                  { label: 'Revisions submitted', count: statusCounts.awaitingDecision, icon: Archive },
-                  { label: 'Incomplete submissions', count: items.filter((m) => m.status === 'DRAFT').length, icon: XCircle },
-                  { label: 'Scheduled for publication', count: statusCounts.accepted, icon: Clock },
+                  { label: 'Active', count: items.length, icon: Inbox },
+                  { label: 'Revisions', count: statusCounts.revisionRequested, icon: AlertCircle },
+                  { label: 'Submitted', count: statusCounts.awaitingDecision, icon: Archive },
+                  { label: 'Incomplete', count: items.filter((m) => m.status === 'DRAFT').length, icon: XCircle },
+                  { label: 'Scheduled', count: statusCounts.accepted, icon: Clock },
                   { label: 'Published', count: statusCounts.published, icon: CheckCircle },
                   { label: 'Declined', count: statusCounts.rejected, icon: XCircle }
                 ].map((item) => (
                   <button
                     key={item.label}
                     type="button"
-                    className="w-full flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 transition"
+                    className="w-full flex items-center justify-between gap-2 rounded-lg border-2 border-emerald-200 bg-white hover:bg-emerald-50 px-3 py-2 text-left text-xs font-medium text-emerald-900 hover:border-emerald-400 transition"
                   >
-                    <span className="flex items-center gap-3">
-                      <item.icon className="w-4 h-4 text-emerald-600" />
-                      <span>{item.label}</span>
+                    <span className="flex items-center gap-2 min-w-0">
+                      <item.icon className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                      <span className="truncate">{item.label}</span>
                     </span>
-                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 border border-slate-200">{item.count}</span>
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-300 flex-shrink-0">{item.count}</span>
                   </button>
                 ))}
               </nav>
-              <div className="mt-6 border-t border-slate-200 pt-5 space-y-3 text-sm text-slate-600">
-                <div className="font-bold text-slate-900">Quick actions</div>
-                <button onClick={() => setView('new')} className="w-full rounded-2xl bg-emerald-50 px-4 py-3 text-left font-semibold text-emerald-800 hover:bg-emerald-100 transition">New submission</button>
-                <button onClick={() => alert('Open issues panel placeholder')} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-slate-700 hover:bg-slate-50 transition">Issues</button>
-                <button onClick={() => alert('Open announcement panel placeholder')} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-slate-700 hover:bg-slate-50 transition">Announcements</button>
+              <div className="mt-4 border-t-2 border-emerald-200 pt-3 space-y-2 text-xs">
+                <div className="font-semibold text-emerald-900 text-xs">Actions</div>
+                <button onClick={() => setView('new')} className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-left font-semibold text-white transition text-xs">+ New submission</button>
+                <button onClick={() => alert('Open issues panel placeholder')} className="w-full rounded-lg border-2 border-emerald-300 bg-white hover:bg-emerald-50 px-3 py-2 text-left text-emerald-700 hover:border-emerald-400 transition text-xs">Issues</button>
               </div>
             </aside>
 
-            <div className="col-span-12 xl:col-span-9 space-y-5">
+            <div className="col-span-12 lg:col-span-10 space-y-4">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="space-y-2">
                   <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] uppercase tracking-[0.22em] font-bold text-emerald-800">

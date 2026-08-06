@@ -6,8 +6,9 @@ import {
   ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, SuggestedReviewerRow, ProfileRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getStatusHistory, getSuggestedReviewers,
   listActiveProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished,
-  subscribeToManuscripts, PublishDecision
+  subscribeToManuscripts, PublishDecision, getRevisions
 } from '../lib/workflow';
+import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity } from 'lucide-react';
 
 interface CoordinatorWorkspaceProps {
@@ -51,8 +52,9 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [reviewerProfiles, setReviewerProfiles] = useState<ProfileRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('ALL');
-  const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS'>('MANUSCRIPT_QUEUE');
+  const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS'>('MANUSCRIPT_QUEUE');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedManuscriptForRevision, setSelectedManuscriptForRevision] = useState<ManuscriptRow | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [editorSearch, setEditorSearch] = useState('');
   const [reviewerSearch, setReviewerSearch] = useState('');
@@ -1521,6 +1523,7 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
           busy={busy}
           editorHasRecommended={editorHasRecommended}
           recommendation={activeEditorAssignment?.recommendation ?? null}
+          reviewerAssignments={reviewerAssignments}
           onPublish={async (decision, letter) => {
             setBusy(true); setError('');
             try { await publishDecision(manuscript.id, decision, letter); await load(); onChanged(); }
@@ -1625,11 +1628,16 @@ function AssignReviewersPanel({ busy, onAssign }: { busy: boolean; onAssign: (r1
   );
 }
 
-function PublishDecisionPanel({ busy, editorHasRecommended, recommendation, onPublish }: {
-  busy: boolean; editorHasRecommended: boolean; recommendation: string | null; onPublish: (decision: PublishDecision, letter: string) => void;
+function PublishDecisionPanel({ busy, editorHasRecommended, recommendation, reviewerAssignments, onPublish }: {
+  busy: boolean; editorHasRecommended: boolean; recommendation: string | null; reviewerAssignments?: ReviewerAssignmentRow[]; onPublish: (decision: PublishDecision, letter: string) => void;
 }) {
   const [decision, setDecision] = useState<PublishDecision>('ACCEPT');
   const [letter, setLetter] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [viewMode, setViewMode] = useState<'SUMMARY' | 'REVIEWERS' | 'DECISION'>('SUMMARY');
+
+  const submittedReviews = (reviewerAssignments || []).filter((r) => r.status === 'SUBMITTED');
+  const allReviewsIn = submittedReviews.length >= 2;
 
   if (!editorHasRecommended) {
     return (
@@ -1640,20 +1648,153 @@ function PublishDecisionPanel({ busy, editorHasRecommended, recommendation, onPu
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6">
-      <h3 className="text-sm font-black text-slate-900 mb-1">Verify & Publish Decision</h3>
-      <p className="text-xs text-slate-500 mb-3">Editor recommended: <strong>{recommendation?.replace(/_/g, ' ')}</strong></p>
-      <select value={decision} onChange={(e) => setDecision(e.target.value as PublishDecision)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs mb-2">
-        <option value="ACCEPT">Accept</option>
-        <option value="MINOR_REVISION">Minor Revision</option>
-        <option value="MAJOR_REVISION">Major Revision</option>
-        <option value="REJECT">Reject</option>
-      </select>
-      <textarea value={letter} onChange={(e) => setLetter(e.target.value)} rows={3} placeholder="Decision letter to the author" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs mb-3" />
-      <button disabled={busy} onClick={() => onPublish(decision, letter)} className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50">
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Publish Decision to Author
-      </button>
-    </div>
+    <>
+      <div className="bg-gradient-to-r from-emerald-50 to-emerald-100/50 border border-emerald-200 rounded-2xl p-6">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-black text-slate-900">Complete Review Package</h3>
+            <p className="text-xs text-slate-600 mt-1">All reviewer reports received • Editor recommendation ready</p>
+          </div>
+          <span className={`px-3 py-1 rounded-full font-bold text-[11px] ${allReviewsIn ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-100 text-amber-700'}`}>
+            {allReviewsIn ? '✓ READY' : `${submittedReviews.length}/2 REVIEWS IN`}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-4 gap-2 mb-4">
+          {['SUMMARY', 'REVIEWERS', 'DECISION'].map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode as any)}
+              className={`px-3 py-2 rounded-lg text-xs font-bold transition ${
+                viewMode === mode
+                  ? 'bg-[#008751] text-white'
+                  : 'bg-white border border-slate-200 text-slate-700 hover:border-emerald-300'
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+
+        {viewMode === 'SUMMARY' && (
+          <div className="space-y-3 text-xs">
+            <div className="bg-white rounded-lg p-3 border border-slate-100">
+              <p className="font-bold text-slate-900 mb-1">Editor Assessment</p>
+              <p className="text-slate-600">Recommendation: <span className="font-bold text-[#008751]">{recommendation?.replace(/_/g, ' ')}</span></p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-white rounded-lg p-3 border border-slate-100">
+                <p className="text-slate-500 uppercase font-bold text-[10px] mb-1">Reviews Received</p>
+                <p className="text-2xl font-black text-slate-900">{submittedReviews.length}</p>
+              </div>
+              <div className="bg-white rounded-lg p-3 border border-slate-100">
+                <p className="text-slate-500 uppercase font-bold text-[10px] mb-1">Status</p>
+                <p className="font-bold text-emerald-700">{allReviewsIn ? 'All In' : 'Pending'}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {viewMode === 'REVIEWERS' && (
+          <div className="space-y-2">
+            {submittedReviews.map((r, idx) => (
+              <div key={r.id} className="bg-white rounded-lg p-3 border border-slate-100 text-xs">
+                <p className="font-bold text-slate-900 mb-2">Reviewer {idx + 1}</p>
+                <div className="space-y-1 text-slate-600">
+                  <p><strong>Recommendation:</strong> <span className="font-bold">{r.recommendation?.replace(/_/g, ' ')}</span></p>
+                  <p><strong>To Author:</strong> {r.comments_to_author?.substring(0, 80)}...</p>
+                  <p><strong>To Editor:</strong> {r.comments_to_editor?.substring(0, 80)}...</p>
+                </div>
+              </div>
+            ))}
+            {submittedReviews.length < 2 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                ⏳ Waiting for {2 - submittedReviews.length} more review(s) before final decision
+              </div>
+            )}
+          </div>
+        )}
+
+        {viewMode === 'DECISION' && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-900 mb-2">Final Decision</label>
+              <select value={decision} onChange={(e) => setDecision(e.target.value as PublishDecision)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white">
+                <option value="ACCEPT">✓ Accept - Ready for Publication</option>
+                <option value="MINOR_REVISION">◊ Minor Revisions Required</option>
+                <option value="MAJOR_REVISION">◆ Major Revisions Required</option>
+                <option value="REJECT">✕ Reject - Not Suitable</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-900 mb-2">Decision Letter to Author</label>
+              <textarea
+                value={letter}
+                onChange={(e) => setLetter(e.target.value)}
+                rows={4}
+                placeholder="Communicate the final decision and next steps clearly..."
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white font-sans"
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-2 mt-4 pt-4 border-t border-emerald-200">
+          <button
+            onClick={() => alert('Returned to Editor for clarification')}
+            className="flex-1 px-3 py-2 border border-slate-300 text-slate-700 font-bold text-xs rounded-lg hover:bg-slate-50 transition"
+          >
+            Return to Editor
+          </button>
+          <button
+            disabled={busy || !allReviewsIn}
+            onClick={() => setShowModal(true)}
+            className="flex-1 bg-[#008751] hover:bg-[#007043] disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer transition flex items-center justify-center gap-1.5"
+          >
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+            Publish Decision
+          </button>
+        </div>
+      </div>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 text-white p-6">
+              <h2 className="text-lg font-black">Publish Final Decision</h2>
+              <p className="text-emerald-100 text-xs mt-1">This will notify the author of the final verdict</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-slate-50 rounded-lg p-4 text-xs space-y-2">
+                <p><strong>Decision:</strong> <span className="font-bold text-[#008751]">{decision.replace(/_/g, ' ')}</span></p>
+                <p><strong>Letter Preview:</strong></p>
+                <p className="text-slate-600 italic">{letter.substring(0, 150)}...</p>
+                <p className="text-slate-500 text-[11px] pt-2 border-t border-slate-200">✓ Reviewer reports reviewed and compiled<br/>✓ Editor recommendation confirmed<br/>✓ Ready to send to author</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 font-bold text-xs rounded-lg hover:bg-slate-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    onPublish(decision, letter);
+                    setShowModal(false);
+                  }}
+                  className="flex-1 bg-[#008751] hover:bg-[#007043] disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg cursor-pointer transition flex items-center justify-center gap-1.5"
+                >
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Confirm & Send
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

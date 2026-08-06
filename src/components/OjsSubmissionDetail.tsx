@@ -799,7 +799,7 @@ export default function OjsSubmissionDetail({
         
         {/* Section A: Workflow headings and items */}
         <div className="space-y-3">
-          <span className="block text-[11px] font-black uppercase tracking-widest text-[#004d2e] font-mono">
+          <span className="block text-[11px] font-semibold uppercase tracking-widest text-[#004d2e] font-mono">
             Workflow
           </span>
           <nav className="flex flex-col space-y-1">
@@ -830,7 +830,7 @@ export default function OjsSubmissionDetail({
                     <span>{item.label}</span>
                   </div>
                   {item.badge !== null && (
-                    <span className={`text-[11px] font-black font-mono px-2 py-0.5 rounded-full ${
+                    <span className={`text-[11px] font-semibold font-mono px-2 py-0.5 rounded-full ${
                       isActive ? 'bg-[#008751] text-white' : 'bg-slate-200 text-slate-900'
                     }`}>
                       {item.badge}
@@ -845,7 +845,7 @@ export default function OjsSubmissionDetail({
         {/* Section B: Publication headings and items with checkmarks */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="block text-[11px] font-black uppercase tracking-widest text-[#004d2e] font-mono">
+            <span className="block text-[11px] font-semibold uppercase tracking-widest text-[#004d2e] font-mono">
               Publication
             </span>
             <ChevronUp className="w-3.5 h-3.5 text-[#004d2e] font-bold" />
@@ -920,7 +920,7 @@ export default function OjsSubmissionDetail({
             {/* Top Header Row with dynamic/stat values matching screenshot */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-emerald-200 gap-4">
               <div className="text-left">
-                <h1 className="text-[24px] font-black text-black tracking-tight leading-none">Submission</h1>
+                <h1 className="text-[24px] font-semibold text-black tracking-tight leading-none">Submission</h1>
                 <p className="text-[14px] text-[#005e38] mt-1.5 font-medium">Track and manage your manuscript submission.</p>
               </div>
               <div className="flex items-center gap-3">
@@ -963,7 +963,7 @@ export default function OjsSubmissionDetail({
                     <span className="text-emerald-200 text-[13px] font-medium uppercase tracking-widest block font-mono">
                       Manuscript ID: #{paper.id || "N/A"}
                     </span>
-                    <h2 className="text-white text-[24px] font-black font-sans tracking-tight leading-snug drop-shadow-xs">
+                    <h2 className="text-white text-[24px] font-semibold font-sans tracking-tight leading-snug drop-shadow-xs">
                       {paper.title || "Artificial Intelligence in Healthcare: Opportunities and Challenges"}
                     </h2>
                     
@@ -1018,12 +1018,12 @@ export default function OjsSubmissionDetail({
                       <FolderOpen className="w-5.5 h-5.5 stroke-[2.5]" />
                     </div>
                     <div className="text-left space-y-0.5">
-                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Files</span>
-                      <div className="text-2xl font-black text-black leading-none">{uploadedFiles.length}</div>
+                      <span className="text-black text-[13px] font-normal uppercase tracking-wider block">Files</span>
+                      <div className="text-2xl font-semibold text-black leading-none">{uploadedFiles.length}</div>
                       <span className="text-slate-900 text-[11px] block font-medium">Files Uploaded</span>
                       <button 
                         onClick={() => document.getElementById("uploaded-files-card")?.scrollIntoView({ behavior: 'smooth' })}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
                       >
                         <span>View Files</span>
                         <span>→</span>
@@ -1037,12 +1037,12 @@ export default function OjsSubmissionDetail({
                       <MessageSquare className="w-5.5 h-5.5 stroke-[2.5]" />
                     </div>
                     <div className="text-left space-y-0.5">
-                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Discussions</span>
-                      <div className="text-2xl font-black text-black leading-none">2</div>
+                      <span className="text-black text-[13px] font-normal uppercase tracking-wider block">Discussions</span>
+                      <div className="text-2xl font-semibold text-black leading-none">2</div>
                       <span className="text-slate-900 text-[11px] block font-medium">New Messages</span>
                       <button 
                         onClick={() => document.getElementById("discussions-card")?.scrollIntoView({ behavior: 'smooth' })}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
                       >
                         <span>Open</span>
                         <span>→</span>
@@ -1056,12 +1056,12 @@ export default function OjsSubmissionDetail({
                       <User className="w-5.5 h-5.5 stroke-[2.5]" />
                     </div>
                     <div className="text-left space-y-0.5 overflow-hidden">
-                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Editorial Team</span>
+                      <span className="text-black text-[13px] font-normal uppercase tracking-wider block">Editorial Team</span>
                       <div className="text-sm font-semibold text-black leading-none truncate font-sans" title="Dr. John Smith">Dr. John Smith</div>
                       <span className="text-slate-900 text-[11px] block font-medium">Editor Assigned</span>
                       <button 
                         onClick={() => alert("Assigned Editorial Contact Panel:\nDr. John Smith (Lead Managing Editor)\nJournal of AI in Medicine.")}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
                       >
                         <span>View Details</span>
                         <span>→</span>
@@ -1075,14 +1075,14 @@ export default function OjsSubmissionDetail({
                       <Calendar className="w-5.5 h-5.5 stroke-[2.5]" />
                     </div>
                     <div className="text-left space-y-0.5">
-                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Important Dates</span>
+                      <span className="text-black text-[13px] font-normal uppercase tracking-wider block">Important Dates</span>
                       <div className="text-[11px] font-medium text-slate-900 leading-tight">
                         <div>Submitted <strong className="text-black font-semibold">08 June 2026</strong></div>
                         <div className="mt-0.5">Expected <strong className="text-black font-semibold">22 June 2026</strong></div>
                       </div>
                       <button 
                         onClick={() => alert("Opening manuscript editorial milestones tracking calendar.")}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1 flex items-center gap-0.5 cursor-pointer"
+                        className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1 flex items-center gap-0.5 cursor-pointer"
                       >
                         <span>View Calendar</span>
                         <span>→</span>
@@ -1093,7 +1093,7 @@ export default function OjsSubmissionDetail({
 
                 {/* Submission Workflow horizontal stepper */}
                 <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-6 shadow-xs text-left">
-                  <h3 className="text-black text-[18px] font-black tracking-tight mb-6">Submission Workflow</h3>
+                  <h3 className="text-black text-[18px] font-semibold tracking-tight mb-6">Submission Workflow</h3>
                   
                   <div className="relative flex items-center justify-between">
                     {/* Background connecting line */}
@@ -1160,7 +1160,7 @@ export default function OjsSubmissionDetail({
                       />
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3 border-emerald-100">
                         <div className="flex items-center gap-2">
-                          <h3 className="text-black text-[18px] font-black tracking-tight">Uploaded Files</h3>
+                          <h3 className="text-black text-[18px] font-semibold tracking-tight">Uploaded Files</h3>
                           <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
                             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                             Supabase Connected
@@ -1190,7 +1190,7 @@ export default function OjsSubmissionDetail({
                       <div className="mt-4 overflow-x-auto rounded-xl border border-emerald-50">
                         <table className="w-full text-left text-xs border-collapse">
                           <thead>
-                            <tr className="text-[13px] font-bold uppercase tracking-wider text-[#004d2e] border-b border-emerald-200 bg-emerald-50/50">
+                            <tr className="text-[13px] font-normal uppercase tracking-wider text-[#004d2e] border-b border-emerald-200 bg-emerald-50/50">
                               <th className="p-3 font-bold">File Name</th>
                               <th className="p-3 font-bold">Type</th>
                               <th className="p-3 font-bold">Size</th>
@@ -1284,7 +1284,7 @@ export default function OjsSubmissionDetail({
                         <div className="flex items-center justify-between shrink-0">
                           <div className="flex items-center gap-2">
                             <span className="w-3 h-3 rounded-full bg-[#008751]"></span>
-                            <h3 className="text-black text-[18px] font-black tracking-tight">
+                            <h3 className="text-black text-[18px] font-semibold tracking-tight">
                               Discussions
                             </h3>
                             <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
@@ -1480,20 +1480,20 @@ export default function OjsSubmissionDetail({
                                   className="bg-white border border-emerald-100 hover:border-[#008751] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
                                 >
                                   <div className="shrink-0 pt-0.5">
-                                    <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50 font-black text-xs">
+                                    <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50 font-semibold text-xs">
                                       {thread.initiator ? thread.initiator.substring(0, 2).toUpperCase() : "UT"}
                                     </div>
                                   </div>
                                   <div className="flex-grow space-y-0.5">
-                                    <h4 className="text-[15px] font-black text-black tracking-tight leading-snug">
+                                    <h4 className="text-[15px] font-semibold text-black tracking-tight leading-snug">
                                       {thread.subject}
                                     </h4>
                                     <p className="text-[13px] font-bold text-slate-950 leading-snug line-clamp-1">
-                                      <strong className="text-black font-black">{thread.initiator}:</strong> {thread.messages[0]?.text || "No messages yet."}
+                                      <strong className="text-black font-semibold">{thread.initiator}:</strong> {thread.messages[0]?.text || "No messages yet."}
                                     </p>
                                   </div>
                                   <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                    <span className="text-[11px] font-black text-black font-mono">
+                                    <span className="text-[11px] font-semibold text-black font-mono">
                                       {new Date(thread.createdAt || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric' })}
                                     </span>
                                   </div>
@@ -1519,7 +1519,7 @@ export default function OjsSubmissionDetail({
                               setSearchQuery('');
                               alert("Showing all discussions. Click on any discussion item to enter its dedicated communication channel.");
                             }}
-                            className="text-[#008751] hover:text-[#007043] font-black hover:underline text-[13px] flex items-center gap-1 cursor-pointer bg-emerald-50/50 hover:bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl"
+                            className="text-[#008751] hover:text-[#007043] font-semibold hover:underline text-[13px] flex items-center gap-1 cursor-pointer bg-emerald-50/50 hover:bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl"
                           >
                             <span>View All Discussions</span>
                             <span className="font-extrabold">→</span>
@@ -1547,7 +1547,7 @@ export default function OjsSubmissionDetail({
                               FI
                             </div>
                             <div>
-                              <h4 className="font-black text-[14px] text-white tracking-tight flex items-center gap-1.5">
+                              <h4 className="font-semibold text-[14px] text-white tracking-tight flex items-center gap-1.5">
                                 Editorial Inquiry Forum
                                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
                               </h4>
@@ -2019,7 +2019,7 @@ export default function OjsSubmissionDetail({
                 
                 {/* Submission Timeline */}
                 <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left">
-                  <h3 className="text-black text-[18px] font-black tracking-tight mb-5 border-b pb-3 border-emerald-100">Submission Timeline</h3>
+                  <h3 className="text-black text-[18px] font-semibold tracking-tight mb-5 border-b pb-3 border-emerald-100">Submission Timeline</h3>
                   
                   <div className="relative pl-5 ml-2.5 space-y-6 text-xs border-l-2 border-emerald-100">
                     {[
@@ -2036,11 +2036,11 @@ export default function OjsSubmissionDetail({
                       
                       if (item.status === "completed") {
                         markerStyle = "bg-[#008751] border-[#008751] text-white";
-                        textStyle = "text-black font-black text-[14px]";
+                        textStyle = "text-black font-semibold text-[14px]";
                         subStyle = "text-[#004d2b] font-bold text-[12px] font-mono";
                       } else if (item.status === "active") {
                         markerStyle = "border-2 border-[#008751] bg-[#eefcf5] text-[#008751]";
-                        textStyle = "text-[#008751] font-black text-[14px]";
+                        textStyle = "text-[#008751] font-semibold text-[14px]";
                         subStyle = "text-emerald-800 font-bold text-[12px] font-mono";
                       }
                       
@@ -2069,7 +2069,7 @@ export default function OjsSubmissionDetail({
 
                 {/* Recent Activity */}
                 <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left space-y-4">
-                  <h3 className="text-black text-[18px] font-black tracking-tight border-b pb-3 border-emerald-100">Recent Activity</h3>
+                  <h3 className="text-black text-[18px] font-semibold tracking-tight border-b pb-3 border-emerald-100">Recent Activity</h3>
                   
                   <div className="space-y-3.5 text-xs">
                     {[
@@ -2085,7 +2085,7 @@ export default function OjsSubmissionDetail({
                             <div className={`w-7 h-7 rounded-lg ${act.color} flex items-center justify-center shrink-0`}>
                               <Icon className={`w-3.5 h-3.5 ${act.rotate ? 'rotate-180' : ''}`} />
                             </div>
-                            <span className="font-black text-black truncate">{act.label}</span>
+                            <span className="font-semibold text-black truncate">{act.label}</span>
                           </div>
                           <span className="text-[11px] text-black font-mono shrink-0 font-extrabold">{act.time}</span>
                         </div>
@@ -2096,13 +2096,13 @@ export default function OjsSubmissionDetail({
 
                 {/* Need Help? */}
                 <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left space-y-3">
-                  <h3 className="text-black text-[18px] font-black tracking-tight border-b pb-3 border-emerald-100">Need Help?</h3>
+                  <h3 className="text-black text-[18px] font-semibold tracking-tight border-b pb-3 border-emerald-100">Need Help?</h3>
                   <p className="text-[14px] text-slate-950 leading-relaxed font-bold">
                     If you have any questions, please contact the editorial office.
                   </p>
                   <button
                     onClick={() => alert("Connecting you with TULITICS Scholarly Publishing Editorial Desk. A support ticket is logged.")}
-                    className="bg-[#008751] text-white hover:bg-[#007043] border-2 border-[#004d2e] px-4 py-2.5 text-[14.5px] font-black rounded-xl transition duration-150 cursor-pointer w-full flex items-center justify-center gap-2 mt-2 shadow-xs hover:scale-[1.01] active:scale-[0.99]"
+                    className="bg-[#008751] text-white hover:bg-[#007043] border-2 border-[#004d2e] px-4 py-2.5 text-[14.5px] font-semibold rounded-xl transition duration-150 cursor-pointer w-full flex items-center justify-center gap-2 mt-2 shadow-xs hover:scale-[1.01] active:scale-[0.99]"
                   >
                     <HelpCircle className="w-4 h-4 text-white stroke-[2.5]" />
                     <span>Contact Support</span>
@@ -2388,7 +2388,7 @@ export default function OjsSubmissionDetail({
                         <button
                           id="bulk-assets-download-link"
                           onClick={() => alert("Downloading all matching document publication files recursively.")}
-                          className="inline-flex items-center gap-2 text-xs font-black text-[#008751] hover:text-[#007043] hover:underline cursor-pointer select-none transition"
+                          className="inline-flex items-center gap-2 text-xs font-semibold text-[#008751] hover:text-[#007043] hover:underline cursor-pointer select-none transition"
                         >
                           <Download className="w-4 h-4 text-[#008751]" />
                           <span>Download All Files</span>
@@ -3076,7 +3076,7 @@ export default function OjsSubmissionDetail({
                           iconElem = <Check className="w-2.5 h-2.5 stroke-[3.5]" />;
                         } else if (isActive) {
                           bulletColor = "bg-emerald-50 border-2 border-[#008751] text-[#008751] animate-pulse ring-2 ring-[#008751]/10";
-                          textColor = "text-[#008751] font-black";
+                          textColor = "text-[#008751] font-semibold";
                           iconElem = <span className="w-1.5 h-1.5 bg-[#008751] rounded-full animate-ping" />;
                         } else if (isSkipped) {
                           bulletColor = "bg-slate-100 border-slate-200 text-slate-400";

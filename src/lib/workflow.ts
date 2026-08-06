@@ -325,6 +325,60 @@ export async function getRevisions(manuscriptId: string): Promise<RevisionRow[]>
   return data ?? [];
 }
 
+export async function getRevisionById(revisionId: string): Promise<RevisionRow | null> {
+  const { data, error } = await supabase.from('manuscript_revisions').select('*').eq('id', revisionId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export interface ManuscriptFileRow {
+  id: string;
+  manuscript_id: string;
+  revision_id: string | null;
+  file_name: string;
+  file_type: string;
+  file_size: string;
+  storage_path: string;
+  public_url: string | null;
+  uploaded_by: string | null;
+  uploaded_at: string;
+}
+
+export async function getRevisionFiles(revisionId: string): Promise<ManuscriptFileRow[]> {
+  const { data, error } = await supabase.from('manuscript_files').select('*').eq('revision_id', revisionId).order('uploaded_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function uploadRevisionFile(revisionId: string, file: File, fileType: string): Promise<ManuscriptFileRow> {
+  const fileName = `${revisionId}/${Date.now()}_${file.name}`;
+  const { error: uploadError } = await supabase.storage.from('manuscripts').upload(fileName, file);
+  if (uploadError) throw new Error(uploadError.message);
+
+  const { data: fileRecord, error: dbError } = await supabase.from('manuscript_files').insert({
+    revision_id: revisionId,
+    file_name: file.name,
+    file_type: fileType,
+    file_size: (file.size / 1024).toFixed(2) + ' KB',
+    storage_path: fileName
+  }).select().single();
+
+  if (dbError) throw new Error(dbError.message);
+  return fileRecord as ManuscriptFileRow;
+}
+
+export async function updateRevisionStatus(revisionId: string, status: 'AWAITING_AUTHOR_UPLOAD' | 'REVISION_SUBMITTED' | 'UNDER_REVIEW' | 'COMPLETED'): Promise<RevisionRow> {
+  const { data, error } = await supabase.from('manuscript_revisions').update({ status }).eq('id', revisionId).select().single();
+  if (error) throw new Error(error.message);
+  return data as RevisionRow;
+}
+
+export async function assignRevisedManuscriptToEditor(manuscriptId: string, editorId: string): Promise<EditorAssignmentRow> {
+  const { data, error } = await supabase.rpc('assign_editor', { p_manuscript_id: manuscriptId, p_editor_id: editorId });
+  if (error) throw new Error(error.message);
+  return data as EditorAssignmentRow;
+}
+
 /** Active accounts for a given role -- used by Coordinator's editor/reviewer pickers. */
 export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER'): Promise<ProfileRow[]> {
   const { data, error } = await supabase.from('profiles').select('id, name, email, role, status').eq('role', role).eq('status', 'ACTIVE').order('name', { ascending: true });
@@ -410,6 +464,9 @@ export function subscribeToManuscripts(onChange: () => void): () => void {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscripts' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'editor_assignments' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'reviewer_assignments' }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_revisions' }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_files' }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_status_history' }, onChange)
     .subscribe();
   return () => { supabase.removeChannel(channel); };
 }
