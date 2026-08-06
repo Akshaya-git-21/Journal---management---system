@@ -92,16 +92,13 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
 
-  // If a manuscript is selected, show full-page detail view
   if (selected) {
     return <AssignmentDetail row={selected} onBack={() => setSelectedManuscriptId(null)} onChanged={load} />;
   }
 
   return (
     <div className="w-full h-screen bg-slate-50 flex font-sans overflow-hidden">
-      {/* Dark Green Sidebar */}
       <aside className="w-80 bg-[#1a4038] text-white flex flex-col overflow-y-auto shadow-lg border-r border-[#0f3f37]">
-        {/* User Info */}
         <div className="p-6 border-b border-[#0f3f37] shrink-0">
           <div className="flex items-start gap-3 mb-4">
             <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30 shrink-0">
@@ -118,9 +115,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
           </div>
         </div>
 
-        {/* Navigation Sections */}
         <nav className="flex-1 p-4 space-y-3 overflow-y-auto">
-          {/* SUBMISSIONS Section */}
           <div className="border border-emerald-500/20 rounded-2xl overflow-hidden">
             <button
               onClick={() => toggleSection('submissions')}
@@ -148,7 +143,6 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             )}
           </div>
 
-          {/* REVIEW STAGES Section */}
           <div className="border border-emerald-500/20 rounded-2xl overflow-hidden">
             <button
               onClick={() => toggleSection('reviewStages')}
@@ -178,7 +172,6 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             )}
           </div>
 
-          {/* COPYEDIT & PRODUCTION Section */}
           <div className="border border-emerald-500/20 rounded-2xl overflow-hidden">
             <button
               onClick={() => toggleSection('copyedit')}
@@ -210,9 +203,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
         </nav>
       </aside>
 
-      {/* Main Content Area */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
         <div className="bg-white border-b border-slate-200 px-8 py-5 shrink-0">
           <p className="text-xs uppercase tracking-[0.24em] text-slate-400 font-semibold mb-1">SUBMISSIONS WORKFLOW REALM</p>
           <div className="flex items-center justify-between">
@@ -231,9 +222,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
           </div>
         </div>
 
-        {/* Content Scroll Area */}
         <div className="flex-1 overflow-y-auto p-8">
-          {/* Stats Cards */}
           <div className="grid grid-cols-4 gap-4 mb-6">
             <div className="bg-white border-2 border-emerald-200/50 rounded-2xl p-4">
               <Clock className="w-6 h-6 text-emerald-500 mb-2" />
@@ -257,7 +246,6 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             </div>
           </div>
 
-          {/* Checklist Card */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-black text-slate-900">Submissions Intake Checksum Checklist</h2>
@@ -280,7 +268,6 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             </div>
           </div>
 
-          {/* Main Content */}
           {loading ? (
             <div className="flex items-center justify-center py-24 text-slate-400">
               <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...
@@ -302,7 +289,6 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
               <AssignmentList rows={filteredRows} onOpen={setSelectedManuscriptId} />
             )}
 
-          {/* Feature Highlights */}
           {!selected && filteredRows.length > 0 && (
             <div className="grid grid-cols-4 gap-4 mt-8">
               {[
@@ -362,42 +348,36 @@ function AssignmentDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
   const [revisions, setRevisions] = useState<RevisionRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [reviewRounds, setReviewRounds] = useState(1);
-  const [suggestedReviewers, setSuggestedReviewers] = useState<{name: string; email: string}[]>([]);
-  const [reviewerName, setReviewerName] = useState('');
-  const [reviewerEmail, setReviewerEmail] = useState('');
-  const [viewingFile, setViewingFile] = useState<string | null>(null);
-  const [manuscriptStatus, setManuscriptStatus] = useState(manuscript.status);
+  const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'history' | 'comments'>('title');
 
   useEffect(() => {
     getReviewerAssignments(manuscript.id).then(setReviewerAssignments);
     getRevisions(manuscript.id).then(setRevisions);
   }, [manuscript.id]);
 
-  const respond = async (accept: boolean) => {
-    setBusy(true); setError('');
-    try { await respondToEditorAssignment(assignment.id, accept); onChanged(); }
-    catch (e: any) { setError(e.message); }
-    finally { setBusy(false); }
-  };
-
-  const allReviewsIn = reviewerAssignments.length > 0 && reviewerAssignments.every((r) => r.status === 'SUBMITTED' || r.status === 'DECLINED');
+  const tabs = [
+    { id: 'title', label: 'Title & Abstract' },
+    { id: 'contributors', label: 'Contributors' },
+    { id: 'files', label: 'Files for Review' },
+    { id: 'evaluation', label: 'Editor Evaluation' },
+    { id: 'history', label: 'Review History' },
+    { id: 'comments', label: 'Comments' }
+  ];
 
   return (
-    <div className="w-full h-full flex flex-col -mx-8 -my-8 bg-white">
-      {/* Dark Green Header */}
+    <div className="w-full h-full flex flex-col bg-white overflow-hidden">
       <div className="bg-[#1a4038] text-white px-8 py-4 flex items-center justify-between shrink-0 border-b-4 border-[#008751]">
-        <div className="flex items-center gap-4">
-          <button onClick={onBack} className="text-emerald-300 hover:text-white transition">
+        <div className="flex items-center gap-4 flex-1 min-w-0">
+          <button onClick={onBack} className="text-emerald-300 hover:text-white transition flex-shrink-0">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-sm font-bold text-emerald-300">{manuscript.id}</span>
-            <span className="bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-1 rounded font-bold uppercase">LEVELAGE</span>
-            <h1 className="text-lg font-black">{manuscript.title}</h1>
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="font-mono text-sm font-bold text-emerald-300 flex-shrink-0">{manuscript.id}</span>
+            <span className="bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-1 rounded font-bold uppercase flex-shrink-0">Accepted for Review</span>
+            <h1 className="text-lg font-black truncate">{manuscript.title}</h1>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-shrink-0">
           <button className="text-emerald-300 hover:text-white transition flex items-center gap-1.5 text-xs font-bold">
             📋 Activity Log
           </button>
@@ -407,169 +387,124 @@ function AssignmentDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
         </div>
       </div>
 
-      {/* Three-Column Layout */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar - Workflow */}
+      <div className="bg-white border-b border-slate-200 px-8 flex-shrink-0">
+        <div className="flex gap-8 overflow-x-auto">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`px-2 py-4 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
+                activeTab === tab.id
+                  ? 'text-[#008751] border-[#008751]'
+                  : 'text-slate-600 border-transparent hover:text-slate-900'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 flex overflow-hidden min-h-0">
         <div className="w-80 bg-slate-50 border-r border-slate-200 overflow-y-auto p-6">
           <div className="space-y-4">
             <div className="bg-white border border-slate-200 rounded-2xl p-4">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-3">WORKFLOW</p>
-              <div className="space-y-2">
-                {[
-                  { label: 'Submission', done: true },
-                  { label: 'Review', done: true },
-                  { label: 'Copyediting', done: false },
-                  { label: 'Production', done: false }
-                ].map((step) => (
-                  <div key={step.label} className="flex items-center gap-2 text-sm">
-                    <div className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 ${step.done ? 'bg-emerald-100 border-emerald-300' : 'border-slate-300 bg-white'}`}>
-                      {step.done && <Check className="w-3 h-3 text-emerald-600" />}
-                    </div>
-                    <span className={step.done ? 'text-slate-700 font-semibold' : 'text-slate-500'}>{step.label}</span>
-                  </div>
-                ))}
-              </div>
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-3">Referrer</p>
+              <p className="text-sm font-semibold text-slate-900">Dr. Richard Hamming</p>
             </div>
-
             <div className="bg-white border border-slate-200 rounded-2xl p-4">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-3">PUBLICATION</p>
-              <div className="space-y-2">
-                {['Title & Abstract', 'Contributors', 'Metadata', 'References', 'Galleys', 'JATS XML', 'Permissions & Disclosure', 'Issue'].map((item) => (
-                  <div key={item} className="flex items-center gap-2 text-sm">
-                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span className="text-slate-700 font-semibold">{item}</span>
-                  </div>
-                ))}
-              </div>
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-3">STATUS</p>
+              <p className="text-sm font-bold text-emerald-600">Accepted for Review</p>
             </div>
-
             <div className="bg-white border border-slate-200 rounded-2xl p-4">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-3">NEED HELP?</p>
-              <p className="text-xs text-slate-600">Read our editor guidelines or contact support.</p>
-              <button className="text-emerald-600 text-xs font-bold mt-2 hover:text-emerald-700">View Guidelines →</button>
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-3">REVIEW ROUND</p>
+              <p className="text-2xl font-black text-slate-900">Round 1</p>
+              <p className="text-xs text-slate-500 mt-1">2 Reviewers Assigned</p>
+              <p className="text-xs text-slate-500">0 / 2 Completed</p>
             </div>
           </div>
         </div>
 
-        {/* Center Content */}
-        <div className="flex-1 overflow-y-auto p-8 space-y-6">
-          {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4">{error}</div>}
+        <div className="flex-1 overflow-y-auto p-8">
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4 mb-6">{error}</div>}
 
-          {/* Decision Phase */}
-          <div className="bg-gradient-to-r from-emerald-900 to-emerald-800 text-white rounded-2xl p-6 border-2 border-emerald-600">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <p className="text-[10px] uppercase tracking-wider font-bold text-emerald-200 mb-2">INTAKE SCREENING PHASE</p>
-                <h2 className="text-xl font-black">Initial Desk Screening & Intake Decisions</h2>
-              </div>
-              <span className="bg-emerald-500/30 text-emerald-100 text-xs px-3 py-1 rounded-full font-bold">Ready for Desk Evaluation</span>
-            </div>
-            <p className="text-sm text-emerald-100 mb-4">{manuscript.abstract}</p>
-            <div className="flex gap-3">
-              <button className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-5 py-2.5 rounded-lg transition flex items-center gap-1.5">
-                ✓ Desk Accept Manuscript
-              </button>
-              <button className="bg-white/20 hover:bg-white/30 text-white text-xs font-bold px-5 py-2.5 rounded-lg transition">
-                Send to Peer Review
-              </button>
-              <button className="bg-red-500/20 hover:bg-red-500/30 text-red-100 text-xs font-bold px-5 py-2.5 rounded-lg transition">
-                Desk Reject Manuscript
-              </button>
-            </div>
-          </div>
-
-          {/* Suggest Peer Referees */}
-          <div className="bg-white border border-emerald-200/50 rounded-2xl p-6">
-            <h3 className="text-sm font-black text-slate-900 mb-4">👥 SUGGEST PEER REFEREES</h3>
-            <div className="space-y-3 mb-4">
-              <input type="text" placeholder="Reviewer Name" value={reviewerName} onChange={(e) => setReviewerName(e.target.value)} className="w-full text-xs border border-slate-200 rounded px-3 py-2" />
-              <input type="email" placeholder="Reviewer Email" value={reviewerEmail} onChange={(e) => setReviewerEmail(e.target.value)} className="w-full text-xs border border-slate-200 rounded px-3 py-2" />
-              <button onClick={() => { if(reviewerName && reviewerEmail) { setSuggestedReviewers([...suggestedReviewers, {name: reviewerName, email: reviewerEmail}]); setReviewerName(''); setReviewerEmail(''); } }} className="w-full bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold py-2 rounded-lg transition">
-                + Add Suggestion
-              </button>
-            </div>
-            {suggestedReviewers.length > 0 && (
-              <div className="space-y-2">
-                {suggestedReviewers.map((r, i) => (
-                  <div key={i} className="text-xs p-2 bg-slate-50 rounded border border-slate-200 flex justify-between items-center">
-                    <span>{r.name} ({r.email})</span>
-                    <button onClick={() => setSuggestedReviewers(suggestedReviewers.filter((_, j) => j !== i))} className="text-red-500">×</button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Files for Review */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6">
-            <h3 className="text-sm font-black text-slate-900 mb-4">FILES FOR REVIEW</h3>
-            {viewingFile ? (
-              <div className="bg-slate-100 p-6 rounded-lg mb-4 relative">
-                <button onClick={() => setViewingFile(null)} className="absolute top-2 right-2 text-2xl text-slate-500 hover:text-slate-700">×</button>
-                <p className="text-xs text-slate-600 mb-2">Viewing: {viewingFile}</p>
-                <div className="bg-white p-8 rounded border border-slate-300 text-center text-slate-500 min-h-96">
-                  [Document Preview: {viewingFile}]
+          {activeTab === 'title' && (
+            <div className="max-w-4xl">
+              <div className="bg-white border border-slate-200 rounded-2xl p-8">
+                <h2 className="text-2xl font-black text-slate-900 mb-4">{manuscript.title}</h2>
+                <div className="border-t border-slate-200 pt-6">
+                  <h3 className="text-sm font-black text-slate-900 mb-3">Abstract</h3>
+                  <p className="text-sm text-slate-700 leading-relaxed">{manuscript.abstract}</p>
                 </div>
               </div>
-            ) : null}
-            <div className="space-y-2">
-              {['Figure.docx', 'Submission_PKP Image.jpg', 'Data_Set.docx', 'Article_Text_Submission.pdf'].map((file) => (
-                <div key={file} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
-                  <span className="text-sm text-slate-700">{file}</span>
-                  <button onClick={() => setViewingFile(file)} className="text-emerald-600 text-xs font-bold hover:text-emerald-700">View & Read</button>
-                </div>
-              ))}
             </div>
-          </div>
+          )}
+
+          {activeTab === 'contributors' && (
+            <div className="max-w-4xl">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">Manuscript Contributors</h3>
+                <div className="text-center py-8 text-slate-400 text-sm">No contributors data available.</div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'files' && (
+            <div className="max-w-4xl">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">FILES FOR REVIEW</h3>
+                <div className="text-center py-8 text-slate-400 text-sm">No files available.</div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'evaluation' && (
+            <div className="max-w-4xl">
+              <EditorEvaluationForm assignmentId={assignment.id} onSubmitted={onChanged} />
+            </div>
+          )}
+
+          {activeTab === 'history' && (
+            <div className="max-w-4xl">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">REVIEW HISTORY</h3>
+                <div className="text-center py-8 text-slate-400 text-sm">No history available.</div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'comments' && (
+            <div className="max-w-4xl">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">COMMENTS</h3>
+                <div className="text-center py-8 text-slate-400 text-sm">No comments yet.</div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Right Sidebar - Decision Desk */}
         <div className="w-72 bg-slate-50 border-l border-slate-200 overflow-y-auto p-6">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-black text-slate-900">DECISION DESK</h3>
               <span className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-1 rounded-full font-bold">ACTIVE</span>
             </div>
-
-            <button onClick={() => { setManuscriptStatus('ACCEPTED'); setBusy(false); }} disabled={busy} className="w-full bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold py-3 rounded-lg transition disabled:opacity-50">
+            <button className="w-full bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold py-3 rounded-lg transition">
               Accept Submission
             </button>
-            <button onClick={() => setReviewRounds(r => r + 1)} className="w-full bg-slate-200 hover:bg-slate-300 text-slate-900 text-xs font-bold py-3 rounded-lg transition">
-              Create Review Round {reviewRounds + 1}
+            <button className="w-full bg-slate-200 hover:bg-slate-300 text-slate-900 text-xs font-bold py-3 rounded-lg transition">
+              Create New Review Round
             </button>
-            <button onClick={() => setManuscriptStatus('REJECTED')} className="w-full text-red-600 hover:text-red-700 text-xs font-bold py-3 rounded-lg transition">
+            <button className="w-full text-red-600 hover:text-red-700 text-xs font-bold py-3 rounded-lg transition">
               Decline Submission
             </button>
-
             <div className="bg-white border border-slate-200 rounded-lg p-3">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-2">STATUS TRACKING</p>
-              <div className="space-y-1 text-[10px] text-slate-600">
-                <p>Manuscript: <span className="font-bold text-slate-900">{manuscriptStatus}</span></p>
-                <p>Review Rounds: <span className="font-bold text-slate-900">{reviewRounds}</span></p>
-                <p>Suggested Reviewers: <span className="font-bold text-slate-900">{suggestedReviewers.length}</span></p>
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-lg p-3">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-2">OVERRIDE / DECISION NOTES:</p>
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-2">DECISION NOTES:</p>
               <textarea
-                placeholder="E.g. Please address referee comments in Section 5"
+                placeholder="E.g. Please address referee comments..."
                 className="w-full text-xs border border-slate-200 rounded p-2 focus:border-emerald-500 focus:outline-none"
                 rows={4}
               />
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-lg p-3">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-3">PARTICIPANTS</p>
-              <div className="space-y-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-emerald-200 flex items-center justify-center text-emerald-800 font-bold">U</div>
-                  <div>
-                    <p className="font-semibold text-slate-900">Unassigned</p>
-                    <p className="text-slate-500">Assigned Editor</p>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -578,102 +513,158 @@ function AssignmentDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
   );
 }
 
-interface ScoreState {
-  scientificMerit: number; noveltyInnovation: number; methodologyQuality: number;
-  literatureAdequacy: number; ethicalCompliance: number; dataReliability: number; writingQuality: number;
+interface EditorEvalState {
+  scientificMerit: number;
+  noveltyInnovation: number;
+  methodologyQuality: number;
+  validityResults: number;
+  clarityPresentation: number;
+  ethicalStandards: number;
+  overallRecommendation: number;
+  commentsToAuthors: string;
+  strengths: string;
+  weaknesses: string;
+  mandatoryRevisions: string;
+  suggestedReviewers: { name: string; email: string; expertise: string }[];
 }
 
-function EvaluationForm({ assignmentId, onSubmitted }: { assignmentId: string; onSubmitted: () => void }) {
-  const [scores, setScores] = useState<ScoreState>({
-    scientificMerit: 7, noveltyInnovation: 7, methodologyQuality: 7, literatureAdequacy: 7, ethicalCompliance: 7, dataReliability: 7, writingQuality: 7
+function EditorEvaluationForm({ assignmentId, onSubmitted }: { assignmentId: string; onSubmitted: () => void }) {
+  const [evalData, setEvalData] = useState<EditorEvalState>({
+    scientificMerit: 9,
+    noveltyInnovation: 8,
+    methodologyQuality: 8,
+    validityResults: 8,
+    clarityPresentation: 9,
+    ethicalStandards: 10,
+    overallRecommendation: 0,
+    commentsToAuthors: '',
+    strengths: '',
+    weaknesses: '',
+    mandatoryRevisions: '',
+    suggestedReviewers: []
   });
-  const [strengths, setStrengths] = useState('');
-  const [weaknesses, setWeaknesses] = useState('');
-  const [mandatoryRevisions, setMandatoryRevisions] = useState('');
-  const [commentsToCoordinator, setCommentsToCoordinator] = useState('');
-  const [suggested, setSuggested] = useState<{ name: string; email: string; note: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const setScore = (key: keyof ScoreState, value: number) => setScores((s) => ({ ...s, [key]: value }));
+  const updateScore = (key: keyof EditorEvalState, value: number) => {
+    setEvalData(prev => ({ ...prev, [key]: value }));
+  };
+
+  const updateText = (key: keyof EditorEvalState, value: string) => {
+    setEvalData(prev => ({ ...prev, [key]: value }));
+  };
+
+  const addReviewer = () => {
+    setEvalData(prev => ({
+      ...prev,
+      suggestedReviewers: [...prev.suggestedReviewers, { name: '', email: '', expertise: '' }]
+    }));
+  };
 
   const submit = async () => {
-    setBusy(true); setError('');
+    setBusy(true);
+    setError('');
     try {
       await submitEditorAssessment(assignmentId, {
-        ...scores, strengths, weaknesses, mandatoryRevisions, commentsToCoordinator,
-        suggestedReviewers: suggested.filter((s) => s.name.trim())
+        scientificMerit: evalData.scientificMerit,
+        noveltyInnovation: evalData.noveltyInnovation,
+        methodologyQuality: evalData.methodologyQuality,
+        literatureAdequacy: evalData.validityResults,
+        ethicalCompliance: evalData.ethicalStandards,
+        dataReliability: evalData.validityResults,
+        writingQuality: evalData.clarityPresentation,
+        strengths: evalData.strengths,
+        weaknesses: evalData.weaknesses,
+        mandatoryRevisions: evalData.mandatoryRevisions,
+        commentsToCoordinator: evalData.commentsToAuthors,
+        suggestedReviewers: evalData.suggestedReviewers.filter(r => r.name.trim() && r.email.trim())
       });
       onSubmitted();
     } catch (e: any) {
-      setError(e.message);
+      setError(e.message || 'Failed to submit');
     } finally {
       setBusy(false);
     }
   };
 
-  const scoreFields: [keyof ScoreState, string][] = [
-    ['scientificMerit', 'Scientific Merit'], ['noveltyInnovation', 'Novelty / Innovation'], ['methodologyQuality', 'Methodology'],
-    ['literatureAdequacy', 'Literature Adequacy'], ['ethicalCompliance', 'Ethical Compliance'], ['dataReliability', 'Data Reliability'], ['writingQuality', 'Writing Quality']
-  ];
-
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-      <h3 className="text-sm font-black text-slate-900">Editor Evaluation</h3>
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-2">{error}</div>}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {scoreFields.map(([key, label]) => (
-          <div key={key}>
-            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{label}</label>
-            <input type="number" min={1} max={10} value={scores[key]} onChange={(e) => setScore(key, Number(e.target.value))} className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs" />
+    <div className="space-y-6">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4">{error}</div>}
+
+      <div className="bg-white border border-slate-200 rounded-2xl p-6">
+        <h3 className="text-sm font-black text-slate-900 mb-6">EVALUATION CRITERIA</h3>
+        <p className="text-xs text-slate-500 mb-6">Scale: 1 (Poor) to 10 (Excellent)</p>
+
+        {[
+          { key: 'scientificMerit', label: '1. SCIENTIFIC MERIT', desc: 'Original contribution and study rigor' },
+          { key: 'noveltyInnovation', label: '2. NOVELTY & INNOVATION', desc: 'Breakthrough contributions and uniqueness' },
+          { key: 'methodologyQuality', label: '3. METHODOLOGY QUALITY', desc: 'Experimental setup and verification rigor' },
+          { key: 'validityResults', label: '4. VALIDITY OF RESULTS', desc: 'Mathematical reproducibility and accuracy' },
+          { key: 'clarityPresentation', label: '5. CLARITY & PRESENTATION', desc: 'Writing quality and organization' },
+          { key: 'ethicalStandards', label: '6. ETHICAL STANDARDS', desc: 'Research ethics and moral bounds' }
+        ].map(({ key, label, desc }) => (
+          <div key={key} className="mb-6">
+            <div className="flex justify-between mb-2">
+              <label className="text-xs font-bold text-slate-700">{label}</label>
+              <span className="text-[10px] text-slate-500">{desc}</span>
+            </div>
+            <div className="flex gap-2">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((score) => (
+                <button
+                  key={score}
+                  onClick={() => updateScore(key as any, score)}
+                  className={`w-8 h-8 rounded font-bold text-xs transition ${
+                    evalData[key as any] === score ? 'bg-[#008751] text-white' : 'bg-slate-100 hover:bg-slate-200'
+                  }`}
+                >
+                  {score}
+                </button>
+              ))}
+            </div>
           </div>
         ))}
       </div>
-      <textarea value={strengths} onChange={(e) => setStrengths(e.target.value)} rows={2} placeholder="Strengths" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs" />
-      <textarea value={weaknesses} onChange={(e) => setWeaknesses(e.target.value)} rows={2} placeholder="Weaknesses" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs" />
-      <textarea value={mandatoryRevisions} onChange={(e) => setMandatoryRevisions(e.target.value)} rows={2} placeholder="Mandatory revisions (if any)" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs" />
-      <textarea value={commentsToCoordinator} onChange={(e) => setCommentsToCoordinator(e.target.value)} rows={2} placeholder="Comments to Coordinator" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs" />
 
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <label className="text-xs font-bold text-slate-600">Suggested Reviewers</label>
-          <button onClick={() => setSuggested([...suggested, { name: '', email: '', note: '' }])} className="text-[11px] font-bold text-[#008751] cursor-pointer flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>
-        </div>
-        <div className="space-y-2">
-          {suggested.map((s, i) => (
-            <div key={i} className="grid grid-cols-3 gap-2">
-              <input value={s.name} onChange={(e) => setSuggested(suggested.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} placeholder="Name" className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs" />
-              <input value={s.email} onChange={(e) => setSuggested(suggested.map((x, j) => j === i ? { ...x, email: e.target.value } : x))} placeholder="Email" className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs" />
-              <div className="flex gap-1">
-                <input value={s.note} onChange={(e) => setSuggested(suggested.map((x, j) => j === i ? { ...x, note: e.target.value } : x))} placeholder="Note" className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs flex-1" />
-                <button onClick={() => setSuggested(suggested.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 cursor-pointer"><Trash2 className="w-4 h-4" /></button>
-              </div>
-            </div>
-          ))}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6">
+        <h3 className="text-sm font-black text-slate-900 mb-4">QUALITATIVE APPRAISALS</h3>
+        <div className="space-y-4">
+          <textarea value={evalData.commentsToAuthors} onChange={(e) => updateText('commentsToAuthors', e.target.value)} placeholder="Comments to Authors" className="w-full text-xs border border-slate-200 rounded px-3 py-2" rows={3} />
+          <textarea value={evalData.strengths} onChange={(e) => updateText('strengths', e.target.value)} placeholder="Strengths" className="w-full text-xs border border-slate-200 rounded px-3 py-2" rows={2} />
+          <textarea value={evalData.weaknesses} onChange={(e) => updateText('weaknesses', e.target.value)} placeholder="Weaknesses" className="w-full text-xs border border-slate-200 rounded px-3 py-2" rows={2} />
+          <textarea value={evalData.mandatoryRevisions} onChange={(e) => updateText('mandatoryRevisions', e.target.value)} placeholder="Mandatory Revisions" className="w-full text-xs border border-slate-200 rounded px-3 py-2" rows={2} />
         </div>
       </div>
 
-      <button disabled={busy} onClick={submit} className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-5 py-2.5 rounded-lg cursor-pointer disabled:opacity-50 flex items-center gap-1.5">
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Submit Assessment to Coordinator
-      </button>
-    </div>
-  );
-}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-sm font-black text-slate-900">SUGGEST PEER REFEREES</h3>
+          <button onClick={addReviewer} className="text-[#008751] text-xs font-bold flex items-center gap-1">
+            <Plus className="w-3 h-3" /> Add
+          </button>
+        </div>
+        {evalData.suggestedReviewers.length === 0 ? (
+          <p className="text-xs text-slate-500 text-center py-4">No reviewers added yet</p>
+        ) : (
+          <div className="space-y-2">
+            {evalData.suggestedReviewers.map((r, i) => (
+              <div key={i} className="border border-slate-200 rounded p-3">
+                <p className="text-xs font-bold text-slate-900">{r.name}</p>
+                <p className="text-xs text-slate-500">{r.email}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
-function RecommendationForm({ busy, onSubmit }: { busy: boolean; onSubmit: (rec: ReviewerRecommendation) => void }) {
-  const [rec, setRec] = useState<ReviewerRecommendation>('MINOR_REVISION');
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6">
-      <h3 className="text-sm font-black text-slate-900 mb-3">Submit Your Recommendation</h3>
-      <select value={rec} onChange={(e) => setRec(e.target.value as ReviewerRecommendation)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs mb-3">
-        <option value="ACCEPT">Accept</option>
-        <option value="MINOR_REVISION">Minor Revision</option>
-        <option value="MAJOR_REVISION">Major Revision</option>
-        <option value="REJECT">Reject</option>
-      </select>
-      <button disabled={busy} onClick={() => onSubmit(rec)} className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50">
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit Recommendation'}
-      </button>
+      <div className="flex gap-3">
+        <button className="flex-1 bg-white border border-slate-300 text-slate-900 text-xs font-bold py-3 rounded-lg">
+          Save Draft
+        </button>
+        <button disabled={busy} onClick={submit} className="flex-1 bg-[#008751] text-white text-xs font-bold py-3 rounded-lg disabled:opacity-50">
+          {busy ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : null}
+          SUBMIT EVALUATION
+        </button>
+      </div>
     </div>
   );
 }
