@@ -362,6 +362,12 @@ function AssignmentDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
   const [revisions, setRevisions] = useState<RevisionRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [reviewRounds, setReviewRounds] = useState(1);
+  const [suggestedReviewers, setSuggestedReviewers] = useState<{name: string; email: string}[]>([]);
+  const [reviewerName, setReviewerName] = useState('');
+  const [reviewerEmail, setReviewerEmail] = useState('');
+  const [viewingFile, setViewingFile] = useState<string | null>(null);
+  const [manuscriptStatus, setManuscriptStatus] = useState(manuscript.status);
 
   useEffect(() => {
     getReviewerAssignments(manuscript.id).then(setReviewerAssignments);
@@ -472,30 +478,45 @@ function AssignmentDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
             </div>
           </div>
 
-          {/* Delegated Referees */}
+          {/* Suggest Peer Referees */}
           <div className="bg-white border border-emerald-200/50 rounded-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                👥 DELEGATED PEER REFEREES
-              </h3>
-              <button className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
-                + Invite Referee
+            <h3 className="text-sm font-black text-slate-900 mb-4">👥 SUGGEST PEER REFEREES</h3>
+            <div className="space-y-3 mb-4">
+              <input type="text" placeholder="Reviewer Name" value={reviewerName} onChange={(e) => setReviewerName(e.target.value)} className="w-full text-xs border border-slate-200 rounded px-3 py-2" />
+              <input type="email" placeholder="Reviewer Email" value={reviewerEmail} onChange={(e) => setReviewerEmail(e.target.value)} className="w-full text-xs border border-slate-200 rounded px-3 py-2" />
+              <button onClick={() => { if(reviewerName && reviewerEmail) { setSuggestedReviewers([...suggestedReviewers, {name: reviewerName, email: reviewerEmail}]); setReviewerName(''); setReviewerEmail(''); } }} className="w-full bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold py-2 rounded-lg transition">
+                + Add Suggestion
               </button>
             </div>
-            <p className="text-xs text-slate-500 mb-4">Invited university consensus referees assigned to evaluate this proposal.</p>
-            <div className="text-center py-8 text-slate-400 text-sm">
-              No peer referees delegated yet. Click "+ Invite Referee" to assign review tasks.
-            </div>
+            {suggestedReviewers.length > 0 && (
+              <div className="space-y-2">
+                {suggestedReviewers.map((r, i) => (
+                  <div key={i} className="text-xs p-2 bg-slate-50 rounded border border-slate-200 flex justify-between items-center">
+                    <span>{r.name} ({r.email})</span>
+                    <button onClick={() => setSuggestedReviewers(suggestedReviewers.filter((_, j) => j !== i))} className="text-red-500">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Files for Review */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6">
             <h3 className="text-sm font-black text-slate-900 mb-4">FILES FOR REVIEW</h3>
+            {viewingFile ? (
+              <div className="bg-slate-100 p-6 rounded-lg mb-4 relative">
+                <button onClick={() => setViewingFile(null)} className="absolute top-2 right-2 text-2xl text-slate-500 hover:text-slate-700">×</button>
+                <p className="text-xs text-slate-600 mb-2">Viewing: {viewingFile}</p>
+                <div className="bg-white p-8 rounded border border-slate-300 text-center text-slate-500 min-h-96">
+                  [Document Preview: {viewingFile}]
+                </div>
+              </div>
+            ) : null}
             <div className="space-y-2">
               {['Figure.docx', 'Submission_PKP Image.jpg', 'Data_Set.docx', 'Article_Text_Submission.pdf'].map((file) => (
                 <div key={file} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
                   <span className="text-sm text-slate-700">{file}</span>
-                  <button className="text-emerald-600 text-xs font-bold hover:text-emerald-700">View & Read</button>
+                  <button onClick={() => setViewingFile(file)} className="text-emerald-600 text-xs font-bold hover:text-emerald-700">View & Read</button>
                 </div>
               ))}
             </div>
@@ -510,15 +531,24 @@ function AssignmentDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
               <span className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-1 rounded-full font-bold">ACTIVE</span>
             </div>
 
-            <button className="w-full bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold py-3 rounded-lg transition">
+            <button onClick={() => { setManuscriptStatus('ACCEPTED'); setBusy(false); }} disabled={busy} className="w-full bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold py-3 rounded-lg transition disabled:opacity-50">
               Accept Submission
             </button>
-            <button className="w-full bg-slate-200 hover:bg-slate-300 text-slate-900 text-xs font-bold py-3 rounded-lg transition">
-              Create New Review Round
+            <button onClick={() => setReviewRounds(r => r + 1)} className="w-full bg-slate-200 hover:bg-slate-300 text-slate-900 text-xs font-bold py-3 rounded-lg transition">
+              Create Review Round {reviewRounds + 1}
             </button>
-            <button className="w-full text-red-600 hover:text-red-700 text-xs font-bold py-3 rounded-lg transition">
+            <button onClick={() => setManuscriptStatus('REJECTED')} className="w-full text-red-600 hover:text-red-700 text-xs font-bold py-3 rounded-lg transition">
               Decline Submission
             </button>
+
+            <div className="bg-white border border-slate-200 rounded-lg p-3">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-2">STATUS TRACKING</p>
+              <div className="space-y-1 text-[10px] text-slate-600">
+                <p>Manuscript: <span className="font-bold text-slate-900">{manuscriptStatus}</span></p>
+                <p>Review Rounds: <span className="font-bold text-slate-900">{reviewRounds}</span></p>
+                <p>Suggested Reviewers: <span className="font-bold text-slate-900">{suggestedReviewers.length}</span></p>
+              </div>
+            </div>
 
             <div className="bg-white border border-slate-200 rounded-lg p-3">
               <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 mb-2">OVERRIDE / DECISION NOTES:</p>
