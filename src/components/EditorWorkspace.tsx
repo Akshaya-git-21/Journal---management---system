@@ -429,12 +429,69 @@ function AssignmentDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
           {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4 mb-6">{error}</div>}
 
           {activeTab === 'title' && (
-            <div className="max-w-4xl">
-              <div className="bg-white border border-slate-200 rounded-2xl p-8">
-                <h2 className="text-2xl font-black text-slate-900 mb-4">{manuscript.title}</h2>
-                <div className="border-t border-slate-200 pt-6">
-                  <h3 className="text-sm font-black text-slate-900 mb-3">Abstract</h3>
-                  <p className="text-sm text-slate-700 leading-relaxed">{manuscript.abstract}</p>
+            <div className="max-w-5xl mx-auto">
+              {/* PDF-style Document Viewer */}
+              <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+                {/* Toolbar */}
+                <div className="bg-slate-100 border-b border-slate-200 px-4 py-3 flex items-center justify-between text-xs text-slate-600">
+                  <div className="flex items-center gap-2">
+                    <button className="p-1 hover:bg-slate-200 rounded">≡</button>
+                    <button className="p-1 hover:bg-slate-200 rounded">🔍</button>
+                  </div>
+                  <span>Page 1 of 3</span>
+                  <button className="p-1 hover:bg-slate-200 rounded">⛶</button>
+                </div>
+
+                {/* Document Content */}
+                <div className="bg-slate-50 p-8 min-h-[500px]">
+                  <div className="bg-white p-12 max-w-3xl mx-auto">
+                    {/* Title */}
+                    <h1 className="text-2xl font-bold text-center mb-4">{manuscript.title || 'Professional Document Title'}</h1>
+
+                    {/* Authors */}
+                    <div className="text-center mb-4 text-sm text-slate-700">
+                      <p>John Doe¹, Jane Smith², Michael Brown³</p>
+                    </div>
+
+                    {/* Affiliations */}
+                    <div className="text-center mb-6 text-xs text-slate-600 border-b border-slate-200 pb-4">
+                      <div>¹Department of Computer Science, University of Technology</div>
+                      <div>²Institute of Artificial Intelligence, Research Center</div>
+                      <div>³AI Research Lab, Tech University</div>
+                    </div>
+
+                    {/* Keywords */}
+                    <div className="mb-6 text-sm text-slate-700">
+                      <span className="font-semibold">Keywords:</span>
+                      <span className="italic text-emerald-600 ml-2">Machine Learning, Federated Learning, Security, Byzantine Attacks, Sybil Attacks</span>
+                    </div>
+
+                    {/* Abstract */}
+                    <div>
+                      <h2 className="text-sm font-bold text-emerald-700 mb-3 uppercase">Abstract</h2>
+                      <p className="text-sm text-slate-700 leading-relaxed">{manuscript.abstract || 'This is a professional document viewer displaying the manuscript content in an academic paper format.'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="bg-slate-100 border-t border-slate-200 px-8 py-3 text-xs text-slate-600 flex justify-between">
+                  <span>Word Count: 6,245</span>
+                  <span>Language: English (US)</span>
+                  <span>Published Date: 12 May 2025</span>
+                </div>
+              </div>
+
+              {/* Files Section */}
+              <div className="mt-6 bg-white border border-slate-200 rounded-lg p-6">
+                <h3 className="font-bold text-slate-900 mb-4">📎 Supplementary Files</h3>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 cursor-pointer">
+                    <span>📄 manuscript.pdf (2.4 MB)</span>
+                  </div>
+                  <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 cursor-pointer">
+                    <span>📊 supplementary_data.xlsx (1.2 MB)</span>
+                  </div>
                 </div>
               </div>
             </div>
