@@ -130,6 +130,48 @@ export async function logoutAccount(): Promise<void> {
   await supabase.auth.signOut();
 }
 
+export async function createUserAccount(
+  email: string,
+  password: string,
+  fullName: string,
+  role: 'EDITOR' | 'REVIEWER',
+  metadata: Record<string, any> = {}
+): Promise<void> {
+  const response = await fetch('/api/create-user', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email,
+      password,
+      fullName,
+      role,
+      metadata
+    })
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.error || 'Unable to create user account.');
+  }
+}
+
+export async function createEditorAccount(email: string, password: string, fullName: string, specialization: string, editorialRole: string): Promise<void> {
+  return createUserAccount(email, password, fullName, 'EDITOR', {
+    specialization,
+    editorial_role: editorialRole,
+    invited_by: 'coordinator',
+    created_without_email: true
+  });
+}
+
+export async function createReviewerAccount(email: string, password: string, fullName: string, specialization: string): Promise<void> {
+  return createUserAccount(email, password, fullName, 'REVIEWER', {
+    specialization,
+    invited_by: 'coordinator',
+    created_without_email: true
+  });
+}
+
 export async function requestPasswordReset(email: string): Promise<void> {
   const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
   if (error) throw new Error(error.message);

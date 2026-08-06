@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ManuscriptStatus } from '../types';
+import { supabase } from '../lib/supabase';
+import { createEditorAccount, createReviewerAccount } from '../lib/auth';
 import {
   ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, SuggestedReviewerRow, ProfileRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getStatusHistory, getSuggestedReviewers,
@@ -59,16 +61,21 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('Editorial Board');
   const [inviteDiscipline, setInviteDiscipline] = useState('');
+  const [invitePassword, setInvitePassword] = useState('');
   const [generatedInviteCredentials, setGeneratedInviteCredentials] = useState<{ email: string; password: string } | null>(null);
   const [showReviewerInviteModal, setShowReviewerInviteModal] = useState(false);
   const [reviewerInviteName, setReviewerInviteName] = useState('');
+  const [reviewerInviteEmail, setReviewerInviteEmail] = useState('');
   const [reviewerInviteSpecialty, setReviewerInviteSpecialty] = useState('');
+  const [reviewerInvitePassword, setReviewerInvitePassword] = useState('');
+  const [generatedReviewerCredentials, setGeneratedReviewerCredentials] = useState<{ email: string; password: string } | null>(null);
 
   const resetInviteForm = () => {
     setInviteName('');
     setInviteEmail('');
     setInviteRole('Editorial Board');
     setInviteDiscipline('');
+    setInvitePassword(generateTempPassword());
   };
 
   const handleOpenInvite = () => {
@@ -81,23 +88,135 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
     return Array.from({ length: 12 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
   };
 
-  const handleSendInvite = () => {
-    const email = inviteEmail || `${inviteName.replace(/\s+/g, '.').toLowerCase()}@example.com`;
-    const password = generateTempPassword();
-    setGeneratedInviteCredentials({ email, password });
-    setShowInviteModal(false);
-    window.alert(`Invitation dispatched to ${email}. Password: ${password}`);
+  const isValidEmail = (value: string) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  };
+
+  const handleSendInvite = async () => {
+    const normalizedName = inviteName.trim();
+    if (!normalizedName) {
+      window.alert('Please enter the editor name before creating an account.');
+      return;
+    }
+
+    const normalizedEmail = inviteEmail.trim().toLowerCase();
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+      window.alert('Please enter a valid email address for the editor.');
+      return;
+    }
+
+    const specialization = inviteDiscipline.trim();
+    if (!specialization) {
+      window.alert('Please enter the editor specialization before creating an account.');
+      return;
+    }
+
+    const password = invitePassword.trim() || generateTempPassword();
+    if (password.length < 6) {
+      window.alert('Password must be at least 6 characters long.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await createEditorAccount(normalizedEmail, password, normalizedName, specialization, inviteRole);
+
+      let profile: { id: string; email: string; status: string } | null = null;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const { data, error } = await supabase.from('profiles').select('id, email, status').eq('email', normalizedEmail).maybeSingle();
+        if (!error && data) {
+          profile = data as { id: string; email: string; status: string };
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+
+      if (profile) {
+        try {
+          await approveUserRole(profile.id, true);
+        } catch (approveError: any) {
+          console.warn('Could not auto-approve editor account:', approveError.message);
+        }
+      }
+
+      setGeneratedInviteCredentials({ email: normalizedEmail, password });
+      setShowInviteModal(false);
+      resetInviteForm();
+      await load();
+    } catch (error: any) {
+      window.alert(error.message || 'Unable to create the editor account.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleOpenReviewerInvite = () => {
     setReviewerInviteName('');
+    setReviewerInviteEmail('');
     setReviewerInviteSpecialty('');
+    setReviewerInvitePassword(generateTempPassword());
     setShowReviewerInviteModal(true);
   };
 
-  const handleSendReviewerInvite = () => {
-    setShowReviewerInviteModal(false);
-    window.alert(`Reviewer invitation dispatched to ${reviewerInviteName || 'the expert'}`);
+  const handleSendReviewerInvite = async () => {
+    const normalizedName = reviewerInviteName.trim();
+    if (!normalizedName) {
+      window.alert('Please enter the reviewer name before creating an account.');
+      return;
+    }
+
+    const normalizedEmail = reviewerInviteEmail.trim().toLowerCase();
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+      window.alert('Please enter a valid email address for the reviewer.');
+      return;
+    }
+
+    const specialization = reviewerInviteSpecialty.trim();
+    if (!specialization) {
+      window.alert('Please enter the reviewer specialization before creating an account.');
+      return;
+    }
+
+    const password = reviewerInvitePassword.trim() || generateTempPassword();
+    if (password.length < 6) {
+      window.alert('Password must be at least 6 characters long.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await createReviewerAccount(normalizedEmail, password, normalizedName, specialization);
+
+      let profile: { id: string; email: string; status: string } | null = null;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const { data, error } = await supabase.from('profiles').select('id, email, status').eq('email', normalizedEmail).maybeSingle();
+        if (!error && data) {
+          profile = data as { id: string; email: string; status: string };
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+
+      if (profile) {
+        try {
+          await approveUserRole(profile.id, true);
+        } catch (approveError: any) {
+          console.warn('Could not auto-approve reviewer account:', approveError.message);
+        }
+      }
+
+      setGeneratedReviewerCredentials({ email: normalizedEmail, password });
+      setShowReviewerInviteModal(false);
+      setReviewerInviteName('');
+      setReviewerInviteEmail('');
+      setReviewerInviteSpecialty('');
+      setReviewerInvitePassword('');
+      await load();
+    } catch (error: any) {
+      window.alert(error.message || 'Unable to create the reviewer account.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const load = async () => {
@@ -322,6 +441,29 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
                 </div>
               </div>
             ) : null}
+          {generatedReviewerCredentials ? (
+            <div className="rounded-3xl border border-sky-100 bg-sky-50 p-5 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-slate-900">Temporary reviewer login</p>
+                  <p className="mt-1 text-sm text-slate-600">Use the generated email and password to login temporarily.</p>
+                </div>
+                <button onClick={() => setGeneratedReviewerCredentials(null)} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  Dismiss
+                </button>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Email</p>
+                  <p className="mt-2 font-semibold text-slate-900 break-words">{generatedReviewerCredentials.email}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Password</p>
+                  <p className="mt-2 font-semibold text-slate-900 break-words">{generatedReviewerCredentials.password}</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
           </main>
           <InviteEditorialMemberModal
             open={showInviteModal}
@@ -334,15 +476,23 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
             onEmailChange={setInviteEmail}
             onRoleChange={setInviteRole}
             onDisciplineChange={setInviteDiscipline}
+            password={invitePassword}
+            onPasswordChange={setInvitePassword}
+            onGeneratePassword={() => setInvitePassword(generateTempPassword())}
             onSubmit={handleSendInvite}
           />
           <InviteReviewerModal
             open={showReviewerInviteModal}
             onClose={() => setShowReviewerInviteModal(false)}
             name={reviewerInviteName}
+            email={reviewerInviteEmail}
             specialty={reviewerInviteSpecialty}
+            password={reviewerInvitePassword}
             onNameChange={setReviewerInviteName}
+            onEmailChange={setReviewerInviteEmail}
             onSpecialtyChange={setReviewerInviteSpecialty}
+            onPasswordChange={setReviewerInvitePassword}
+            onGeneratePassword={() => setReviewerInvitePassword(generateTempPassword())}
             onSubmit={handleSendReviewerInvite}
           />
         </div>
@@ -674,7 +824,7 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
   );
 }
 
-function InviteEditorialMemberModal({ open, onClose, name, email, role, discipline, onNameChange, onEmailChange, onRoleChange, onDisciplineChange, onSubmit }: { open: boolean; onClose: () => void; name: string; email: string; role: string; discipline: string; onNameChange: (value: string) => void; onEmailChange: (value: string) => void; onRoleChange: (value: string) => void; onDisciplineChange: (value: string) => void; onSubmit: () => void; }) {
+function InviteEditorialMemberModal({ open, onClose, name, email, role, discipline, password, onNameChange, onEmailChange, onRoleChange, onDisciplineChange, onPasswordChange, onGeneratePassword, onSubmit }: { open: boolean; onClose: () => void; name: string; email: string; role: string; discipline: string; password: string; onNameChange: (value: string) => void; onEmailChange: (value: string) => void; onRoleChange: (value: string) => void; onDisciplineChange: (value: string) => void; onPasswordChange: (value: string) => void; onGeneratePassword: () => void; onSubmit: () => void; }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
@@ -725,12 +875,29 @@ function InviteEditorialMemberModal({ open, onClose, name, email, role, discipli
               />
             </div>
           </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold">Temporary password</label>
+            <div className="flex gap-2">
+              <input
+                value={password}
+                onChange={(e) => onPasswordChange(e.target.value)}
+                placeholder="Enter or generate a password"
+                className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+              />
+              <button type="button" onClick={onGeneratePassword} className="rounded-2xl border border-slate-300 bg-white px-3 py-3 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                Generate
+              </button>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">
+            No email delivery is connected right now. The temporary login credentials will be shown directly in the coordinator dashboard after the account is created.
+          </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
             <button onClick={onClose} className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
               Cancel
             </button>
             <button onClick={onSubmit} className="rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043]">
-              Dispatch Invitation
+              Create Editor Account
             </button>
           </div>
         </div>
@@ -739,14 +906,14 @@ function InviteEditorialMemberModal({ open, onClose, name, email, role, discipli
   );
 }
 
-function InviteReviewerModal({ open, onClose, name, specialty, onNameChange, onSpecialtyChange, onSubmit }: { open: boolean; onClose: () => void; name: string; specialty: string; onNameChange: (value: string) => void; onSpecialtyChange: (value: string) => void; onSubmit: () => void; }) {
+function InviteReviewerModal({ open, onClose, name, email, specialty, password, onNameChange, onEmailChange, onSpecialtyChange, onPasswordChange, onGeneratePassword, onSubmit }: { open: boolean; onClose: () => void; name: string; email: string; specialty: string; password: string; onNameChange: (value: string) => void; onEmailChange: (value: string) => void; onSpecialtyChange: (value: string) => void; onPasswordChange: (value: string) => void; onGeneratePassword: () => void; onSubmit: () => void; }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
       <div className="w-full max-w-lg rounded-[30px] overflow-hidden bg-white shadow-2xl border border-slate-200">
         <div className="relative bg-slate-950 px-8 py-6">
           <div className="uppercase tracking-[0.35em] text-xs text-emerald-300 font-semibold">Reviewer outreach</div>
-          <h2 className="mt-3 text-2xl font-black text-white">Invite expert reviewer</h2>
+          <h2 className="mt-3 text-2xl font-black text-white">Create reviewer account</h2>
           <button onClick={onClose} className="absolute right-5 top-5 rounded-full p-2 text-slate-400 hover:bg-white/10">
             <X className="w-4 h-4" />
           </button>
@@ -762,6 +929,15 @@ function InviteReviewerModal({ open, onClose, name, specialty, onNameChange, onS
             />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold">Academic email address</label>
+            <input
+              value={email}
+              onChange={(e) => onEmailChange(e.target.value)}
+              placeholder="reviewer@example.com"
+              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
             <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold">Specialty area</label>
             <input
               value={specialty}
@@ -770,12 +946,29 @@ function InviteReviewerModal({ open, onClose, name, specialty, onNameChange, onS
               className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
             />
           </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold">Temporary password</label>
+            <div className="flex gap-2">
+              <input
+                value={password}
+                onChange={(e) => onPasswordChange(e.target.value)}
+                placeholder="Enter or generate a password"
+                className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+              />
+              <button type="button" onClick={onGeneratePassword} className="rounded-2xl border border-slate-300 bg-white px-3 py-3 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                Generate
+              </button>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-xs text-sky-800">
+            No email delivery is connected yet. The login credentials will be shown directly in the coordinator dashboard after the account is created.
+          </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
             <button onClick={onClose} className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
               Cancel
             </button>
             <button onClick={onSubmit} className="rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043]">
-              Send invitation
+              Create Reviewer Account
             </button>
           </div>
         </div>
