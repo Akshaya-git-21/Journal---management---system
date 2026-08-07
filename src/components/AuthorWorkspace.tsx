@@ -140,7 +140,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
   return (
     <div className="w-full min-h-screen bg-slate-50 flex flex-col font-sans">
-      <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-30">
+      <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between sticky top-0 z-30">
         <div>
           <h1 className="text-lg font-black text-slate-900">My Manuscripts</h1>
           <p className="text-xs text-slate-500 font-semibold">{currentUser?.name} &middot; {currentUser?.email}</p>
@@ -160,13 +160,13 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           </div>
         </header>
 
-        <div className="bg-white border-b border-slate-200 p-6">
+        <div className="bg-white border-b border-slate-200 px-8 py-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Submission Dashboard</p>
               <h2 className="text-xl font-black text-slate-900 mt-2">Your manuscripts at a glance</h2>
             </div>
-            <div className="relative w-full max-w-md">
+            <div className="relative w-full lg:max-w-md">
               <input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -195,12 +195,12 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           </div>
         </div>
 
-      <main className={`flex-1 w-full ${view === 'detail' ? 'max-w-full px-0' : 'max-w-7xl mx-auto px-4'} py-6`}>
+      <main className={`flex-1 w-full px-0 py-6`}>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">{error}</div>}
 
         {view === 'list' && (
-          <div className="grid grid-cols-12 gap-4">
-            <aside className="col-span-12 lg:col-span-2 bg-gradient-to-b from-emerald-50 to-emerald-25 border-2 border-emerald-200 rounded-2xl p-5 shadow-sm h-fit sticky top-20">
+          <div className="grid grid-cols-12 gap-6 px-8">
+            <aside className="col-span-12 md:col-span-3 lg:col-span-3 xl:col-span-2 bg-gradient-to-b from-emerald-50 to-emerald-25 border-2 border-emerald-200 rounded-2xl p-5 shadow-sm h-fit sticky top-20">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-lg font-semibold text-emerald-900">Dashboard</h2>
@@ -237,7 +237,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               </div>
             </aside>
 
-            <div className="col-span-12 lg:col-span-10 space-y-4">
+            <div className="col-span-12 md:col-span-9 lg:col-span-9 xl:col-span-10 space-y-4">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="space-y-2">
                   <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] uppercase tracking-[0.22em] font-bold text-emerald-800">
@@ -279,7 +279,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div className="text-sm font-semibold text-slate-600">Search papers, authors...</div>
-                  <div className="relative w-full max-w-md">
+                  <div className="relative w-full lg:max-w-md">
                     <input
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
