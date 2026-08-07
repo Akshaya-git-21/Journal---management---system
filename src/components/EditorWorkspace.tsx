@@ -12,12 +12,12 @@ import {
   subscribeToEditorAssignments,
   EditorManuscriptDetails,
   respondToAssignment,
+  saveDraftEvaluation,
+  getDraftEvaluation,
+  submitAssessment,
+  publishFinalDecision,
   formatDate,
-  formatDateTime,
-  subscribeToEditorDashboard,
-  formatDate,
-  formatDateTime,
-  EditorDashboardData
+  formatDateTime
 } from '../lib/editorWorkspace';
 import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send } from 'lucide-react';
 import RevisionReview from './RevisionReview';
@@ -111,7 +111,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   };
 
   if (selected) {
-    return <AssignmentDetail row={selected} onBack={() => setSelectedManuscriptId(null)} onChanged={load} currentUser={currentUser} />;
+    return <AssignmentDetail details={selected} onBack={() => setSelectedManuscriptId(null)} onChanged={load} currentUser={currentUser} />;
   }
 
   return (
@@ -330,7 +330,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   );
 }
 
-function AssignmentList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) => void }) {
+function AssignmentList({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onOpen: (id: string) => void }) {
   if (rows.length === 0) {
     return <div className="text-center py-24 bg-white border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">No manuscript assignments yet.</div>;
   }
@@ -346,11 +346,11 @@ function AssignmentList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {rows.map(({ manuscript, assignment }) => (
-            <tr key={manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(manuscript.id)}>
-              <td className="px-4 py-3 font-bold text-slate-800">{manuscript.title}</td>
-              <td className="px-4 py-3"><StatusBadge status={manuscript.status} /></td>
-              <td className="px-4 py-3 text-xs font-bold text-slate-600">{assignment.status}</td>
+          {rows.map((details) => (
+            <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id)}>
+              <td className="px-4 py-3 font-bold text-slate-800">{details.manuscript.title}</td>
+              <td className="px-4 py-3"><StatusBadge status={details.manuscript.status} /></td>
+              <td className="px-4 py-3 text-xs font-bold text-slate-600">{details.assignment.status}</td>
               <td className="px-4 py-3 text-right text-[#008751] font-bold text-xs">Open &rarr;</td>
             </tr>
           ))}
@@ -360,27 +360,46 @@ function AssignmentList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
   );
 }
 
-function AssignmentDetail({ row, onBack, onChanged, currentUser }: { row: Row; onBack: () => void; onChanged: () => void; currentUser?: { name: string; email: string; role: Role } | null }) {
-  const { manuscript, assignment } = row;
-  const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>([]);
-  const [revisions, setRevisions] = useState<RevisionRow[]>([]);
+function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details: EditorManuscriptDetails; onBack: () => void; onChanged: () => void; currentUser?: { name: string; email: string; role: Role } | null }) {
+  const { manuscript, assignment, reviewerAssignments: initialReviewerAssignments, revisions: initialRevisions } = details;
+  const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>(initialReviewerAssignments || []);
+  const [revisions, setRevisions] = useState<RevisionRow[]>(initialRevisions || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'history' | 'revisions' | 'comments'>('title');
   const [activePublication, setActivePublication] = useState<'title' | 'contributors' | 'metadata' | 'references' | 'galleries' | 'jats' | 'permissions' | 'issue'>('title');
   const [currentPage, setCurrentPage] = useState(1);
-  const [suggestedReviewers, setSuggestedReviewers] = useState<{ name: string; email: string; expertise: string }[]>([
-    { name: 'Dr. Emily Johnson', email: 'emily.johnson@university.edu', expertise: '' },
-    { name: 'Dr. Robert Williams', email: 'robert.williams@research.org', expertise: '' }
-  ]);
   const [decisionLetter, setDecisionLetter] = useState('');
   const [showDecisionModal, setShowDecisionModal] = useState(false);
   const [decisionType, setDecisionType] = useState<'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION' | 'REJECT' | null>(null);
 
-  useEffect(() => {
-    getReviewerAssignments(manuscript.id).then(setReviewerAssignments);
-    getRevisions(manuscript.id).then(setRevisions);
-  }, [manuscript.id]);
+  const handleAcceptAssignment = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await respondToAssignment(assignment.id, true);
+      onChanged();
+      onBack();
+    } catch (e: any) {
+      setError(e.message || 'Failed to accept assignment');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeclineAssignment = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await respondToAssignment(assignment.id, false);
+      onChanged();
+      onBack();
+    } catch (e: any) {
+      setError(e.message || 'Failed to decline assignment');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleEditorDecision = async (decision: 'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION' | 'REJECT') => {
     setDecisionType(decision);
@@ -391,7 +410,7 @@ function AssignmentDetail({ row, onBack, onChanged, currentUser }: { row: Row; o
     if (!decisionType) return;
     setBusy(true);
     try {
-      await publishDecision(manuscript.id, decisionType, decisionLetter);
+      await publishFinalDecision(manuscript.id, decisionType, decisionLetter);
       setShowDecisionModal(false);
       setDecisionLetter('');
       onChanged();
@@ -474,27 +493,20 @@ function AssignmentDetail({ row, onBack, onChanged, currentUser }: { row: Row; o
         <div className="mb-8">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">STATUS TRACKING</p>
           <div className="space-y-2">
-            {[
-              { label: 'Submission Received', date: '12 May 2025', done: true },
-              { label: 'Under Editor Review', date: '13 May 2025', done: true },
-              { label: 'Peer Review In Progress', done: false },
-              { label: 'Editor Decision', done: false },
-              { label: 'Production Pending', done: false }
-            ].map((item) => (
-              <div key={item.label} className="flex items-start gap-2">
-                {item.done ? (
+            {details.statusHistory && details.statusHistory.length > 0 ? (
+              details.statusHistory.map((status, idx) => (
+                <div key={idx} className="flex items-start gap-2">
                   <Check className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                ) : (
-                  <div className="w-5 h-5 border-2 border-slate-300 rounded-full flex-shrink-0 mt-0.5" />
-                )}
-                <div className="flex-1">
-                  <p className={`text-sm ${item.done ? 'text-slate-900 font-semibold' : 'text-slate-600'}`}>
-                    {item.label}
-                  </p>
-                  {item.date && <p className="text-xs text-slate-500">{item.date}</p>}
+                  <div className="flex-1">
+                    <p className="text-sm text-slate-900 font-semibold">{status.status}</p>
+                    {status.created_at && <p className="text-xs text-slate-500">{formatDate(status.created_at)}</p>}
+                    {status.notes && <p className="text-xs text-slate-600 mt-1">{status.notes}</p>}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-xs text-slate-500">No status history available.</p>
+            )}
           </div>
         </div>
 
@@ -533,10 +545,25 @@ function AssignmentDetail({ row, onBack, onChanged, currentUser }: { row: Row; o
           </div>
           <h1 className="text-lg font-black text-slate-900 mb-1">{manuscript.title || 'Manuscript Title'}</h1>
           <div className="flex items-center gap-3">
-            <span className="bg-emerald-100 text-emerald-700 text-xs px-3 py-1 rounded-full font-bold">Accepted for Review</span>
-            <button className="text-xs text-slate-600 hover:text-slate-900 flex items-center gap-1">
-              📥 Download as Word
-            </button>
+            <span className="bg-emerald-100 text-emerald-700 text-xs px-3 py-1 rounded-full font-bold">{assignment.status || 'Pending'}</span>
+            {assignment.status === 'PENDING' && (
+              <>
+                <button
+                  onClick={handleAcceptAssignment}
+                  disabled={busy}
+                  className="text-xs bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700 disabled:bg-slate-300"
+                >
+                  ✓ Accept Assignment
+                </button>
+                <button
+                  onClick={handleDeclineAssignment}
+                  disabled={busy}
+                  className="text-xs bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 disabled:bg-slate-300"
+                >
+                  ✕ Decline Assignment
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -569,20 +596,20 @@ function AssignmentDetail({ row, onBack, onChanged, currentUser }: { row: Row; o
                 {activePublication === 'contributors' && (
                   <div className="max-w-4xl">
                     <div className="bg-white border border-slate-200 rounded-lg p-8">
-                      <h2 className="text-xl font-bold text-slate-900 mb-6">Contributors</h2>
+                      <h2 className="text-xl font-bold text-slate-900 mb-6">Contributors ({details.contributors?.length || 0})</h2>
                       <div className="space-y-4">
-                        <div className="border border-slate-200 rounded-lg p-4">
-                          <p className="font-semibold text-slate-900">John Doe</p>
-                          <p className="text-sm text-slate-600">Corresponding Author</p>
-                          <p className="text-xs text-slate-500 mt-1">Department of Computer Science, University of Example</p>
-                          <p className="text-xs text-slate-500">Email: john.doe@example.com</p>
-                        </div>
-                        <div className="border border-slate-200 rounded-lg p-4">
-                          <p className="font-semibold text-slate-900">Jane Smith</p>
-                          <p className="text-sm text-slate-600">Co-Author</p>
-                          <p className="text-xs text-slate-500 mt-1">Institute of Technology, City, Country</p>
-                          <p className="text-xs text-slate-500">Email: jane.smith@tech.org</p>
-                        </div>
+                        {details.contributors && details.contributors.length > 0 ? (
+                          details.contributors.map((contributor, idx) => (
+                            <div key={idx} className="border border-slate-200 rounded-lg p-4">
+                              <p className="font-semibold text-slate-900">{contributor.name || 'Unknown Author'}</p>
+                              <p className="text-sm text-slate-600">{contributor.role || 'Author'}</p>
+                              {contributor.affiliation && <p className="text-xs text-slate-500 mt-1">{contributor.affiliation}</p>}
+                              {contributor.email && <p className="text-xs text-slate-500">Email: {contributor.email}</p>}
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-slate-600">No contributor data available.</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -599,20 +626,22 @@ function AssignmentDetail({ row, onBack, onChanged, currentUser }: { row: Row; o
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-slate-600 mb-2">Submission Date</p>
-                          <p className="text-slate-900">12 May 2025</p>
+                          <p className="text-slate-900">{formatDate(manuscript.submitted_at)}</p>
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-slate-600 mb-2">Word Count</p>
-                          <p className="text-slate-900">6,245</p>
+                          <p className="text-sm font-semibold text-slate-600 mb-2">Status</p>
+                          <p className="text-slate-900">{manuscript.status || 'SUBMITTED'}</p>
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-slate-600 mb-2">Language</p>
-                          <p className="text-slate-900">English (US)</p>
+                          <p className="text-slate-900">{manuscript.language || 'English'}</p>
                         </div>
-                        <div className="col-span-2">
-                          <p className="text-sm font-semibold text-slate-600 mb-2">Status</p>
-                          <p className="text-slate-900">Accepted for Review</p>
-                        </div>
+                        {manuscript.doi && (
+                          <div className="col-span-2">
+                            <p className="text-sm font-semibold text-slate-600 mb-2">DOI</p>
+                            <p className="text-slate-900">{manuscript.doi}</p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -771,28 +800,31 @@ function AssignmentDetail({ row, onBack, onChanged, currentUser }: { row: Row; o
 
                 {/* Files Section */}
                 <div className="bg-white border border-slate-200 rounded-lg p-6">
-                  <h3 className="font-bold text-slate-900 mb-4">FILES FOR REVIEW</h3>
+                  <h3 className="font-bold text-slate-900 mb-4">FILES FOR REVIEW ({details.files?.length || 0})</h3>
                   <div className="space-y-3">
-                    {[
-                      { name: 'Manuscript.docx', size: '54.2 kB', date: '12 May 2025' },
-                      { name: 'Figure_1.png', size: '120.4 kB', date: '12 May 2025' },
-                      { name: 'Data_Set.xlsx', size: '32.6 kB', date: '12 May 2025' },
-                      { name: 'Supplementary_Material.pdf', size: '245.3 kB', date: '12 May 2025' }
-                    ].map((file) => (
-                      <div key={file.name} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 cursor-pointer transition">
-                        <div className="flex items-center gap-3 flex-1">
-                          <span className="text-lg">📄</span>
-                          <div className="flex-1">
-                            <p className="text-sm font-semibold text-slate-900">{file.name}</p>
-                            <p className="text-xs text-slate-500">{file.size} • {file.date}</p>
+                    {details.files && details.files.length > 0 ? (
+                      details.files.map((file) => (
+                        <div key={file.id} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 cursor-pointer transition">
+                          <div className="flex items-center gap-3 flex-1">
+                            <span className="text-lg">📄</span>
+                            <div className="flex-1">
+                              <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                              <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            {file.public_url && (
+                              <>
+                                <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-1">👁️</a>
+                                <a href={file.public_url} download className="text-slate-600 hover:text-slate-900 p-1">📥</a>
+                              </>
+                            )}
                           </div>
                         </div>
-                        <div className="flex gap-2">
-                          <button className="text-slate-600 hover:text-slate-900 p-1">👁️</button>
-                          <button className="text-slate-600 hover:text-slate-900 p-1">📥</button>
-                        </div>
-                      </div>
-                    ))}
+                      ))
+                    ) : (
+                      <p className="text-slate-600 text-sm">No files uploaded.</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1009,12 +1041,12 @@ interface EditorEvalState {
 
 function EditorEvaluationForm({ assignmentId, onSubmitted }: { assignmentId: string; onSubmitted: () => void }) {
   const [evalData, setEvalData] = useState<EditorEvalState>({
-    scientificMerit: 9,
-    noveltyInnovation: 8,
-    methodologyQuality: 8,
-    validityResults: 8,
-    clarityPresentation: 9,
-    ethicalStandards: 10,
+    scientificMerit: 0,
+    noveltyInnovation: 0,
+    methodologyQuality: 0,
+    validityResults: 0,
+    clarityPresentation: 0,
+    ethicalStandards: 0,
     overallRecommendation: 0,
     commentsToAuthors: '',
     strengths: '',
@@ -1024,6 +1056,21 @@ function EditorEvaluationForm({ assignmentId, onSubmitted }: { assignmentId: str
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    const loadDraft = async () => {
+      try {
+        const draft = await getDraftEvaluation(assignmentId);
+        if (draft) {
+          setEvalData(draft);
+        }
+      } catch (e) {
+        console.error('Failed to load draft:', e);
+      }
+    };
+    loadDraft();
+  }, [assignmentId]);
 
   const updateScore = (key: keyof EditorEvalState, value: number) => {
     setEvalData(prev => ({ ...prev, [key]: value }));
@@ -1040,11 +1087,25 @@ function EditorEvaluationForm({ assignmentId, onSubmitted }: { assignmentId: str
     }));
   };
 
+  const saveDraft = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await saveDraftEvaluation(assignmentId, evalData);
+      setError('Draft saved successfully');
+      setTimeout(() => setError(''), 2000);
+    } catch (e: any) {
+      setError(e.message || 'Failed to save draft');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submit = async () => {
     setBusy(true);
     setError('');
     try {
-      await submitEditorAssessment(assignmentId, {
+      await submitAssessment(assignmentId, {
         scientificMerit: evalData.scientificMerit,
         noveltyInnovation: evalData.noveltyInnovation,
         methodologyQuality: evalData.methodologyQuality,
@@ -1058,6 +1119,7 @@ function EditorEvaluationForm({ assignmentId, onSubmitted }: { assignmentId: str
         commentsToCoordinator: evalData.commentsToAuthors,
         suggestedReviewers: evalData.suggestedReviewers.filter(r => r.name.trim() && r.email.trim())
       });
+      setSubmitted(true);
       onSubmitted();
     } catch (e: any) {
       setError(e.message || 'Failed to submit');
@@ -1136,12 +1198,13 @@ function EditorEvaluationForm({ assignmentId, onSubmitted }: { assignmentId: str
       </div>
 
       <div className="flex gap-3">
-        <button className="flex-1 bg-white border border-slate-300 text-slate-900 text-xs font-bold py-3 rounded-lg">
+        <button disabled={busy || submitted} onClick={saveDraft} className="flex-1 bg-white border border-slate-300 text-slate-900 text-xs font-bold py-3 rounded-lg disabled:opacity-50">
+          {busy && <Loader2 className="w-4 h-4 animate-spin inline mr-2" />}
           Save Draft
         </button>
-        <button disabled={busy} onClick={submit} className="flex-1 bg-[#008751] text-white text-xs font-bold py-3 rounded-lg disabled:opacity-50">
+        <button disabled={busy || submitted} onClick={submit} className="flex-1 bg-[#008751] text-white text-xs font-bold py-3 rounded-lg disabled:opacity-50">
           {busy ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : null}
-          SUBMIT EVALUATION
+          {submitted ? 'SUBMITTED' : 'SUBMIT EVALUATION'}
         </button>
       </div>
     </div>
