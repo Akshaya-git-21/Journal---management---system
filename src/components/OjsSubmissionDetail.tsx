@@ -1083,13 +1083,17 @@ export default function OjsSubmissionDetail({
                     </div>
                     <div className="text-left space-y-0.5">
                       <span className="text-black text-[13px] font-normal uppercase tracking-wider block">Discussions</span>
-                      <div className="text-2xl font-semibold text-black leading-none">2</div>
-                      <span className="text-slate-900 text-[11px] block font-medium">New Messages</span>
-                      <button 
+                      <div className="text-2xl font-semibold text-black leading-none">
+                        {manuscriptDetails?.discussions?.length || 0}
+                      </div>
+                      <span className="text-slate-900 text-[11px] block font-medium">
+                        {manuscriptDetails?.discussions?.length === 1 ? 'Message' : 'Messages'}
+                      </span>
+                      <button
                         onClick={() => document.getElementById("discussions-card")?.scrollIntoView({ behavior: 'smooth' })}
                         className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
                       >
-                        <span>Open</span>
+                        <span>{manuscriptDetails?.discussions?.length ? 'Open' : 'Start'}</span>
                         <span>→</span>
                       </button>
                     </div>
