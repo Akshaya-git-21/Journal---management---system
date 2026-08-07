@@ -2,29 +2,51 @@ import { supabase } from './supabase';
 import {
   getManuscript,
   getContributors,
-  getEditorAssignments,
+  getDiscussions,
   getReviewerAssignments,
   getStatusHistory,
-  getDiscussions,
-  respondToEditorAssignment,
-  submitEditorAssessment,
+  getRevisions,
+  getSuggestedReviewers,
   ManuscriptRow,
   ContributorRow,
+  DiscussionRow,
   EditorAssignmentRow,
   ReviewerAssignmentRow,
-  DiscussionRow,
   StatusHistoryRow,
-  EditorAssessmentInput
+  RevisionRow,
+  SuggestedReviewerRow,
+  respondToEditorAssignment,
+  submitEditorAssessment,
+  submitEditorRecommendation,
+  publishDecision,
+  EditorAssessmentInput,
+  PublishDecision
 } from './workflow';
 
-export interface EditorDashboardData {
+export interface EditorManuscriptDetails {
   manuscript: ManuscriptRow;
   assignment: EditorAssignmentRow;
   contributors: ContributorRow[];
-  reviewers: ReviewerAssignmentRow[];
   discussions: DiscussionRow[];
+  reviewers: ReviewerAssignmentRow[];
   statusHistory: StatusHistoryRow[];
+  revisions: RevisionRow[];
+  suggestedReviewers: SuggestedReviewerRow[];
+  files: ManuscriptFileRow[];
   profiles: Map<string, ProfileData>;
+}
+
+export interface ManuscriptFileRow {
+  id: string;
+  manuscript_id: string;
+  revision_id: string | null;
+  file_name: string;
+  file_type: string;
+  file_size: string;
+  storage_path: string;
+  public_url: string | null;
+  uploaded_by: string | null;
+  uploaded_at: string;
 }
 
 export interface ProfileData {
@@ -34,230 +56,163 @@ export interface ProfileData {
   role?: string;
 }
 
-/** Load all editor assignments for the current user */
-export async function loadEditorAssignments(editorId: string) {
+export async function getEditorAssignedManuscripts(editorId: string): Promise<EditorManuscriptDetails[]> {
   try {
-    const { data: manuscriptsData, error: manuscriptsError } = await supabase
-      .from('manuscripts')
+    const { data: assignments, error: assignError } = await supabase
+      .from('editor_assignments')
       .select('*')
-      .order('created_at', { ascending: false });
+      .eq('editor_id', editorId);
 
-    if (manuscriptsError) throw new Error(manuscriptsError.message);
+    if (assignError) throw new Error(assignError.message);
+    if (!assignments || assignments.length === 0) return [];
 
-    const assignments: Array<{ manuscript: ManuscriptRow; assignment: EditorAssignmentRow }> = [];
+    const details: EditorManuscriptDetails[] = [];
 
-    for (const manuscript of manuscriptsData || []) {
-      const manuscriptAssignments = await getEditorAssignments(manuscript.id);
-      const myAssignment = manuscriptAssignments.find((a) => a.editor_id === editorId);
-      if (myAssignment) {
-        assignments.push({
-          manuscript,
-          assignment: myAssignment
-        });
-      }
-    }
+    for (const assignment of assignments) {
+      try {
+        const manuscript = await getManuscript(assignment.manuscript_id);
+        if (!manuscript) continue;
 
-    return assignments;
-  } catch (error) {
-    console.error('Error loading editor assignments:', error);
-    throw error;
-  }
-}
+        const [
+          contributors,
+          discussions,
+          reviewers,
+          statusHistory,
+          revisions,
+          suggestedReviewers
+        ] = await Promise.all([
+          getContributors(assignment.manuscript_id),
+          getDiscussions(assignment.manuscript_id),
+          getReviewerAssignments(assignment.manuscript_id),
+          getStatusHistory(assignment.manuscript_id),
+          getRevisions(assignment.manuscript_id),
+          getSuggestedReviewers(assignment.manuscript_id)
+        ]);
 
-/** Load complete dashboard data for a manuscript assignment */
-export async function loadEditorDashboardData(
-  manuscriptId: string,
-  editorId: string
-): Promise<EditorDashboardData> {
-  try {
-    const [
-      manuscript,
-      contributors,
-      reviewers,
-      discussions,
-      statusHistory,
-      assignments
-    ] = await Promise.all([
-      getManuscript(manuscriptId),
-      getContributors(manuscriptId),
-      getReviewerAssignments(manuscriptId),
-      getDiscussions(manuscriptId),
-      getStatusHistory(manuscriptId),
-      getEditorAssignments(manuscriptId)
-    ]);
+        const { data: filesData } = await supabase
+          .from('manuscript_files')
+          .select('*')
+          .eq('manuscript_id', assignment.manuscript_id)
+          .order('uploaded_at', { ascending: false });
 
-    if (!manuscript) {
-      throw new Error('Manuscript not found');
-    }
+        const userIds = new Set<string>();
+        userIds.add(manuscript.author_id);
+        userIds.add(assignment.editor_id);
+        discussions.forEach(d => userIds.add(d.sender_id));
+        reviewers.forEach(r => userIds.add(r.reviewer_id));
+        statusHistory.forEach(s => s.actor_id && userIds.add(s.actor_id));
 
-    const assignment = assignments.find((a) => a.editor_id === editorId);
-    if (!assignment) {
-      throw new Error('Not assigned to this manuscript');
-    }
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('id, name, email, role')
+          .in('id', Array.from(userIds));
 
-    // Collect user IDs for profile lookup
-    const userIds = new Set<string>();
-    if (manuscript.author_id) userIds.add(manuscript.author_id);
-    if (assignment.editor_id) userIds.add(assignment.editor_id);
-    discussions.forEach((d) => userIds.add(d.sender_id));
-    reviewers.forEach((r) => {
-      if (r.reviewer_id) userIds.add(r.reviewer_id);
-    });
-    statusHistory.forEach((h) => {
-      if (h.actor_id) userIds.add(h.actor_id);
-    });
-
-    // Fetch profiles
-    const profiles = new Map<string, ProfileData>();
-    if (userIds.size > 0) {
-      const { data: profilesData, error: profilesError } = await supabase
-        .from('profiles')
-        .select('id, name, email, role')
-        .in('id', Array.from(userIds));
-
-      if (!profilesError && profilesData) {
-        profilesData.forEach((p: any) => {
-          profiles.set(p.id, {
-            id: p.id,
-            name: p.name,
-            email: p.email,
-            role: p.role
+        const profiles = new Map<string, ProfileData>();
+        if (profilesData) {
+          profilesData.forEach((p: any) => {
+            profiles.set(p.id, {
+              id: p.id,
+              name: p.name,
+              email: p.email,
+              role: p.role
+            });
           });
+        }
+
+        details.push({
+          manuscript,
+          assignment: assignment as EditorAssignmentRow,
+          contributors,
+          discussions,
+          reviewers,
+          statusHistory,
+          revisions,
+          suggestedReviewers,
+          files: (filesData || []) as ManuscriptFileRow[],
+          profiles
         });
+      } catch (error) {
+        console.error(`Error fetching details for manuscript ${assignment.manuscript_id}:`, error);
+        continue;
       }
     }
 
-    return {
-      manuscript,
-      assignment,
-      contributors,
-      reviewers,
-      discussions,
-      statusHistory,
-      profiles
-    };
+    return details;
   } catch (error) {
-    console.error('Error loading editor dashboard data:', error);
+    console.error('Error fetching editor manuscripts:', error);
     throw error;
   }
 }
 
-/** Accept or decline an editor assignment */
-export async function handleEditorAssignmentResponse(
+export function subscribeToEditorAssignments(
+  editorId: string,
+  onUpdate: (details: EditorManuscriptDetails[]) => void
+): () => void {
+  const channel = supabase
+    .channel(`editor:${editorId}:assignments`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'editor_assignments',
+        filter: `editor_id=eq.${editorId}`
+      },
+      async () => {
+        const details = await getEditorAssignedManuscripts(editorId);
+        onUpdate(details);
+      }
+    )
+    .subscribe();
+
+  return () => channel.unsubscribe();
+}
+
+export async function respondToAssignment(
   assignmentId: string,
   accept: boolean
 ): Promise<void> {
-  try {
-    await respondToEditorAssignment(assignmentId, accept);
-  } catch (error) {
-    console.error('Error responding to assignment:', error);
-    throw error;
-  }
+  return respondToEditorAssignment(assignmentId, accept);
 }
 
-/** Save editor evaluation as draft */
 export async function saveDraftEvaluation(
   assignmentId: string,
-  evaluation: Partial<EditorAssessmentInput>
+  input: Partial<EditorAssessmentInput>
 ): Promise<void> {
-  // Store draft in localStorage for now
-  localStorage.setItem(`editor_draft_${assignmentId}`, JSON.stringify(evaluation));
+  const key = `editor_draft_${assignmentId}`;
+  localStorage.setItem(key, JSON.stringify(input));
 }
 
-/** Submit editor evaluation */
-export async function submitEvaluationToSupabase(
+export function getDraftEvaluation(assignmentId: string): Partial<EditorAssessmentInput> | null {
+  const key = `editor_draft_${assignmentId}`;
+  const data = localStorage.getItem(key);
+  return data ? JSON.parse(data) : null;
+}
+
+export async function submitAssessment(
   assignmentId: string,
-  evaluation: EditorAssessmentInput
+  input: EditorAssessmentInput
 ): Promise<void> {
-  try {
-    await submitEditorAssessment(assignmentId, evaluation);
-    // Clear draft after submission
-    localStorage.removeItem(`editor_draft_${assignmentId}`);
-  } catch (error) {
-    console.error('Error submitting evaluation:', error);
-    throw error;
-  }
+  await submitEditorAssessment(assignmentId, input);
+  const key = `editor_draft_${assignmentId}`;
+  localStorage.removeItem(key);
 }
 
-/** Load draft evaluation from localStorage */
-export function loadDraftEvaluation(assignmentId: string): Partial<EditorAssessmentInput> | null {
-  const draft = localStorage.getItem(`editor_draft_${assignmentId}`);
-  return draft ? JSON.parse(draft) : null;
-}
-
-/** Subscribe to manuscript updates */
-export function subscribeToEditorDashboard(
+export async function submitRecommendation(
   manuscriptId: string,
-  onUpdate: (updates: Partial<EditorDashboardData>) => void
-): () => void {
-  const unsubscribers: (() => void)[] = [];
-
-  // Subscribe to manuscript changes
-  const manuscriptChannel = supabase
-    .channel(`editor_manuscript:${manuscriptId}`)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'manuscripts',
-        filter: `id=eq.${manuscriptId}`
-      },
-      async () => {
-        const manuscript = await getManuscript(manuscriptId);
-        if (manuscript) onUpdate({ manuscript });
-      }
-    )
-    .subscribe();
-
-  unsubscribers.push(() => manuscriptChannel.unsubscribe());
-
-  // Subscribe to discussions
-  const discussionsChannel = supabase
-    .channel(`editor_discussions:${manuscriptId}`)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'manuscript_discussions',
-        filter: `manuscript_id=eq.${manuscriptId}`
-      },
-      async () => {
-        const discussions = await getDiscussions(manuscriptId);
-        onUpdate({ discussions });
-      }
-    )
-    .subscribe();
-
-  unsubscribers.push(() => discussionsChannel.unsubscribe());
-
-  // Subscribe to reviewer assignments
-  const reviewersChannel = supabase
-    .channel(`editor_reviewers:${manuscriptId}`)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'reviewer_assignments',
-        filter: `manuscript_id=eq.${manuscriptId}`
-      },
-      async () => {
-        const reviewers = await getReviewerAssignments(manuscriptId);
-        onUpdate({ reviewers });
-      }
-    )
-    .subscribe();
-
-  unsubscribers.push(() => reviewersChannel.unsubscribe());
-
-  return () => {
-    unsubscribers.forEach((unsub) => unsub());
-  };
+  recommendation: string
+): Promise<void> {
+  return submitEditorRecommendation(manuscriptId, recommendation as any);
 }
 
-/** Format date */
+export async function publishFinalDecision(
+  manuscriptId: string,
+  decision: PublishDecision,
+  letter: string
+): Promise<void> {
+  return publishDecision(manuscriptId, decision, letter);
+}
+
 export function formatDate(isoDate: string | null): string {
   if (!isoDate) return '--';
   const date = new Date(isoDate);
@@ -268,7 +223,6 @@ export function formatDate(isoDate: string | null): string {
   });
 }
 
-/** Format date and time */
 export function formatDateTime(isoDate: string | null): string {
   if (!isoDate) return '--';
   const date = new Date(isoDate);
