@@ -449,3 +449,229 @@ export async function notifyCoordinator(
     throw error;
   }
 }
+
+/** PHASE 4: Real-Time Updates & Polish */
+
+// Validation functions
+export function validateManuscriptData(manuscript: ManuscriptRow): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!manuscript.id) errors.push('Manuscript ID is required');
+  if (!manuscript.title || manuscript.title.trim().length === 0) errors.push('Manuscript title is required');
+  if (!manuscript.status) errors.push('Manuscript status is required');
+
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+export function validateAssignmentData(assignment: EditorAssignmentRow): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!assignment.id) errors.push('Assignment ID is required');
+  if (!assignment.manuscript_id) errors.push('Manuscript ID is required');
+  if (!assignment.editor_id) errors.push('Editor ID is required');
+  if (!assignment.status) errors.push('Assignment status is required');
+
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+export function validateReviewerAssignment(reviewer: ReviewerAssignmentRow): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!reviewer.id) errors.push('Reviewer assignment ID is required');
+  if (!reviewer.manuscript_id) errors.push('Manuscript ID is required');
+  if (!reviewer.reviewer_id) errors.push('Reviewer ID is required');
+  if (!reviewer.review_status) errors.push('Review status is required');
+
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+// Real-time subscription manager
+export function subscribeToAllManuscriptUpdates(
+  manuscriptId: string,
+  callbacks: {
+    onManuscriptChange?: (manuscript: ManuscriptRow) => void;
+    onReviewerChange?: (reviewers: ReviewerAssignmentRow[]) => void;
+    onDiscussionChange?: (discussions: DiscussionRow[]) => void;
+    onStatusChange?: (history: StatusHistoryRow[]) => void;
+  }
+): () => void {
+  const unsubscribers: (() => void)[] = [];
+
+  // Subscribe to manuscript changes
+  const manuscriptChannel = supabase
+    .channel(`manuscript:${manuscriptId}:updates`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'manuscripts',
+        filter: `id=eq.${manuscriptId}`
+      },
+      async (payload) => {
+        try {
+          const manuscript = await getManuscript(manuscriptId);
+          if (manuscript) {
+            const validation = validateManuscriptData(manuscript);
+            if (validation.valid && callbacks.onManuscriptChange) {
+              callbacks.onManuscriptChange(manuscript);
+            } else {
+              console.warn('Invalid manuscript data received:', validation.errors);
+            }
+          }
+        } catch (error) {
+          console.error('Error processing manuscript update:', error);
+        }
+      }
+    )
+    .subscribe();
+
+  unsubscribers.push(() => manuscriptChannel.unsubscribe());
+
+  // Subscribe to reviewer changes
+  const reviewerChannel = supabase
+    .channel(`manuscript:${manuscriptId}:reviewers_rt`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'reviewer_assignments',
+        filter: `manuscript_id=eq.${manuscriptId}`
+      },
+      async () => {
+        try {
+          const reviewers = await getReviewerAssignments(manuscriptId);
+          if (callbacks.onReviewerChange) {
+            callbacks.onReviewerChange(reviewers);
+          }
+        } catch (error) {
+          console.error('Error processing reviewer update:', error);
+        }
+      }
+    )
+    .subscribe();
+
+  unsubscribers.push(() => reviewerChannel.unsubscribe());
+
+  // Subscribe to discussion changes
+  const discussionChannel = supabase
+    .channel(`manuscript:${manuscriptId}:discussions_rt`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'manuscript_discussions',
+        filter: `manuscript_id=eq.${manuscriptId}`
+      },
+      async () => {
+        try {
+          const discussions = await getDiscussions(manuscriptId);
+          if (callbacks.onDiscussionChange) {
+            callbacks.onDiscussionChange(discussions);
+          }
+        } catch (error) {
+          console.error('Error processing discussion update:', error);
+        }
+      }
+    )
+    .subscribe();
+
+  unsubscribers.push(() => discussionChannel.unsubscribe());
+
+  // Subscribe to status history changes
+  const statusChannel = supabase
+    .channel(`manuscript:${manuscriptId}:status_rt`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'manuscript_status_history',
+        filter: `manuscript_id=eq.${manuscriptId}`
+      },
+      async () => {
+        try {
+          const history = await getStatusHistory(manuscriptId);
+          if (callbacks.onStatusChange) {
+            callbacks.onStatusChange(history);
+          }
+        } catch (error) {
+          console.error('Error processing status update:', error);
+        }
+      }
+    )
+    .subscribe();
+
+  unsubscribers.push(() => statusChannel.unsubscribe());
+
+  // Return unified cleanup function
+  return () => {
+    unsubscribers.forEach(unsub => unsub());
+  };
+}
+
+// Retry logic for failed operations
+export async function retryOperation<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  delayMs: number = 1000
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(`Attempt ${attempt}/${maxRetries} failed:`, lastError.message);
+
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
+      }
+    }
+  }
+
+  throw new Error(`Operation failed after ${maxRetries} attempts: ${lastError?.message}`);
+}
+
+// Error categorization
+export function categorizeError(error: any): {
+  category: 'network' | 'auth' | 'validation' | 'permission' | 'database' | 'unknown';
+  message: string;
+  recoverable: boolean;
+} {
+  const message = error?.message || String(error);
+
+  if (message.includes('auth') || message.includes('unauthorized')) {
+    return { category: 'auth', message: 'Authentication failed. Please log in again.', recoverable: false };
+  }
+
+  if (message.includes('network') || message.includes('failed to fetch')) {
+    return { category: 'network', message: 'Network error. Please check your connection.', recoverable: true };
+  }
+
+  if (message.includes('validation') || message.includes('constraint')) {
+    return { category: 'validation', message: 'Invalid data submitted.', recoverable: false };
+  }
+
+  if (message.includes('permission') || message.includes('policy')) {
+    return { category: 'permission', message: 'You do not have permission to perform this action.', recoverable: false };
+  }
+
+  if (message.includes('database') || message.includes('PGRST')) {
+    return { category: 'database', message: 'Database error occurred.', recoverable: true };
+  }
+
+  return { category: 'unknown', message: 'An unexpected error occurred.', recoverable: true };
+}

@@ -24,6 +24,10 @@ import {
   subscribeToDiscussions,
   postInternalNote,
   notifyCoordinator,
+  subscribeToAllManuscriptUpdates,
+  retryOperation,
+  categorizeError,
+  validateAssignmentData,
   formatDate,
   formatDateTime
 } from '../lib/editorWorkspace';
@@ -391,15 +395,84 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [newInternalNote, setNewInternalNote] = useState('');
   const [showInternalNotes, setShowInternalNotes] = useState(false);
 
+  // Phase 4: Real-Time Updates & Polish
+  const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+  // Phase 4: Set up real-time subscriptions for manuscript updates
+  useEffect(() => {
+    if (!manuscript.id) return;
+
+    const unsubscribe = subscribeToAllManuscriptUpdates(
+      manuscript.id,
+      {
+        onManuscriptChange: (updated) => {
+          console.log('Manuscript updated in real-time');
+          onChanged();
+        },
+        onReviewerChange: (updated) => {
+          setReviewerAssignments(updated);
+          showNotification('info', 'Reviewer assignments updated');
+        },
+        onDiscussionChange: (updated) => {
+          setDiscussions(updated);
+        },
+        onStatusChange: (updated) => {
+          console.log('Status history updated');
+          onChanged();
+        }
+      }
+    );
+
+    setIsSubscribed(true);
+
+    return () => {
+      unsubscribe();
+      setIsSubscribed(false);
+    };
+  }, [manuscript.id, onChanged]);
+
+  // Phase 4: Notification helper
+  const showNotification = (type: 'success' | 'error' | 'info', message: string) => {
+    setNotification({ type, message });
+    setTimeout(() => setNotification(null), 4000);
+  };
+
+  // Phase 4: Enhanced error handler with categorization
+  const handleError = async (error: any, context: string) => {
+    const errorInfo = categorizeError(error);
+    console.error(`[${context}]`, errorInfo);
+
+    if (errorInfo.recoverable && retryCount < 2) {
+      setRetryCount(retryCount + 1);
+      showNotification('info', `${errorInfo.message} Retrying...`);
+    } else {
+      setError(errorInfo.message);
+      showNotification('error', errorInfo.message);
+    }
+  };
+
   const handleAcceptAssignment = async () => {
     setBusy(true);
     setError('');
     try {
-      await respondToAssignment(assignment.id, true);
+      const validation = validateAssignmentData(assignment);
+      if (!validation.valid) {
+        throw new Error(`Invalid assignment: ${validation.errors.join(', ')}`);
+      }
+
+      await retryOperation(
+        () => respondToAssignment(assignment.id, true),
+        3,
+        1000
+      );
+
+      showNotification('success', 'Assignment accepted successfully');
       onChanged();
       onBack();
     } catch (e: any) {
-      setError(e.message || 'Failed to accept assignment');
+      await handleError(e, 'Accept Assignment');
     } finally {
       setBusy(false);
     }
@@ -409,11 +482,22 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     setBusy(true);
     setError('');
     try {
-      await respondToAssignment(assignment.id, false);
+      const validation = validateAssignmentData(assignment);
+      if (!validation.valid) {
+        throw new Error(`Invalid assignment: ${validation.errors.join(', ')}`);
+      }
+
+      await retryOperation(
+        () => respondToAssignment(assignment.id, false),
+        3,
+        1000
+      );
+
+      showNotification('success', 'Assignment declined successfully');
       onChanged();
       onBack();
     } catch (e: any) {
-      setError(e.message || 'Failed to decline assignment');
+      await handleError(e, 'Decline Assignment');
     } finally {
       setBusy(false);
     }
@@ -442,22 +526,28 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   // Phase 2: Reviewer Management Handlers
   const handleAssignReviewers = async () => {
     if (selectedReviewerIds.size === 0) {
-      setError('Please select at least one reviewer');
+      showNotification('error', 'Please select at least one reviewer');
       return;
     }
     setBusy(true);
     setError('');
     try {
-      await assignReviewers(
-        manuscript.id,
-        Array.from(selectedReviewerIds),
-        currentUser?.email || 'unknown'
+      await retryOperation(
+        () => assignReviewers(
+          manuscript.id,
+          Array.from(selectedReviewerIds),
+          currentUser?.email || 'unknown'
+        ),
+        3,
+        1000
       );
+
       setShowAssignReviewersModal(false);
       setSelectedReviewerIds(new Set());
+      showNotification('success', `${selectedReviewerIds.size} reviewer(s) assigned successfully`);
       onChanged();
     } catch (e: any) {
-      setError(e.message || 'Failed to assign reviewers');
+      await handleError(e, 'Assign Reviewers');
     } finally {
       setBusy(false);
     }
@@ -467,11 +557,17 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     setBusy(true);
     setError('');
     try {
-      await removeReviewerAssignment(assignmentId);
+      await retryOperation(
+        () => removeReviewerAssignment(assignmentId),
+        3,
+        1000
+      );
+
       setReviewerAssignments(prev => prev.filter(r => r.id !== assignmentId));
+      showNotification('success', 'Reviewer removed successfully');
       onChanged();
     } catch (e: any) {
-      setError(e.message || 'Failed to remove reviewer');
+      await handleError(e, 'Remove Reviewer');
     } finally {
       setBusy(false);
     }
@@ -490,7 +586,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   // Phase 3: Collaboration Handlers
   const handlePostComment = async () => {
     if (!newComment.trim()) {
-      setError('Please enter a comment');
+      showNotification('error', 'Please enter a comment');
       return;
     }
     setBusy(true);
@@ -499,23 +595,17 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
       const { data } = await supabase.auth.getUser();
       if (!data.user?.id) throw new Error('Not authenticated');
 
-      await postDiscussion(
-        manuscript.id,
-        data.user.id,
-        newComment,
-        'GENERAL'
+      await retryOperation(
+        () => postDiscussion(manuscript.id, data.user.id, newComment, 'GENERAL'),
+        3,
+        1000
       );
+
       setNewComment('');
-      setDiscussions([...discussions, {
-        id: Date.now().toString(),
-        manuscript_id: manuscript.id,
-        sender_id: data.user.id,
-        message: newComment,
-        created_at: new Date().toISOString()
-      } as DiscussionRow]);
+      showNotification('success', 'Comment posted successfully');
       onChanged();
     } catch (e: any) {
-      setError(e.message || 'Failed to post comment');
+      await handleError(e, 'Post Comment');
     } finally {
       setBusy(false);
     }
@@ -523,7 +613,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
 
   const handlePostInternalNote = async () => {
     if (!newInternalNote.trim()) {
-      setError('Please enter an internal note');
+      showNotification('error', 'Please enter an internal note');
       return;
     }
     setBusy(true);
@@ -532,16 +622,18 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
       const { data } = await supabase.auth.getUser();
       if (!data.user?.id) throw new Error('Not authenticated');
 
-      await postInternalNote(
-        manuscript.id,
-        data.user.id,
-        newInternalNote
+      await retryOperation(
+        () => postInternalNote(manuscript.id, data.user.id, newInternalNote),
+        3,
+        1000
       );
+
       setNewInternalNote('');
       setShowInternalNotes(false);
+      showNotification('success', 'Internal note posted successfully');
       onChanged();
     } catch (e: any) {
-      setError(e.message || 'Failed to post internal note');
+      await handleError(e, 'Post Internal Note');
     } finally {
       setBusy(false);
     }
@@ -561,6 +653,25 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
 
   return (
     <div className="w-full h-full flex bg-white overflow-hidden">
+      {/* Phase 4: Notification Toast */}
+      {notification && (
+        <div className={`fixed top-4 right-4 px-4 py-3 rounded-lg shadow-lg text-white text-sm font-semibold z-50 animate-pulse ${
+          notification.type === 'success' ? 'bg-emerald-600' :
+          notification.type === 'error' ? 'bg-red-600' :
+          'bg-blue-600'
+        }`}>
+          {notification.message}
+        </div>
+      )}
+
+      {/* Phase 4: Subscription Status Indicator */}
+      {isSubscribed && (
+        <div className="fixed top-4 left-4 flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-200 z-40">
+          <span className="w-2 h-2 bg-emerald-600 rounded-full animate-pulse"></span>
+          Live Updates Active
+        </div>
+      )}
+
       {/* LEFT SIDEBAR */}
       <aside className="w-64 bg-white border-r border-slate-200 overflow-y-auto p-6 flex flex-col">
         {/* WORKFLOW */}
