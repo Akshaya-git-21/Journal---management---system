@@ -1508,9 +1508,9 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
 
             {/* SUGGESTED REVIEWERS */}
             <div className="bg-white border border-slate-200 rounded-lg p-4">
-              <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">SUGGESTED REVIEWERS ({suggestedReviewers.length})</p>
+              <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">SUGGESTED REVIEWERS ({details.suggestedReviewers?.length || 0})</p>
               <div className="space-y-3">
-                {suggestedReviewers.map((reviewer, i) => (
+                {details.suggestedReviewers && details.suggestedReviewers.map((reviewer, i) => (
                   <div key={i} className="p-3 bg-slate-50 rounded border border-slate-200 hover:bg-slate-100 transition">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
