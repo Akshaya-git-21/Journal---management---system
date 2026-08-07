@@ -66,6 +66,7 @@ import {
   Mail,
   Bell,
   Calendar,
+  Clock,
   User,
   Info,
   Pin,
