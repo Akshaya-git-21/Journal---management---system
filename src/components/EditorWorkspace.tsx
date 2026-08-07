@@ -110,11 +110,18 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
     if (!currentUser?.email) return;
 
     // Subscribe to real-time updates
-    const { data } = await supabase.auth.getUser();
-    if (!data.user?.id) return;
+    const setupSubscription = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (!data.user?.id) return;
 
-    const unsubscribe = subscribeToEditorAssignments(data.user.id, setRows);
-    return unsubscribe;
+      const unsubscribe = subscribeToEditorAssignments(data.user.id, setRows);
+      return unsubscribe;
+    };
+
+    const unsubscribePromise = setupSubscription();
+    return () => {
+      unsubscribePromise.then(unsub => unsub?.());
+    };
   }, [currentUser?.email]);
 
   const selected = rows.find((r) => r.manuscript.id === selectedManuscriptId) || null;
