@@ -370,7 +370,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [revisions, setRevisions] = useState<RevisionRow[]>(initialRevisions || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'history' | 'revisions' | 'comments'>('title');
+  const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'reviews' | 'history' | 'revisions' | 'comments'>('title');
   const [activePublication, setActivePublication] = useState<'title' | 'contributors' | 'metadata' | 'references' | 'galleries' | 'jats' | 'permissions' | 'issue'>('title');
   const [currentPage, setCurrentPage] = useState(1);
   const [decisionLetter, setDecisionLetter] = useState('');
@@ -482,6 +482,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     { id: 'contributors', label: 'Contributors' },
     { id: 'files', label: 'Files for Review' },
     { id: 'evaluation', label: 'Editor Evaluation' },
+    { id: 'reviews', label: 'Reviews' },
     { id: 'history', label: 'Review History' },
     { id: 'revisions', label: 'Revisions' },
     { id: 'comments', label: 'Comments' }
@@ -939,6 +940,57 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
 
             {activeTab === 'evaluation' && (
               <EditorEvaluationForm assignmentId={assignment.id} onSubmitted={onChanged} />
+            )}
+
+            {activeTab === 'reviews' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">PEER REVIEWS ({reviewerAssignments?.length || 0})</h3>
+                {reviewerAssignments && reviewerAssignments.length > 0 ? (
+                  <div className="space-y-4">
+                    {reviewerAssignments.map((assignment) => (
+                      <div key={assignment.id} className="border border-slate-200 rounded-lg p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {details.profiles.get(assignment.reviewer_id)?.name || 'Unknown Reviewer'}
+                            </p>
+                            <p className="text-xs text-slate-600">{details.profiles.get(assignment.reviewer_id)?.email}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className={`inline-flex text-xs font-bold px-2 py-1 rounded ${
+                              assignment.review_status === 'SUBMITTED'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : assignment.review_status === 'PENDING'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {assignment.review_status || 'Pending'}
+                            </span>
+                            {assignment.submitted_at && (
+                              <p className="text-xs text-slate-500 mt-1">{formatDate(assignment.submitted_at)}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {assignment.review_status === 'SUBMITTED' && (
+                          <div className="bg-slate-50 rounded p-3 text-sm text-slate-700 space-y-2 mt-3">
+                            <p><span className="font-semibold">Recommendation:</span> {(assignment as any).recommendation || 'N/A'}</p>
+                            {(assignment as any).review_comments && (
+                              <p><span className="font-semibold">Comments:</span> {(assignment as any).review_comments}</p>
+                            )}
+                          </div>
+                        )}
+
+                        {assignment.review_status === 'PENDING' && (
+                          <p className="text-xs text-slate-500 italic mt-3">Awaiting review submission...</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet. Use the REVIEW ROUND section to assign reviewers.</div>
+                )}
+              </div>
             )}
 
             {activeTab === 'history' && (
