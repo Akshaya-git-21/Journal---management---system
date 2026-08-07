@@ -4,8 +4,24 @@ import {
   uploadManuscriptFile,
   syncManuscriptFilesToSupabase,
   syncManuscriptDiscussionsToSupabase,
-  subscribeToManuscriptsRealtime
+  subscribeToManuscriptsRealtime,
+  supabase
 } from '../lib/supabase';
+import {
+  fetchAuthorManuscriptDetails,
+  subscribeToManuscriptDetails,
+  formatDateTime,
+  formatDate,
+  AuthorManuscriptDetails,
+  ManuscriptFileRow,
+  ProfileData
+} from '../lib/authorManuscriptDetails';
+import {
+  getEditorAssignments,
+  getReviewerAssignments,
+  getStatusHistory,
+  postDiscussionMessage
+} from '../lib/workflow';
 import {
   ChevronLeft,
   FileText,
@@ -99,16 +115,11 @@ export default function OjsSubmissionDetail({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isUploading, setIsUploading] = useState<boolean>(false);
 
-  const [uploadedFiles, setUploadedFiles] = useState<any[]>(() => {
-    if (paper?.uploadedFiles && Array.isArray(paper.uploadedFiles) && paper.uploadedFiles.length > 0) {
-      return paper.uploadedFiles;
-    }
-    return [
-      { name: paper?.fileName || "Manuscript.pdf", type: "Manuscript", size: paper?.fileSize || "1.2 MB", date: "08 Jun 2026" },
-      { name: "Figures.docx", type: "Figures", size: "850 KB", date: "08 Jun 2026" },
-      { name: "Supplementary.zip", type: "Supplementary File", size: "2.4 MB", date: "08 Jun 2026" }
-    ];
-  });
+  // Real-time data from Supabase
+  const [manuscriptDetails, setManuscriptDetails] = useState<AuthorManuscriptDetails | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(true);
+  const [detailsError, setDetailsError] = useState<string>('');
+  const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
 
   // File Preview States
   const [previewModalOpen, setPreviewModalOpen] = useState<boolean>(false);
@@ -116,29 +127,9 @@ export default function OjsSubmissionDetail({
   const [previewFileType, setPreviewFileType] = useState<string>("");
   const [previewFileSize, setPreviewFileSize] = useState<string>("");
 
-  // WhatsApp Messages States
-  const [whatsappMessages, setWhatsappMessages] = useState<any[]>([
-    {
-      id: "wa-1",
-      sender: "Dr. John Smith",
-      senderRole: "Editor",
-      avatar: "JS",
-      avatarBg: "bg-sky-600",
-      text: "Dear Author, Please confirm that the manuscript complies with the journal guidelines.",
-      timestamp: "10:30 AM",
-      isMe: false
-    },
-    {
-      id: "wa-2",
-      sender: "Akshaya G",
-      senderRole: "Author",
-      avatar: "AG",
-      avatarBg: "bg-emerald-600",
-      text: "Thank you for your message. Yes, the manuscript follows all the guidelines.",
-      timestamp: "11:02 AM",
-      isMe: true
-    }
-  ]);
+  // Real discussion messages from Supabase
+  const [allMessages, setAllMessages] = useState<any[]>([]);
+  const [whatsappMessages, setWhatsappMessages] = useState<any[]>([]);
   const [whatsappInput, setWhatsappInput] = useState("");
 
   // Discussion forum list and filter states
@@ -147,121 +138,69 @@ export default function OjsSubmissionDetail({
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
 
-  // Technical Check thread messages
-  const [techCheckMessages, setTechCheckMessages] = useState<any[]>([
-    {
-      id: "tc-1",
-      sender: "System",
-      senderRole: "System",
-      text: "Your file \"Manuscript.pdf\" has been successfully checked.",
-      timestamp: "Yesterday, 3:15 PM",
-      isMe: false
-    },
-    {
-      id: "tc-2",
-      sender: "System",
-      senderRole: "System",
-      text: "PDF formatting matches the LaTeX templates perfectly. DOI link generation initialized.",
-      timestamp: "Yesterday, 3:16 PM",
-      isMe: false
-    }
-  ]);
+  // Thread-specific messages (filtered from allMessages based on thread type)
+  const [techCheckMessages, setTechCheckMessages] = useState<any[]>([]);
   const [techCheckInput, setTechCheckInput] = useState("");
 
-  // Formatting & Style thread messages
-  const [formattingMessages, setFormattingMessages] = useState<any[]>([
-    {
-      id: "fm-1",
-      sender: "Editor",
-      senderRole: "Editor",
-      text: "Please ensure all references follow the journal format.",
-      timestamp: "02 Jun 2026, 11:20 AM",
-      isMe: false
-    }
-  ]);
+  const [formattingMessages, setFormattingMessages] = useState<any[]>([]);
   const [formattingInput, setFormattingInput] = useState("");
 
-  const handleSendWhatsappMessage = () => {
-    if (!whatsappInput.trim()) return;
-    
-    const userMsg = {
-      id: "wa-user-" + Date.now(),
-      sender: currentUser?.name || "Akshaya G",
-      senderRole: "Author",
-      avatar: "AG",
-      avatarBg: "bg-emerald-600",
-      text: whatsappInput.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isMe: true
-    };
-    
-    setWhatsappMessages(prev => [...prev, userMsg]);
-    setWhatsappInput("");
-    
-    // Auto reply after 1.5 seconds from Editor
-    setTimeout(() => {
-      const editorMsg = {
-        id: "wa-editor-reply-" + Date.now(),
-        sender: "Dr. John Smith",
-        senderRole: "Editor",
-        avatar: "JS",
-        avatarBg: "bg-sky-600",
-        text: "Excellent confirmation. I have recorded your acknowledgment. Your manuscript files will now undergo formal reviewer assignment.",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isMe: false
-      };
-      setWhatsappMessages(prev => [...prev, editorMsg]);
-    }, 1500);
+  // User profiles map for quick lookup
+  const [userProfiles, setUserProfiles] = useState<Map<string, ProfileData>>(new Map());
+
+  const handleSendWhatsappMessage = async () => {
+    if (!whatsappInput.trim() || !paper?.id || !currentUser?.email) return;
+
+    try {
+      // Get current user's ID from Supabase (for sender_id)
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (!user || userError) {
+        console.error('Could not get current user');
+        return;
+      }
+
+      // Post message to Supabase
+      await postDiscussionMessage(paper.id, user.id, whatsappInput.trim());
+
+      // Clear input - the real-time subscription will update the messages
+      setWhatsappInput("");
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
   };
 
-  const handleSendTechCheckMessage = () => {
-    if (!techCheckInput.trim()) return;
-    const userMsg = {
-      id: "tc-user-" + Date.now(),
-      sender: currentUser?.name || "Akshaya G",
-      senderRole: "Author",
-      text: techCheckInput.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isMe: true
-    };
-    setTechCheckMessages(prev => [...prev, userMsg]);
-    setTechCheckInput("");
-    setTimeout(() => {
-      const autoMsg = {
-        id: "tc-sys-reply-" + Date.now(),
-        sender: "System",
-        senderRole: "System",
-        text: "Technical analysis completed. All structural guidelines are verified as compliant.",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isMe: false
-      };
-      setTechCheckMessages(prev => [...prev, autoMsg]);
-    }, 1500);
+  const handleSendTechCheckMessage = async () => {
+    if (!techCheckInput.trim() || !paper?.id || !currentUser?.email) return;
+
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (!user || userError) {
+        console.error('Could not get current user');
+        return;
+      }
+
+      await postDiscussionMessage(paper.id, user.id, `[Technical Check] ${techCheckInput.trim()}`);
+      setTechCheckInput("");
+    } catch (error) {
+      console.error('Error sending technical check message:', error);
+    }
   };
 
-  const handleSendFormattingMessage = () => {
-    if (!formattingInput.trim()) return;
-    const userMsg = {
-      id: "fm-user-" + Date.now(),
-      sender: currentUser?.name || "Akshaya G",
-      senderRole: "Author",
-      text: formattingInput.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isMe: true
-    };
-    setFormattingMessages(prev => [...prev, userMsg]);
-    setFormattingInput("");
-    setTimeout(() => {
-      const autoMsg = {
-        id: "fm-editor-reply-" + Date.now(),
-        sender: "Editor",
-        senderRole: "Editor",
-        text: "Thank you for the formatting update. We will review the reference formatting in the copyediting phase.",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isMe: false
-      };
-      setFormattingMessages(prev => [...prev, autoMsg]);
-    }, 1500);
+  const handleSendFormattingMessage = async () => {
+    if (!formattingInput.trim() || !paper?.id || !currentUser?.email) return;
+
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (!user || userError) {
+        console.error('Could not get current user');
+        return;
+      }
+
+      await postDiscussionMessage(paper.id, user.id, `[Formatting & Style] ${formattingInput.trim()}`);
+      setFormattingInput("");
+    } catch (error) {
+      console.error('Error sending formatting message:', error);
+    }
   };
 
   // Interface for detailed tracking steps
@@ -560,9 +499,114 @@ export default function OjsSubmissionDetail({
     return []; // Empty list per typical default empty state
   });
 
+  // Fetch real manuscript details from Supabase on mount or when paper ID changes
+  useEffect(() => {
+    if (!paper?.id) return;
+
+    let isMounted = true;
+    const loadDetails = async () => {
+      try {
+        setLoadingDetails(true);
+        setDetailsError('');
+        const details = await fetchAuthorManuscriptDetails(paper.id);
+        if (isMounted) {
+          setManuscriptDetails(details);
+          setUserProfiles(details.profiles);
+
+          // Update uploaded files with real data
+          const formattedFiles = details.files.map((f: ManuscriptFileRow) => ({
+            id: f.id,
+            name: f.file_name,
+            type: f.file_type,
+            size: f.file_size,
+            date: formatDate(f.uploaded_at),
+            uploadedAt: f.uploaded_at,
+            uploadedBy: f.uploaded_by,
+            storagePath: f.storage_path,
+            publicUrl: f.public_url
+          }));
+          setUploadedFiles(formattedFiles);
+
+          // Convert discussions to message format
+          const messageList = details.discussions.map((d) => ({
+            id: d.id,
+            sender: details.profiles.get(d.sender_id)?.name || 'Unknown',
+            senderEmail: details.profiles.get(d.sender_id)?.email || '',
+            senderRole: details.profiles.get(d.sender_id)?.role || 'User',
+            avatar: (details.profiles.get(d.sender_id)?.name || 'U').substring(0, 2).toUpperCase(),
+            avatarBg: 'bg-slate-500',
+            text: d.message,
+            timestamp: formatDateTime(d.created_at),
+            isMe: currentUser?.email === details.profiles.get(d.sender_id)?.email,
+            fileName: d.file_name,
+            fileSize: d.file_size
+          }));
+          setAllMessages(messageList);
+          setWhatsappMessages(messageList);
+        }
+      } catch (error: any) {
+        if (isMounted) {
+          setDetailsError(error.message || 'Failed to load manuscript details');
+          console.error('Error loading manuscript details:', error);
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingDetails(false);
+        }
+      }
+    };
+
+    loadDetails();
+
+    // Subscribe to real-time updates
+    const unsubscribe = subscribeToManuscriptDetails(paper.id, (updates) => {
+      if (!isMounted) return;
+
+      if (updates.manuscript) {
+        setManuscriptDetails((prev) => prev ? { ...prev, manuscript: updates.manuscript } : null);
+      }
+      if (updates.discussions) {
+        const messageList = updates.discussions.map((d) => ({
+          id: d.id,
+          sender: userProfiles.get(d.sender_id)?.name || 'Unknown',
+          senderEmail: userProfiles.get(d.sender_id)?.email || '',
+          senderRole: userProfiles.get(d.sender_id)?.role || 'User',
+          avatar: (userProfiles.get(d.sender_id)?.name || 'U').substring(0, 2).toUpperCase(),
+          avatarBg: 'bg-slate-500',
+          text: d.message,
+          timestamp: formatDateTime(d.created_at),
+          isMe: currentUser?.email === userProfiles.get(d.sender_id)?.email,
+          fileName: d.file_name,
+          fileSize: d.file_size
+        }));
+        setAllMessages(messageList);
+        setWhatsappMessages(messageList);
+      }
+      if (updates.files) {
+        const formattedFiles = updates.files.map((f: ManuscriptFileRow) => ({
+          id: f.id,
+          name: f.file_name,
+          type: f.file_type,
+          size: f.file_size,
+          date: formatDate(f.uploaded_at),
+          uploadedAt: f.uploaded_at,
+          uploadedBy: f.uploaded_by,
+          storagePath: f.storage_path,
+          publicUrl: f.public_url
+        }));
+        setUploadedFiles(formattedFiles);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [paper?.id, currentUser?.email]);
+
   // Keep uploaded files in sync with the latest selected paper
   useEffect(() => {
-    if (Array.isArray(paper?.uploadedFiles) && paper.uploadedFiles.length > 0) {
+    if (Array.isArray(paper?.uploadedFiles) && paper.uploadedFiles.length > 0 && uploadedFiles.length === 0) {
       setUploadedFiles(paper.uploadedFiles);
     }
   }, [paper?.uploadedFiles]);
@@ -1057,15 +1101,31 @@ export default function OjsSubmissionDetail({
                     </div>
                     <div className="text-left space-y-0.5 overflow-hidden">
                       <span className="text-black text-[13px] font-normal uppercase tracking-wider block">Editorial Team</span>
-                      <div className="text-sm font-semibold text-black leading-none truncate font-sans" title="Dr. John Smith">Dr. John Smith</div>
-                      <span className="text-slate-900 text-[11px] block font-medium">Editor Assigned</span>
-                      <button 
-                        onClick={() => alert("Assigned Editorial Contact Panel:\nDr. John Smith (Lead Managing Editor)\nJournal of AI in Medicine.")}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <span>View Details</span>
-                        <span>→</span>
-                      </button>
+                      {manuscriptDetails?.editorAssignments && manuscriptDetails.editorAssignments.length > 0 ? (
+                        <>
+                          <div className="text-sm font-semibold text-black leading-none truncate font-sans" title={userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id)?.name || 'Assigned'}>
+                            {userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id)?.name || 'Editor Assigned'}
+                          </div>
+                          <span className="text-slate-900 text-[11px] block font-medium">
+                            {manuscriptDetails.editorAssignments[0].status === 'ACCEPTED' ? 'Editor Confirmed' : 'Awaiting Acceptance'}
+                          </span>
+                          <button
+                            onClick={() => {
+                              const editor = userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id);
+                              alert(`Editor: ${editor?.name}\nEmail: ${editor?.email}\nStatus: ${manuscriptDetails.editorAssignments[0].status}`);
+                            }}
+                            className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
+                          >
+                            <span>View Details</span>
+                            <span>→</span>
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-sm font-semibold text-slate-400">No editor assigned yet</div>
+                          <span className="text-slate-500 text-[11px] block font-medium">Pending assignment</span>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -1077,11 +1137,29 @@ export default function OjsSubmissionDetail({
                     <div className="text-left space-y-0.5">
                       <span className="text-black text-[13px] font-normal uppercase tracking-wider block">Important Dates</span>
                       <div className="text-[11px] font-medium text-slate-900 leading-tight">
-                        <div>Submitted <strong className="text-black font-semibold">08 June 2026</strong></div>
-                        <div className="mt-0.5">Expected <strong className="text-black font-semibold">22 June 2026</strong></div>
+                        <div>
+                          Submitted <strong className="text-black font-semibold">
+                            {manuscriptDetails?.manuscript?.submitted_at
+                              ? formatDate(manuscriptDetails.manuscript.submitted_at)
+                              : '--'}
+                          </strong>
+                        </div>
+                        {manuscriptDetails?.revisions && manuscriptDetails.revisions.length > 0 && (
+                          <div className="mt-0.5">
+                            Last Revision <strong className="text-black font-semibold">
+                              {formatDate(manuscriptDetails.revisions[manuscriptDetails.revisions.length - 1].requested_at)}
+                            </strong>
+                          </div>
+                        )}
                       </div>
-                      <button 
-                        onClick={() => alert("Opening manuscript editorial milestones tracking calendar.")}
+                      <button
+                        onClick={() => {
+                          const dates = manuscriptDetails ? {
+                            submitted: manuscriptDetails.manuscript?.submitted_at ? formatDateTime(manuscriptDetails.manuscript.submitted_at) : 'N/A',
+                            status: manuscriptDetails.manuscript?.status || 'N/A'
+                          } : {};
+                          alert(`Manuscript Timeline:\nSubmitted: ${dates.submitted}\nCurrent Status: ${dates.status}`);
+                        }}
                         className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1 flex items-center gap-0.5 cursor-pointer"
                       >
                         <span>View Calendar</span>
@@ -2070,27 +2148,44 @@ export default function OjsSubmissionDetail({
                 {/* Recent Activity */}
                 <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left space-y-4">
                   <h3 className="text-black text-[18px] font-semibold tracking-tight border-b pb-3 border-emerald-100">Recent Activity</h3>
-                  
+
                   <div className="space-y-3.5 text-xs">
-                    {[
-                      { label: "Manuscript submitted", time: "10:20 AM", icon: FileText, color: "bg-[#eefcf4] text-[#008751] border border-emerald-100" },
-                      { label: "Files uploaded", time: "10:22 AM", icon: Download, color: "bg-blue-50 text-blue-700 border border-blue-100", rotate: true },
-                      { label: "Metadata completed", time: "10:40 AM", icon: Check, color: "bg-[#eefcf4] text-[#008751] border border-emerald-100" },
-                      { label: "Editor assigned", time: "11:15 AM", icon: User, color: "bg-[#eefcf4] text-[#008751] border border-emerald-100" }
-                    ].map((act, i) => {
-                      const Icon = act.icon;
-                      return (
-                        <div key={i} className="flex items-center justify-between gap-3 hover:bg-emerald-50/40 p-1.5 rounded-lg transition">
-                          <div className="flex items-center gap-2.5 overflow-hidden">
-                            <div className={`w-7 h-7 rounded-lg ${act.color} flex items-center justify-center shrink-0`}>
-                              <Icon className={`w-3.5 h-3.5 ${act.rotate ? 'rotate-180' : ''}`} />
+                    {manuscriptDetails && manuscriptDetails.statusHistory && manuscriptDetails.statusHistory.length > 0 ? (
+                      manuscriptDetails.statusHistory.slice(-5).reverse().map((entry, i) => {
+                        const getActivityDetails = (status: string) => {
+                          const statusMap: { [key: string]: { label: string; icon: any; color: string } } = {
+                            SUBMITTED: { label: 'Manuscript submitted', icon: FileText, color: 'bg-[#eefcf4] text-[#008751] border border-emerald-100' },
+                            EDITOR_REVIEW: { label: 'Editor review started', icon: User, color: 'bg-[#eefcf4] text-[#008751] border border-emerald-100' },
+                            UNDER_REVIEW: { label: 'Sent to reviewers', icon: Mail, color: 'bg-blue-50 text-blue-700 border border-blue-100' },
+                            REVISION_REQUESTED: { label: 'Revision requested', icon: AlertCircle, color: 'bg-orange-50 text-orange-700 border border-orange-100' },
+                            AWAITING_DECISION: { label: 'Awaiting editor decision', icon: Clock, color: 'bg-purple-50 text-purple-700 border border-purple-100' },
+                            ACCEPTED: { label: 'Manuscript accepted', icon: Check, color: 'bg-emerald-50 text-emerald-700 border border-emerald-100' },
+                            PUBLISHED: { label: 'Published', icon: BookOpen, color: 'bg-[#eefcf4] text-[#008751] border border-emerald-100' },
+                            REJECTED: { label: 'Rejected', icon: X, color: 'bg-red-50 text-red-700 border border-red-100' }
+                          };
+                          return statusMap[status] || { label: status, icon: FileText, color: 'bg-slate-50 text-slate-700 border border-slate-100' };
+                        };
+
+                        const details = getActivityDetails(entry.to_status);
+                        const Icon = details.icon;
+                        const date = new Date(entry.created_at);
+                        const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+                        return (
+                          <div key={i} className="flex items-center justify-between gap-3 hover:bg-emerald-50/40 p-1.5 rounded-lg transition">
+                            <div className="flex items-center gap-2.5 overflow-hidden">
+                              <div className={`w-7 h-7 rounded-lg ${details.color} flex items-center justify-center shrink-0`}>
+                                <Icon className="w-3.5 h-3.5" />
+                              </div>
+                              <span className="font-semibold text-black truncate">{details.label}</span>
                             </div>
-                            <span className="font-semibold text-black truncate">{act.label}</span>
+                            <span className="text-[11px] text-black font-mono shrink-0 font-extrabold">{time}</span>
                           </div>
-                          <span className="text-[11px] text-black font-mono shrink-0 font-extrabold">{act.time}</span>
-                        </div>
-                      );
-                    })}
+                        );
+                      })
+                    ) : (
+                      <div className="text-slate-500 text-sm">No activity yet</div>
+                    )}
                   </div>
                 </div>
 
