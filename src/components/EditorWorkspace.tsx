@@ -939,28 +939,43 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
             {/* DECISION */}
             <div className="mb-6">
               <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">DECISION</p>
-              <div className="space-y-2">
-                <button
-                  onClick={() => handleEditorDecision('ACCEPT')}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2">
-                  <Check className="w-4 h-4" /> Accept Manuscript
-                </button>
-                <button
-                  onClick={() => handleEditorDecision('MINOR_REVISION')}
-                  className="w-full bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2">
-                  <Plus className="w-4 h-4" /> Request Minor Revision
-                </button>
-                <button
-                  onClick={() => handleEditorDecision('MAJOR_REVISION')}
-                  className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2">
-                  <Plus className="w-4 h-4" /> Request Major Revision
-                </button>
-                <button
-                  onClick={() => handleEditorDecision('REJECT')}
-                  className="w-full text-red-600 text-xs font-bold py-3 rounded-lg hover:bg-red-50 transition flex items-center justify-center gap-2">
-                  <XIcon className="w-4 h-4" /> Decline Submission
-                </button>
-              </div>
+              {assignment.status === 'COMPLETED' ? (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-emerald-700 text-center">✓ Review Complete</p>
+                  <p className="text-xs text-emerald-600 text-center mt-1">Final decision submitted</p>
+                </div>
+              ) : assignment.status === 'DECLINED' ? (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-red-700 text-center">✕ Assignment Declined</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <button
+                    disabled={busy}
+                    onClick={() => handleEditorDecision('ACCEPT')}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
+                    <Check className="w-4 h-4" /> Accept Manuscript
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() => handleEditorDecision('MINOR_REVISION')}
+                    className="w-full bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
+                    <Plus className="w-4 h-4" /> Request Minor Revision
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() => handleEditorDecision('MAJOR_REVISION')}
+                    className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
+                    <Plus className="w-4 h-4" /> Request Major Revision
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() => handleEditorDecision('REJECT')}
+                    className="w-full text-red-600 text-xs font-bold py-3 rounded-lg hover:bg-red-50 transition flex items-center justify-center gap-2 disabled:opacity-50">
+                    <XIcon className="w-4 h-4" /> Decline Submission
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* REVIEW ROUND */}
@@ -972,17 +987,31 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               <div className="space-y-3">
                 <div>
                   <p className="text-xs text-slate-600">Status</p>
-                  <p className="text-sm font-semibold text-blue-600">In Progress</p>
+                  <p className="text-sm font-semibold text-blue-600">{manuscript.status || 'In Progress'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-600">Reviewers Assigned</p>
-                  <p className="text-sm font-bold text-slate-900">2</p>
+                  <p className="text-sm font-bold text-slate-900">{details.reviewerAssignments?.length || 0}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-600">Reviews Completed</p>
-                  <p className="text-sm font-bold text-slate-900">0 / 2</p>
+                  <p className="text-sm font-bold text-slate-900">
+                    {details.reviewerAssignments?.filter(r => r.review_status === 'SUBMITTED').length || 0} / {details.reviewerAssignments?.length || 0}
+                  </p>
                 </div>
-                <button className="text-xs text-emerald-600 font-bold hover:underline">View Review Progress →</button>
+                {details.reviewerAssignments && details.reviewerAssignments.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-200">
+                    <p className="text-xs text-slate-600 mb-2">Assigned Reviewers:</p>
+                    {details.reviewerAssignments.slice(0, 3).map((ra, idx) => (
+                      <p key={idx} className="text-xs text-slate-700 mb-1">
+                        • {details.profiles.get(ra.reviewer_id)?.name || 'Unknown'} ({ra.review_status || 'Pending'})
+                      </p>
+                    ))}
+                    {details.reviewerAssignments.length > 3 && (
+                      <p className="text-xs text-slate-500">+{details.reviewerAssignments.length - 3} more</p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
