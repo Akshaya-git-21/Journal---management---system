@@ -140,57 +140,57 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
   return (
     <div className="w-full min-h-screen bg-slate-50 flex flex-col font-sans">
-      <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between sticky top-0 z-30">
+      <header className="bg-white border-b border-slate-200 px-8 py-3 flex items-center justify-between sticky top-0 z-30">
         <div>
-          <h1 className="text-lg font-black text-slate-900">My Manuscripts</h1>
-          <p className="text-xs text-slate-500 font-semibold">{currentUser?.name} &middot; {currentUser?.email}</p>
+          <h1 className="text-2xl font-bold text-slate-900">My Manuscripts</h1>
+          <p className="text-xs text-slate-500 font-medium mt-0.5">{currentUser?.name} &middot; {currentUser?.email}</p>
         </div>
-<div className="flex items-center gap-2 flex-wrap">
-            {view !== 'new' && (
-              <button
-                onClick={() => { setView('new'); setSelectedId(null); }}
-                className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-lg transition cursor-pointer"
-              >
-                <Plus className="w-4 h-4" /> New Submission
-              </button>
-            )}
-            <button onClick={onSignOut} className="text-xs font-bold text-red-600 hover:text-red-700 px-3 py-2 cursor-pointer">
-              Log Out
+        <div className="flex items-center gap-2 flex-wrap">
+          {view !== 'new' && (
+            <button
+              onClick={() => { setView('new'); setSelectedId(null); }}
+              className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" /> New Submission
             </button>
-          </div>
-        </header>
+          )}
+          <button onClick={onSignOut} className="text-sm font-semibold text-red-600 hover:text-red-700 px-3 py-1.5 cursor-pointer">
+            Log Out
+          </button>
+        </div>
+      </header>
 
-        <div className="bg-white border-b border-slate-200 px-8 py-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="bg-white border-b border-slate-200 px-8 py-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Submission Dashboard</p>
-              <h2 className="text-xl font-black text-slate-900 mt-2">Your manuscripts at a glance</h2>
+              <p className="text-xs uppercase tracking-widest text-slate-500 font-medium">Submission Dashboard</p>
+              <h2 className="text-lg font-semibold text-slate-900 mt-1">Your manuscripts at a glance</h2>
             </div>
             <div className="relative w-full lg:max-w-md">
               <input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search by title, ID, or author"
-                className="w-full rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
               />
             </div>
           </div>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Submitted</p>
-              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.submitted}</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
+              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Submitted</p>
+              <p className="mt-2 text-xl font-semibold text-slate-900">{statusCounts.submitted}</p>
             </div>
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Under Review</p>
-              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.underReview}</p>
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
+              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Under Review</p>
+              <p className="mt-2 text-xl font-semibold text-slate-900">{statusCounts.underReview}</p>
             </div>
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Awaiting Decision</p>
-              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.awaitingDecision}</p>
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
+              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Awaiting Decision</p>
+              <p className="mt-2 text-xl font-semibold text-slate-900">{statusCounts.awaitingDecision}</p>
             </div>
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Revisions</p>
-              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.revisionRequested}</p>
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
+              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Revisions</p>
+              <p className="mt-2 text-xl font-semibold text-slate-900">{statusCounts.revisionRequested}</p>
             </div>
           </div>
         </div>
@@ -200,12 +200,12 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
         {view === 'list' && (
           <div className="grid grid-cols-12 gap-6 px-8">
-            <aside className="col-span-12 md:col-span-3 lg:col-span-3 xl:col-span-2 bg-gradient-to-b from-emerald-50 to-emerald-25 border-2 border-emerald-200 rounded-2xl p-5 shadow-sm h-fit sticky top-20">
-              <div className="flex items-center justify-between mb-4">
+            <aside className="col-span-12 md:col-span-3 lg:col-span-3 xl:col-span-2 bg-gradient-to-b from-emerald-50 to-emerald-25 border-2 border-emerald-200 rounded-xl p-4 shadow-sm h-fit sticky top-20">
+              <div className="flex items-center justify-between mb-3">
                 <div>
-                  <h2 className="text-lg font-semibold text-emerald-900">Dashboard</h2>
+                  <h2 className="text-base font-semibold text-emerald-900">Dashboard</h2>
                 </div>
-                <span className="inline-flex h-8 min-w-[2rem] items-center justify-center rounded-full bg-emerald-600 text-white text-xs font-semibold">{items.length}</span>
+                <span className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-emerald-600 text-white text-xs font-semibold">{items.length}</span>
               </div>
               <nav className="space-y-1">
                 {[
@@ -220,42 +220,42 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                   <button
                     key={item.label}
                     type="button"
-                    className="w-full flex items-center justify-between gap-2 rounded-lg border-2 border-emerald-200 bg-white hover:bg-emerald-50 px-3 py-2 text-left text-xs font-medium text-emerald-900 hover:border-emerald-400 transition"
+                    className="w-full flex items-center justify-between gap-2 rounded-lg border-2 border-emerald-200 bg-white hover:bg-emerald-50 px-2.5 py-1.5 text-left text-sm font-medium text-emerald-900 hover:border-emerald-400 transition"
                   >
                     <span className="flex items-center gap-2 min-w-0">
                       <item.icon className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                      <span className="truncate">{item.label}</span>
+                      <span className="truncate text-sm">{item.label}</span>
                     </span>
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-300 flex-shrink-0">{item.count}</span>
+                    <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-300 flex-shrink-0">{item.count}</span>
                   </button>
                 ))}
               </nav>
-              <div className="mt-4 border-t-2 border-emerald-200 pt-3 space-y-2 text-xs">
-                <div className="font-semibold text-emerald-900 text-xs">Actions</div>
-                <button onClick={() => setView('new')} className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-left font-semibold text-white transition text-xs">+ New submission</button>
-                <button onClick={() => alert('Open issues panel placeholder')} className="w-full rounded-lg border-2 border-emerald-300 bg-white hover:bg-emerald-50 px-3 py-2 text-left text-emerald-700 hover:border-emerald-400 transition text-xs">Issues</button>
+              <div className="mt-3 border-t-2 border-emerald-200 pt-2 space-y-1.5">
+                <div className="font-semibold text-emerald-900 text-xs uppercase tracking-wide">Actions</div>
+                <button onClick={() => setView('new')} className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 px-2.5 py-1.5 text-left font-semibold text-white transition text-sm">+ New submission</button>
+                <button onClick={() => alert('Open issues panel placeholder')} className="w-full rounded-lg border-2 border-emerald-300 bg-white hover:bg-emerald-50 px-2.5 py-1.5 text-left text-emerald-700 hover:border-emerald-400 transition text-sm">Issues</button>
               </div>
             </aside>
 
             <div className="col-span-12 md:col-span-9 lg:col-span-9 xl:col-span-10 space-y-4">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="space-y-2">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] uppercase tracking-[0.22em] font-bold text-emerald-800">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1.5">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs uppercase tracking-wide font-semibold text-emerald-700">
                     <span>/queue/submitted</span>
                   </div>
-                  <h2 className="text-2xl font-black text-slate-900">Active submissions</h2>
-                  <p className="text-sm text-slate-500">Manage your active tasks, review stages, and submission progress.</p>
+                  <h2 className="text-lg font-semibold text-slate-900">Active submissions</h2>
+                  <p className="text-sm text-slate-600">Manage your active tasks, review stages, and submission progress.</p>
                 </div>
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => alert('Open filter options')}
-                    className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
                   >
                     Filters
                   </button>
                   <button
                     onClick={() => setView('new')}
-                    className="rounded-2xl bg-[#008751] px-4 py-2 text-sm font-bold text-white hover:bg-[#007043] transition"
+                    className="rounded-lg bg-[#008751] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#007043] transition"
                   >
                     + New Submission
                   </button>
@@ -269,75 +269,75 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                   { label: 'REVISION REQUIRED', count: statusCounts.revisionRequested },
                   { label: 'REVISION PROCESSING', count: statusCounts.revisionProcessing }
                 ].map((item) => (
-                  <div key={item.label} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">{item.label}</p>
-                    <p className="mt-3 text-2xl font-black text-slate-900">{item.count}</p>
+                  <div key={item.label} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                    <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">{item.label}</p>
+                    <p className="mt-2 text-xl font-semibold text-slate-900">{item.count}</p>
                   </div>
                 ))}
               </div>
 
-              <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="text-sm font-semibold text-slate-600">Search papers, authors...</div>
+              <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-sm">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="text-sm font-medium text-slate-600">Search papers, authors...</div>
                   <div className="relative w-full lg:max-w-md">
                     <input
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       placeholder="Search papers, authors..."
-                      className="w-full rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
+                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
                     />
                   </div>
                 </div>
               </div>
 
-              <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
-                <div className="border-b border-slate-100 bg-slate-50 p-4 text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Manuscript queue</div>
+              <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+                <div className="border-b border-slate-100 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600">Manuscript queue</div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[900px] text-left text-sm">
-                    <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600 font-semibold">
                       <tr>
-                        <th className="px-4 py-4">MANUSCRIPT ID</th>
-                        <th className="px-4 py-4">TITLE</th>
-                        <th className="px-4 py-4">DATE SUBMITTED</th>
-                        <th className="px-4 py-4">CURRENT STATUS</th>
-                        <th className="px-4 py-4">PROGRESS TIMELINE</th>
-                        <th className="px-4 py-4">ACTIONS</th>
+                        <th className="px-4 py-3">Manuscript ID</th>
+                        <th className="px-4 py-3">Title</th>
+                        <th className="px-4 py-3">Date Submitted</th>
+                        <th className="px-4 py-3">Current Status</th>
+                        <th className="px-4 py-3">Progress Timeline</th>
+                        <th className="px-4 py-3">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {filteredItems.map((m) => (
                         <tr key={m.id} className="hover:bg-slate-50 transition">
-                          <td className="px-4 py-4 font-mono text-xs text-slate-500">{m.id}</td>
-                          <td className="px-4 py-4">
-                            <div className="font-semibold text-slate-900">{m.title}</div>
-                            <div className="mt-1 text-xs text-slate-500">By {m.author_name} • Section: Articles • Doc: {m.file_name || 'test.pdf'}</div>
+                          <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.id}</td>
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-slate-900 text-sm">{m.title}</div>
+                            <div className="mt-0.5 text-xs text-slate-500">By {m.author_name} • Section: Articles • Doc: {m.file_name || 'test.pdf'}</div>
                           </td>
-                          <td className="px-4 py-4 text-slate-500 text-xs">{formatDate(m.submitted_at)}</td>
-                          <td className="px-4 py-4">
-                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase text-emerald-700">{m.status.replace(/_/g, ' ')}</span>
+                          <td className="px-4 py-3 text-slate-600 text-sm">{formatDate(m.submitted_at)}</td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold uppercase text-emerald-700">{m.status.replace(/_/g, ' ')}</span>
                           </td>
-                          <td className="px-4 py-4">
-                            <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2 text-xs text-slate-500">
                               {['Intake', 'Evaluation', 'Revision', 'Production', 'Published'].map((step, idx) => {
                                 const activeSteps = ['SUBMITTED', 'EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED'].indexOf(m.status);
                                 const isCompleted = idx <= Math.max(0, activeSteps);
                                 return (
-                                  <span key={step} className={`inline-flex h-3.5 w-3.5 rounded-full ${isCompleted ? 'bg-emerald-600' : 'bg-slate-200'}`} />
+                                  <span key={step} className={`inline-flex h-3 w-3 rounded-full ${isCompleted ? 'bg-emerald-600' : 'bg-slate-200'}`} />
                                 );
                               })}
                             </div>
                           </td>
-                          <td className="px-4 py-4 space-x-2">
+                          <td className="px-4 py-3 space-x-2">
                             <button
                               onClick={() => { setSelectedId(m.id); setView('detail'); }}
-                              className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition"
+                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
                             >
                               View
                             </button>
-                            <button className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition">
+                            <button className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition">
                               Contact
                             </button>
-                            <button className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition">
+                            <button className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition">
                               Delete
                             </button>
                           </td>
