@@ -994,10 +994,10 @@ export default function OjsSubmissionDetail({
             </div>
 
             {/* TWO-COLUMN STACK (Center Column + Right Details Sidebar) */}
-            <div className="w-full flex flex-col lg:flex-row items-start gap-6">
+            <div className="w-full flex flex-col lg:flex-row items-start gap-6 lg:gap-8">
 
               {/* CENTER CORE COLUMN (COLUMN 2) */}
-              <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full lg:max-w-[70%]">
+              <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full lg:min-w-0">
                 
                 {/* Manuscript Detail Banner */}
                 <div className="bg-gradient-to-br from-[#022c22] via-[#047857] to-[#065f46] border border-[#047857]/40 rounded-2xl p-6 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-md text-white">
@@ -1227,9 +1227,9 @@ export default function OjsSubmissionDetail({
                 </div>
 
                 {/* Uploaded Files and Pre-Review Discussions Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
                   {/* Uploaded Files Panel */}
-                  <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left flex flex-col justify-between">
+                  <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left flex flex-col justify-between min-h-[540px]">
                     <div>
                       <input 
                         type="file" 
@@ -1457,134 +1457,71 @@ export default function OjsSubmissionDetail({
                           </div>
                         )}
 
-                        {/* Thread Cards Stack */}
+                        {/* Thread Cards Stack - Real Data from Supabase */}
                         <div className="flex-grow overflow-y-auto mt-4 space-y-3 min-h-0 pr-1">
-                          
-                          {/* Thread 1: Editorial Inquiry (OFFICIAL THREAD) */}
-                          {(activeDiscussionTab === 'ALL' || activeDiscussionTab === 'OFFICIAL') &&
-                           "Editorial Inquiry".toLowerCase().includes(searchQuery.toLowerCase()) && (
-                            <div
-                              onClick={() => setActiveThreadId('thread-editorial-inquiry')}
-                              className="bg-[#f0faf4] border-2 border-[#b8ebd0] hover:bg-[#e2f7eb] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
-                            >
-                              <div className="shrink-0 pt-1">
-                                <Pin className="w-5 h-5 text-[#008751] rotate-45 stroke-[2.5]" />
-                              </div>
-                              <div className="flex-grow space-y-1">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="bg-[#004d2e] text-white text-[9px] font-bold px-2 py-0.5 rounded-md tracking-wider uppercase">
-                                    OFFICIAL THREAD
-                                  </span>
-                                  <Lock className="w-3.5 h-3.5 text-slate-900 stroke-[2.5]" />
-                                </div>
-                                <h4 className="text-[15px] font-bold text-black tracking-tight leading-snug">
-                                  Editorial Inquiry
-                                </h4>
-                                <p className="text-[13px] font-normal text-slate-900 leading-snug line-clamp-1">
-                                  <strong className="text-black font-semibold">Dr. John Smith:</strong> Dear Author, Please confirm that the manuscript complies with the guidelines.
-                                </p>
-                              </div>
-                              <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                <span className="text-[11px] font-semibold text-black font-mono">10:30 AM</span>
-                                <span className="w-5.5 h-5.5 rounded-full bg-[#004d2b] text-white text-[11px] font-bold flex items-center justify-center font-sans mt-1.5">
-                                  2
-                                </span>
-                              </div>
-                            </div>
-                          )}
+                          {manuscriptDetails && manuscriptDetails.discussions && manuscriptDetails.discussions.length > 0 ? (
+                            manuscriptDetails.discussions
+                              .filter(d => d.message.toLowerCase().includes(searchQuery.toLowerCase()))
+                              .map((discussion, idx) => {
+                                const senderProfile = userProfiles.get(discussion.sender_id);
+                                const senderName = senderProfile?.name || 'Unknown';
+                                const senderRole = senderProfile?.role || 'User';
+                                const isOfficial = ['EDITOR', 'COORDINATOR'].includes(senderRole.toUpperCase());
+                                const date = new Date(discussion.created_at);
+                                const displayDate = formatDateTime(discussion.created_at);
 
-                          {/* Thread 2: Technical Check */}
-                          {(activeDiscussionTab === 'ALL') &&
-                           "Technical Check".toLowerCase().includes(searchQuery.toLowerCase()) && (
-                            <div
-                              onClick={() => setActiveThreadId('thread-technical-check')}
-                              className="bg-white border border-emerald-100 hover:border-[#008751] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
-                            >
-                              <div className="shrink-0 pt-0.5">
-                                <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50">
-                                  <Lock className="w-4 h-4 text-[#004d2e] stroke-[2.5]" />
-                                </div>
-                              </div>
-                              <div className="flex-grow space-y-0.5">
-                                <h4 className="text-[15px] font-bold text-black tracking-tight leading-snug">
-                                  Technical Check
-                                </h4>
-                                <p className="text-[13px] font-normal text-slate-900 leading-snug line-clamp-1">
-                                  <strong className="text-black font-semibold">System:</strong> Your file "Manuscript.pdf" has been successfully checked.
-                                </p>
-                              </div>
-                              <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                <span className="text-[11px] font-semibold text-black font-mono">Yesterday</span>
-                                <span className="w-5.5 h-5.5 rounded-full bg-[#004d2b] text-white text-[11px] font-bold flex items-center justify-center font-sans mt-1.5">
-                                  1
-                                </span>
-                              </div>
-                            </div>
-                          )}
+                                // Filter by tab
+                                const shouldShow =
+                                  activeDiscussionTab === 'ALL' ||
+                                  (activeDiscussionTab === 'OFFICIAL' && isOfficial) ||
+                                  (activeDiscussionTab === 'DIRECT' && !isOfficial);
 
-                          {/* Thread 3: Formatting & Style */}
-                          {(activeDiscussionTab === 'ALL' || activeDiscussionTab === 'DIRECT') &&
-                           "Formatting & Style".toLowerCase().includes(searchQuery.toLowerCase()) && (
-                            <div
-                              onClick={() => setActiveThreadId('thread-formatting-style')}
-                              className="bg-white border border-emerald-100 hover:border-[#008751] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
-                            >
-                              <div className="shrink-0 pt-0.5">
-                                <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50">
-                                  <User className="w-4 h-4 text-[#004d2e] stroke-[2.5]" />
-                                </div>
-                              </div>
-                              <div className="flex-grow space-y-0.5">
-                                <h4 className="text-[15px] font-bold text-black tracking-tight leading-snug">
-                                  Formatting & Style
-                                </h4>
-                                <p className="text-[13px] font-normal text-slate-900 leading-snug line-clamp-1">
-                                  <strong className="text-black font-semibold">Editor:</strong> Please ensure all references follow the journal format.
-                                </p>
-                              </div>
-                              <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                <span className="text-[11px] font-semibold text-black font-mono">2 Jun 2026</span>
-                              </div>
-                            </div>
-                          )}
+                                if (!shouldShow) return null;
 
-                          {/* Render custom threads added by user */}
-                          {discussionThreads.length > 0 && (activeDiscussionTab === 'ALL' || activeDiscussionTab === 'DIRECT') && (
-                            discussionThreads
-                              .filter(t => t.subject.toLowerCase().includes(searchQuery.toLowerCase()))
-                              .map(thread => (
-                                <div
-                                  key={thread.id}
-                                  onClick={() => setActiveThreadId(thread.id)}
-                                  className="bg-white border border-emerald-100 hover:border-[#008751] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
-                                >
-                                  <div className="shrink-0 pt-0.5">
-                                    <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50 font-semibold text-xs">
-                                      {thread.initiator ? thread.initiator.substring(0, 2).toUpperCase() : "UT"}
+                                return (
+                                  <div
+                                    key={discussion.id}
+                                    onClick={() => setActiveThreadId(discussion.id)}
+                                    className={`border rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left ${
+                                      isOfficial
+                                        ? 'bg-[#f0faf4] border-2 border-[#b8ebd0] hover:bg-[#e2f7eb]'
+                                        : 'bg-white border border-emerald-100 hover:border-[#008751]'
+                                    }`}
+                                  >
+                                    <div className="shrink-0 pt-0.5">
+                                      {isOfficial ? (
+                                        <Pin className="w-5 h-5 text-[#008751] rotate-45 stroke-[2.5]" />
+                                      ) : (
+                                        <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50 font-semibold text-xs">
+                                          {senderName.substring(0, 2).toUpperCase()}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="flex-grow space-y-1 min-w-0">
+                                      {isOfficial && (
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="bg-[#004d2e] text-white text-[9px] font-bold px-2 py-0.5 rounded-md tracking-wider uppercase">
+                                            {senderRole.toUpperCase()}
+                                          </span>
+                                          <Lock className="w-3.5 h-3.5 text-slate-900 stroke-[2.5]" />
+                                        </div>
+                                      )}
+                                      <h4 className="text-[15px] font-bold text-black tracking-tight leading-snug">
+                                        {senderName}
+                                      </h4>
+                                      <p className="text-[13px] font-normal text-slate-900 leading-snug line-clamp-2 break-words">
+                                        {discussion.message}
+                                      </p>
+                                    </div>
+                                    <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
+                                      <span className="text-[11px] font-semibold text-black font-mono whitespace-nowrap">{displayDate}</span>
                                     </div>
                                   </div>
-                                  <div className="flex-grow space-y-0.5">
-                                    <h4 className="text-[15px] font-semibold text-black tracking-tight leading-snug">
-                                      {thread.subject}
-                                    </h4>
-                                    <p className="text-[13px] font-bold text-slate-950 leading-snug line-clamp-1">
-                                      <strong className="text-black font-semibold">{thread.initiator}:</strong> {thread.messages[0]?.text || "No messages yet."}
-                                    </p>
-                                  </div>
-                                  <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                    <span className="text-[11px] font-semibold text-black font-mono">
-                                      {new Date(thread.createdAt || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                                    </span>
-                                  </div>
-                                </div>
-                              ))
-                          )}
-
-                          {/* Fallback Empty State */}
-                          {((activeDiscussionTab === 'OFFICIAL' && searchQuery !== "" && !"Editorial Inquiry".toLowerCase().includes(searchQuery.toLowerCase())) ||
-                           (activeDiscussionTab === 'DIRECT' && searchQuery !== "" && !"Formatting & Style".toLowerCase().includes(searchQuery.toLowerCase()) && discussionThreads.length === 0)) && (
-                            <div className="text-center py-10 text-slate-900 font-bold text-xs">
-                              No discussions match your filter or search.
+                                );
+                              })
+                          ) : (
+                            <div className="text-center py-10 text-slate-500 font-semibold text-sm">
+                              No discussions yet. Start the conversation!
                             </div>
                           )}
 
@@ -2094,7 +2031,7 @@ export default function OjsSubmissionDetail({
               </div>
 
                {/* RIGHT DETAILS SIDEBAR (COLUMN 3) */}
-              <aside id="ojs-column-right-details-dashboard" className="w-full lg:w-80 shrink-0 space-y-6 text-left leading-normal">
+              <aside id="ojs-column-right-details-dashboard" className="w-full lg:w-96 shrink-0 space-y-6 text-left leading-normal">
                 
                 {/* Submission Timeline */}
                 <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left">
