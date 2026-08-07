@@ -234,3 +234,106 @@ export function formatDateTime(isoDate: string | null): string {
     minute: '2-digit'
   });
 }
+
+/** PHASE 2: Reviewer Management Functions */
+
+export async function assignReviewers(
+  manuscriptId: string,
+  reviewerIds: string[],
+  editorId: string
+): Promise<void> {
+  try {
+    const assignments = reviewerIds.map(reviewerId => ({
+      manuscript_id: manuscriptId,
+      reviewer_id: reviewerId,
+      assigned_by: editorId,
+      assigned_at: new Date().toISOString(),
+      review_status: 'PENDING' as const,
+      review_round: 1
+    }));
+
+    const { error } = await supabase
+      .from('reviewer_assignments')
+      .insert(assignments);
+
+    if (error) throw new Error(error.message);
+  } catch (error) {
+    console.error('Error assigning reviewers:', error);
+    throw error;
+  }
+}
+
+export async function removeReviewerAssignment(
+  assignmentId: string
+): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('reviewer_assignments')
+      .delete()
+      .eq('id', assignmentId);
+
+    if (error) throw new Error(error.message);
+  } catch (error) {
+    console.error('Error removing reviewer assignment:', error);
+    throw error;
+  }
+}
+
+export async function updateReviewerStatus(
+  assignmentId: string,
+  status: 'PENDING' | 'SUBMITTED' | 'REVISION_REQUESTED' | 'REJECTED'
+): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('reviewer_assignments')
+      .update({ review_status: status })
+      .eq('id', assignmentId);
+
+    if (error) throw new Error(error.message);
+  } catch (error) {
+    console.error('Error updating reviewer status:', error);
+    throw error;
+  }
+}
+
+export async function getReviewerFeedback(
+  assignmentId: string
+): Promise<any | null> {
+  try {
+    const { data, error } = await supabase
+      .from('reviewer_assignments')
+      .select('*')
+      .eq('id', assignmentId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw new Error(error.message);
+    return data || null;
+  } catch (error) {
+    console.error('Error fetching reviewer feedback:', error);
+    return null;
+  }
+}
+
+export async function subscribeToReviewerChanges(
+  manuscriptId: string,
+  onUpdate: (reviewers: ReviewerAssignmentRow[]) => void
+): Promise<() => void> {
+  const channel = supabase
+    .channel(`manuscript:${manuscriptId}:reviewers`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'reviewer_assignments',
+        filter: `manuscript_id=eq.${manuscriptId}`
+      },
+      async () => {
+        const reviewers = await getReviewerAssignments(manuscriptId);
+        onUpdate(reviewers);
+      }
+    )
+    .subscribe();
+
+  return () => channel.unsubscribe();
+}

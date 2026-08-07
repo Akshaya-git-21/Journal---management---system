@@ -16,6 +16,10 @@ import {
   getDraftEvaluation,
   submitAssessment,
   publishFinalDecision,
+  assignReviewers,
+  removeReviewerAssignment,
+  updateReviewerStatus,
+  subscribeToReviewerChanges,
   formatDate,
   formatDateTime
 } from '../lib/editorWorkspace';
@@ -373,6 +377,10 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [showDecisionModal, setShowDecisionModal] = useState(false);
   const [decisionType, setDecisionType] = useState<'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION' | 'REJECT' | null>(null);
 
+  // Phase 2: Reviewer Management
+  const [showAssignReviewersModal, setShowAssignReviewersModal] = useState(false);
+  const [selectedReviewerIds, setSelectedReviewerIds] = useState<Set<string>>(new Set());
+
   const handleAcceptAssignment = async () => {
     setBusy(true);
     setError('');
@@ -419,6 +427,54 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     } finally {
       setBusy(false);
     }
+  };
+
+  // Phase 2: Reviewer Management Handlers
+  const handleAssignReviewers = async () => {
+    if (selectedReviewerIds.size === 0) {
+      setError('Please select at least one reviewer');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await assignReviewers(
+        manuscript.id,
+        Array.from(selectedReviewerIds),
+        currentUser?.email || 'unknown'
+      );
+      setShowAssignReviewersModal(false);
+      setSelectedReviewerIds(new Set());
+      onChanged();
+    } catch (e: any) {
+      setError(e.message || 'Failed to assign reviewers');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemoveReviewer = async (assignmentId: string) => {
+    setBusy(true);
+    setError('');
+    try {
+      await removeReviewerAssignment(assignmentId);
+      setReviewerAssignments(prev => prev.filter(r => r.id !== assignmentId));
+      onChanged();
+    } catch (e: any) {
+      setError(e.message || 'Failed to remove reviewer');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleReviewerSelection = (reviewerId: string) => {
+    const newSet = new Set(selectedReviewerIds);
+    if (newSet.has(reviewerId)) {
+      newSet.delete(reviewerId);
+    } else {
+      newSet.add(reviewerId);
+    }
+    setSelectedReviewerIds(newSet);
   };
 
   const tabs = [
@@ -982,7 +1038,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
             <div className="mb-6 bg-white border border-slate-200 rounded-lg p-4">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-xs font-bold text-slate-900 uppercase tracking-wider">REVIEW ROUND</p>
-                <p className="text-emerald-600 font-bold text-sm">Round 1</p>
+                <button
+                  onClick={() => setShowAssignReviewersModal(true)}
+                  className="text-emerald-600 text-xs font-bold hover:text-emerald-700 flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" /> Assign
+                </button>
               </div>
               <div className="space-y-3">
                 <div>
@@ -999,16 +1060,25 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                     {details.reviewerAssignments?.filter(r => r.review_status === 'SUBMITTED').length || 0} / {details.reviewerAssignments?.length || 0}
                   </p>
                 </div>
-                {details.reviewerAssignments && details.reviewerAssignments.length > 0 && (
+                {reviewerAssignments && reviewerAssignments.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-slate-200">
                     <p className="text-xs text-slate-600 mb-2">Assigned Reviewers:</p>
-                    {details.reviewerAssignments.slice(0, 3).map((ra, idx) => (
-                      <p key={idx} className="text-xs text-slate-700 mb-1">
-                        • {details.profiles.get(ra.reviewer_id)?.name || 'Unknown'} ({ra.review_status || 'Pending'})
-                      </p>
+                    {reviewerAssignments.slice(0, 3).map((ra) => (
+                      <div key={ra.id} className="flex items-center justify-between text-xs mb-1 p-1 hover:bg-slate-50 rounded">
+                        <span className="text-slate-700">
+                          • {details.profiles.get(ra.reviewer_id)?.name || 'Unknown'} ({ra.review_status || 'Pending'})
+                        </span>
+                        <button
+                          onClick={() => handleRemoveReviewer(ra.id)}
+                          disabled={busy}
+                          className="text-red-600 hover:text-red-700 text-[10px] disabled:opacity-50"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     ))}
-                    {details.reviewerAssignments.length > 3 && (
-                      <p className="text-xs text-slate-500">+{details.reviewerAssignments.length - 3} more</p>
+                    {reviewerAssignments.length > 3 && (
+                      <p className="text-xs text-slate-500 mt-1">+{reviewerAssignments.length - 3} more</p>
                     )}
                   </div>
                 )}
@@ -1111,6 +1181,73 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : null}
                 Submit Decision
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Phase 2: Assign Reviewers Modal */}
+      {showAssignReviewersModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-slate-200">
+              <h2 className="text-lg font-bold text-slate-900">Assign Peer Reviewers</h2>
+              <p className="text-xs text-slate-500 mt-1">Select reviewers to evaluate this manuscript</p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4">{error}</div>}
+
+              <div>
+                <p className="text-xs font-semibold text-slate-900 mb-3">SUGGESTED REVIEWERS</p>
+                {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
+                  <div className="space-y-2">
+                    {details.suggestedReviewers.map((reviewer) => (
+                      <label key={reviewer.id} className="flex items-start gap-3 p-3 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedReviewerIds.has(reviewer.id)}
+                          onChange={() => toggleReviewerSelection(reviewer.id)}
+                          className="mt-1 w-4 h-4 rounded border-slate-300 text-emerald-600"
+                        />
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-slate-900">{reviewer.name}</p>
+                          <p className="text-xs text-slate-600">{reviewer.email}</p>
+                          {reviewer.expertise && <p className="text-xs text-slate-500 mt-1">Expertise: {reviewer.expertise}</p>}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 text-center py-4">No suggested reviewers available</p>
+                )}
+              </div>
+
+              {selectedReviewerIds.size > 0 && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-emerald-900">{selectedReviewerIds.size} reviewer(s) selected</p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowAssignReviewersModal(false);
+                  setSelectedReviewerIds(new Set());
+                }}
+                className="px-6 py-2 border border-slate-300 text-slate-900 font-bold rounded-lg hover:bg-slate-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={busy || selectedReviewerIds.size === 0}
+                onClick={handleAssignReviewers}
+                className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition disabled:opacity-50"
+              >
+                {busy ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : null}
+                Assign Reviewers
               </button>
             </div>
           </div>
