@@ -407,6 +407,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
+  // Editor Evaluation Workflow
+  const [assignmentAccepted, setAssignmentAccepted] = useState(assignment.status === 'ACCEPTED');
+  const [evaluationSubmitted, setEvaluationSubmitted] = useState(false);
+  const [showAcceptButton, setShowAcceptButton] = useState(assignment.status !== 'ACCEPTED');
+
   // Phase 4: Set up real-time subscriptions for manuscript updates
   useEffect(() => {
     if (!manuscript.id) return;
@@ -475,9 +480,10 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
         1000
       );
 
-      showNotification('success', 'Assignment accepted successfully');
+      setAssignmentAccepted(true);
+      setShowAcceptButton(false);
+      showNotification('success', 'Assignment accepted. You can now proceed with evaluation.');
       onChanged();
-      onBack();
     } catch (e: any) {
       await handleError(e, 'Accept Assignment');
     } finally {
@@ -817,14 +823,23 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
         {/* Header with Breadcrumb */}
         <div className="bg-white border-b border-slate-200 px-8 py-4 shrink-0">
           <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2 text-xs text-slate-600">
-              <span>Dashboard</span>
-              <span>&gt;</span>
-              <span>Editorial Desk</span>
-              <span>&gt;</span>
-              <span>Manuscripts</span>
-              <span>&gt;</span>
-              <span className="font-bold text-slate-900">{manuscript.id}</span>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={onBack}
+                className="text-slate-600 hover:text-slate-900 flex items-center gap-1 text-xs font-bold"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </button>
+              <div className="flex items-center gap-2 text-xs text-slate-600">
+                <span>Dashboard</span>
+                <span>&gt;</span>
+                <span>Editorial Desk</span>
+                <span>&gt;</span>
+                <span>Manuscripts</span>
+                <span>&gt;</span>
+                <span className="font-bold text-slate-900">{manuscript.id}</span>
+              </div>
             </div>
             {/* Editor Profile - Moved to Header */}
             <div className="flex items-center gap-3 bg-slate-50 rounded-lg px-4 py-2 border border-slate-200">
@@ -839,23 +854,35 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
           </div>
           <h1 className="text-lg font-black text-slate-900 mb-1">{manuscript.title || 'Manuscript Title'}</h1>
           <div className="flex items-center gap-3">
-            <span className="bg-emerald-100 text-emerald-700 text-xs px-3 py-1 rounded-full font-bold">{assignment.status || 'Pending'}</span>
-            {assignment.status === 'PENDING' && (
+            {assignmentAccepted ? (
               <>
-                <button
-                  onClick={handleAcceptAssignment}
-                  disabled={busy}
-                  className="text-xs bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700 disabled:bg-slate-300"
-                >
-                  ✓ Accept Assignment
-                </button>
-                <button
-                  onClick={handleDeclineAssignment}
-                  disabled={busy}
-                  className="text-xs bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 disabled:bg-slate-300"
-                >
-                  ✕ Decline Assignment
-                </button>
+                <span className="bg-emerald-100 text-emerald-700 text-xs px-3 py-1 rounded-full font-bold">
+                  ✓ Assignment Accepted
+                </span>
+                {evaluationSubmitted ? (
+                  <span className="bg-blue-100 text-blue-700 text-xs px-3 py-1 rounded-full font-bold">
+                    ✓ Evaluation Submitted
+                  </span>
+                ) : (
+                  <span className="bg-amber-100 text-amber-700 text-xs px-3 py-1 rounded-full font-bold">
+                    ⏳ Evaluation In Progress
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                {assignmentAccepted ? (
+                  <>
+                    <span className="bg-emerald-100 text-emerald-700 text-xs px-3 py-1 rounded-full font-bold">✓ Assignment Accepted</span>
+                    {evaluationSubmitted ? (
+                      <span className="bg-emerald-100 text-emerald-700 text-xs px-3 py-1 rounded-full font-bold">✓ Evaluation Submitted</span>
+                    ) : (
+                      <span className="bg-amber-100 text-amber-700 text-xs px-3 py-1 rounded-full font-bold">⏳ Evaluation In Progress</span>
+                    )}
+                  </>
+                ) : (
+                  <span className="bg-slate-100 text-slate-700 text-xs px-3 py-1 rounded-full font-bold">{assignment.status || 'Pending'}</span>
+                )}
               </>
             )}
           </div>
@@ -864,19 +891,27 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
         {/* Tabs */}
         <div className="bg-white border-b border-slate-200 px-8 flex-shrink-0">
           <div className="flex gap-8">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`px-1 py-4 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
-                  activeTab === tab.id
-                    ? 'text-[#008751] border-[#008751]'
-                    : 'text-slate-600 border-transparent hover:text-slate-900'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+            {tabs.map((tab) => {
+              const isDisabled = tab.id === 'evaluation' && !assignmentAccepted;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => !isDisabled && setActiveTab(tab.id as any)}
+                  disabled={isDisabled}
+                  className={`px-1 py-4 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
+                    isDisabled
+                      ? 'text-slate-400 border-transparent cursor-not-allowed'
+                      : activeTab === tab.id
+                      ? 'text-[#008751] border-[#008751]'
+                      : 'text-slate-600 border-transparent hover:text-slate-900'
+                  }`}
+                  title={isDisabled ? 'Accept assignment first to unlock evaluation' : ''}
+                >
+                  {tab.label}
+                  {isDisabled && <span className="ml-1 text-xs">🔒</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -1176,7 +1211,15 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
             )}
 
             {activeTab === 'evaluation' && (
-              <EditorEvaluationForm assignmentId={assignment.id} onSubmitted={onChanged} />
+              <EditorEvaluationForm
+                assignmentId={assignment.id}
+                onSubmitted={() => {
+                  setEvaluationSubmitted(true);
+                  onChanged();
+                }}
+                isReadOnly={evaluationSubmitted}
+                onDecision={handleEditorDecision}
+              />
             )}
 
             {activeTab === 'reviews' && (
@@ -1412,41 +1455,34 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
             {/* DECISION */}
             <div className="mb-6">
               <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">DECISION</p>
-              {assignment.status === 'COMPLETED' ? (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-                  <p className="text-xs font-semibold text-emerald-700 text-center">✓ Review Complete</p>
-                  <p className="text-xs text-emerald-600 text-center mt-1">Final decision submitted</p>
-                </div>
-              ) : assignment.status === 'DECLINED' ? (
+              {assignment.status === 'DECLINED' ? (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                   <p className="text-xs font-semibold text-red-700 text-center">✕ Assignment Declined</p>
                 </div>
-              ) : (
+              ) : evaluationSubmitted ? (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-emerald-700 text-center">✓ Decision Submitted</p>
+                  <p className="text-xs text-emerald-600 text-center mt-1">Awaiting coordinator action</p>
+                </div>
+              ) : !assignmentAccepted ? (
                 <div className="space-y-2">
                   <button
                     disabled={busy}
-                    onClick={() => handleEditorDecision('ACCEPT')}
+                    onClick={handleAcceptAssignment}
                     className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
-                    <Check className="w-4 h-4" /> Accept Manuscript
+                    <Check className="w-4 h-4" /> Accept Assignment
                   </button>
                   <button
                     disabled={busy}
-                    onClick={() => handleEditorDecision('MINOR_REVISION')}
-                    className="w-full bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
-                    <Plus className="w-4 h-4" /> Request Minor Revision
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() => handleEditorDecision('MAJOR_REVISION')}
-                    className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
-                    <Plus className="w-4 h-4" /> Request Major Revision
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() => handleEditorDecision('REJECT')}
+                    onClick={handleDeclineAssignment}
                     className="w-full text-red-600 text-xs font-bold py-3 rounded-lg hover:bg-red-50 transition flex items-center justify-center gap-2 disabled:opacity-50">
-                    <XIcon className="w-4 h-4" /> Decline Submission
+                    <XIcon className="w-4 h-4" /> Decline Assignment
                   </button>
+                </div>
+              ) : (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-blue-700 text-center">📝 Complete Evaluation</p>
+                  <p className="text-xs text-blue-600 text-center mt-1">Decision buttons at bottom of form</p>
                 </div>
               )}
             </div>
@@ -1689,7 +1725,17 @@ interface EditorEvalState {
   suggestedReviewers: { name: string; email: string; expertise: string }[];
 }
 
-function EditorEvaluationForm({ assignmentId, onSubmitted }: { assignmentId: string; onSubmitted: () => void }) {
+function EditorEvaluationForm({
+  assignmentId,
+  onSubmitted,
+  isReadOnly = false,
+  onDecision
+}: {
+  assignmentId: string;
+  onSubmitted: () => void;
+  isReadOnly?: boolean;
+  onDecision?: (type: 'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION' | 'REJECT') => void;
+}) {
   const [evalData, setEvalData] = useState<EditorEvalState>({
     scientificMerit: 0,
     noveltyInnovation: 0,
@@ -1734,6 +1780,22 @@ function EditorEvaluationForm({ assignmentId, onSubmitted }: { assignmentId: str
     setEvalData(prev => ({
       ...prev,
       suggestedReviewers: [...prev.suggestedReviewers, { name: '', email: '', expertise: '' }]
+    }));
+  };
+
+  const removeReviewer = (index: number) => {
+    setEvalData(prev => ({
+      ...prev,
+      suggestedReviewers: prev.suggestedReviewers.filter((_, i) => i !== index)
+    }));
+  };
+
+  const updateReviewer = (index: number, field: string, value: string) => {
+    setEvalData(prev => ({
+      ...prev,
+      suggestedReviewers: prev.suggestedReviewers.map((r, i) =>
+        i === index ? { ...r, [field]: value } : r
+      )
     }));
   };
 
@@ -1803,10 +1865,11 @@ function EditorEvaluationForm({ assignmentId, onSubmitted }: { assignmentId: str
               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((score) => (
                 <button
                   key={score}
+                  disabled={isReadOnly}
                   onClick={() => updateScore(key as any, score)}
                   className={`w-8 h-8 rounded font-bold text-xs transition ${
                     evalData[key as any] === score ? 'bg-[#008751] text-white' : 'bg-slate-100 hover:bg-slate-200'
-                  }`}
+                  } ${isReadOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   {score}
                 </button>
@@ -1819,44 +1882,129 @@ function EditorEvaluationForm({ assignmentId, onSubmitted }: { assignmentId: str
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
         <h3 className="text-sm font-black text-slate-900 mb-4">QUALITATIVE APPRAISALS</h3>
         <div className="space-y-4">
-          <textarea value={evalData.commentsToAuthors} onChange={(e) => updateText('commentsToAuthors', e.target.value)} placeholder="Comments to Authors" className="w-full text-xs border border-slate-200 rounded px-3 py-2" rows={3} />
-          <textarea value={evalData.strengths} onChange={(e) => updateText('strengths', e.target.value)} placeholder="Strengths" className="w-full text-xs border border-slate-200 rounded px-3 py-2" rows={2} />
-          <textarea value={evalData.weaknesses} onChange={(e) => updateText('weaknesses', e.target.value)} placeholder="Weaknesses" className="w-full text-xs border border-slate-200 rounded px-3 py-2" rows={2} />
-          <textarea value={evalData.mandatoryRevisions} onChange={(e) => updateText('mandatoryRevisions', e.target.value)} placeholder="Mandatory Revisions" className="w-full text-xs border border-slate-200 rounded px-3 py-2" rows={2} />
+          <textarea disabled={isReadOnly} value={evalData.commentsToAuthors} onChange={(e) => updateText('commentsToAuthors', e.target.value)} placeholder="Comments to Authors" className="w-full text-xs border border-slate-200 rounded px-3 py-2 disabled:bg-slate-50 disabled:cursor-not-allowed" rows={3} />
+          <textarea disabled={isReadOnly} value={evalData.strengths} onChange={(e) => updateText('strengths', e.target.value)} placeholder="Strengths" className="w-full text-xs border border-slate-200 rounded px-3 py-2 disabled:bg-slate-50 disabled:cursor-not-allowed" rows={2} />
+          <textarea disabled={isReadOnly} value={evalData.weaknesses} onChange={(e) => updateText('weaknesses', e.target.value)} placeholder="Weaknesses" className="w-full text-xs border border-slate-200 rounded px-3 py-2 disabled:bg-slate-50 disabled:cursor-not-allowed" rows={2} />
+          <textarea disabled={isReadOnly} value={evalData.mandatoryRevisions} onChange={(e) => updateText('mandatoryRevisions', e.target.value)} placeholder="Mandatory Revisions" className="w-full text-xs border border-slate-200 rounded px-3 py-2 disabled:bg-slate-50 disabled:cursor-not-allowed" rows={2} />
         </div>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-sm font-black text-slate-900">SUGGEST PEER REFEREES</h3>
-          <button onClick={addReviewer} className="text-[#008751] text-xs font-bold flex items-center gap-1">
-            <Plus className="w-3 h-3" /> Add
-          </button>
+          {!isReadOnly && (
+            <button onClick={addReviewer} className="text-[#008751] text-xs font-bold flex items-center gap-1">
+              <Plus className="w-3 h-3" /> Add
+            </button>
+          )}
         </div>
         {evalData.suggestedReviewers.length === 0 ? (
           <p className="text-xs text-slate-500 text-center py-4">No reviewers added yet</p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {evalData.suggestedReviewers.map((r, i) => (
-              <div key={i} className="border border-slate-200 rounded p-3">
-                <p className="text-xs font-bold text-slate-900">{r.name}</p>
-                <p className="text-xs text-slate-500">{r.email}</p>
+              <div key={i} className="border border-slate-200 rounded p-3 space-y-2">
+                {isReadOnly ? (
+                  <>
+                    <p className="text-xs font-bold text-slate-900">{r.name}</p>
+                    <p className="text-xs text-slate-600">{r.email}</p>
+                    {r.expertise && <p className="text-xs text-slate-500">Expertise: {r.expertise}</p>}
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={r.name}
+                      onChange={(e) => updateReviewer(i, 'name', e.target.value)}
+                      placeholder="Reviewer Name"
+                      className="w-full text-xs border border-slate-200 rounded px-2 py-1 disabled:bg-slate-50"
+                    />
+                    <input
+                      type="email"
+                      disabled={isReadOnly}
+                      value={r.email}
+                      onChange={(e) => updateReviewer(i, 'email', e.target.value)}
+                      placeholder="Email"
+                      className="w-full text-xs border border-slate-200 rounded px-2 py-1 disabled:bg-slate-50"
+                    />
+                    <input
+                      type="text"
+                      disabled={isReadOnly}
+                      value={r.expertise}
+                      onChange={(e) => updateReviewer(i, 'expertise', e.target.value)}
+                      placeholder="Expertise"
+                      className="w-full text-xs border border-slate-200 rounded px-2 py-1 disabled:bg-slate-50"
+                    />
+                    <button
+                      onClick={() => removeReviewer(i)}
+                      disabled={isReadOnly}
+                      className="text-xs text-red-600 hover:text-red-700 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Remove Reviewer
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>
         )}
       </div>
 
-      <div className="flex gap-3">
-        <button disabled={busy || submitted} onClick={saveDraft} className="flex-1 bg-white border border-slate-300 text-slate-900 text-xs font-bold py-3 rounded-lg disabled:opacity-50">
-          {busy && <Loader2 className="w-4 h-4 animate-spin inline mr-2" />}
-          Save Draft
-        </button>
-        <button disabled={busy || submitted} onClick={submit} className="flex-1 bg-[#008751] text-white text-xs font-bold py-3 rounded-lg disabled:opacity-50">
-          {busy ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : null}
-          {submitted ? 'SUBMITTED' : 'SUBMIT EVALUATION'}
-        </button>
-      </div>
+      {isReadOnly ? (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+          <p className="text-xs font-bold text-emerald-700 text-center">
+            ✓ Evaluation Submitted - Read-Only Mode
+          </p>
+          <p className="text-xs text-emerald-600 text-center mt-1">
+            Your evaluation has been locked. Contact the coordinator if you need to make changes.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-slate-600 mb-2">FINAL DECISION:</div>
+          <button
+            disabled={busy}
+            onClick={() => {
+              saveDraft();
+              setTimeout(() => onDecision?.('ACCEPT'), 500);
+            }}
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            Accept Manuscript
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => {
+              saveDraft();
+              setTimeout(() => onDecision?.('MINOR_REVISION'), 500);
+            }}
+            className="w-full bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertCircle className="w-4 h-4" />}
+            Request Minor Revision
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => {
+              saveDraft();
+              setTimeout(() => onDecision?.('MAJOR_REVISION'), 500);
+            }}
+            className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertCircle className="w-4 h-4" />}
+            Request Major Revision
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => {
+              saveDraft();
+              setTimeout(() => onDecision?.('REJECT'), 500);
+            }}
+            className="w-full text-red-600 hover:bg-red-50 text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <XIcon className="w-4 h-4" />}
+            Reject Manuscript
+          </button>
+        </div>
+      )}
     </div>
   );
 }

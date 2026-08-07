@@ -1,24 +1,20 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Role, ManuscriptStatus } from '../types';
 import {
   ManuscriptRow,
   listManuscripts,
   getManuscript,
-  createDraftManuscript,
-  submitManuscript,
   subscribeToManuscripts
 } from '../lib/workflow';
+import { supabase } from '../lib/supabase';
 import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
-import AuthorRevisionRequest from './AuthorRevisionRequest';
-import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, BookOpen, Globe, Settings, BarChart, AlertCircle } from 'lucide-react';
+import ManuscriptDiscussion from './ManuscriptDiscussion';
+import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, AlertCircle, ChevronDown, Settings, Trash2 } from 'lucide-react';
 
 interface AuthorWorkspaceProps {
   manuscripts?: any[];
-  onSaveManuscript?: (manuscript: any) => void;
-  onSubmitManuscript?: (manuscriptId: string) => void;
-  onDeleteManuscript?: (manuscriptId: string) => void;
-  currentUser?: { name: string; email: string; role: Role } | null;
+  currentUser?: { name: string; email: string; role: Role; id?: string } | null;
   onSignOut?: () => void;
 }
 
@@ -34,17 +30,17 @@ const STATUS_STYLES: Record<ManuscriptStatus, string> = {
   REJECTED: 'bg-red-50 text-red-700 border-red-200',
 };
 
-function StatusBadge({ status }: { status: ManuscriptStatus }) {
-  return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${STATUS_STYLES[status]}`}>
-      {status.replace(/_/g, ' ')}
-    </span>
-  );
-}
+const WORKFLOW_STAGES = ['SUBMITTED', 'EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED'];
+const PROGRESS_STEPS = ['Intake', 'Evaluation', 'Revision', 'Production', 'Published'];
 
 function formatDate(iso: string | null) {
   if (!iso) return '--';
   return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function getProgressTimeline(status: ManuscriptStatus) {
+  const stageIndex = WORKFLOW_STAGES.indexOf(status);
+  return PROGRESS_STEPS.map((_, idx) => idx <= Math.max(0, stageIndex));
 }
 
 export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorkspaceProps) {
@@ -53,30 +49,49 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
-  const [view, setView] = useState<'list' | 'new' | 'detail'>('list');
+  const [view, setView] = useState<'list' | 'new' | 'detail' | 'discussion'>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
+  const [expandedSections, setExpandedSections] = useState({ submissions: true });
 
+  // Load manuscripts for current user
   const load = async () => {
     try {
-      const rows = await listManuscripts();
-      setItems(rows);
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user?.id) {
+        setError('Not authenticated');
+        return;
+      }
+
+      // Fetch manuscripts for this user
+      const { data, error: queryError } = await supabase
+        .from('manuscripts')
+        .select('*')
+        .eq('author_id', userData.user.id)
+        .order('submitted_at', { ascending: false });
+
+      if (queryError) throw queryError;
+      setItems((data || []) as ManuscriptRow[]);
+      setError('');
     } catch (e: any) {
-      setError(e.message);
+      setError(e.message || 'Failed to load manuscripts');
+      console.error('Error loading manuscripts:', e);
     } finally {
       setLoading(false);
     }
   };
 
+  // Filter manuscripts by search
   const filteredItems = items.filter((m) => {
     const query = searchTerm.toLowerCase();
     return (
       m.title.toLowerCase().includes(query) ||
-      m.id.toLowerCase().includes(query) ||
-      m.author_name.toLowerCase().includes(query)
+      m.id.toLowerCase().includes(query)
     );
   });
 
+  // Calculate status counts
   const statusCounts = {
     submitted: items.filter((m) => m.status === 'SUBMITTED').length,
     underReview: items.filter((m) => m.status === 'UNDER_REVIEW').length,
@@ -88,12 +103,14 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
     revisionProcessing: items.filter((m) => ['UNDER_REVIEW', 'AWAITING_DECISION', 'EDITOR_REVIEW'].includes(m.status)).length
   };
 
+  // Setup subscriptions
   useEffect(() => {
     load();
     const unsubscribe = subscribeToManuscripts(load);
     return unsubscribe;
   }, []);
 
+  // Load manuscript details
   useEffect(() => {
     if (!selectedId || view !== 'detail') {
       setSelectedDetail(null);
@@ -109,324 +126,287 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       .finally(() => setDetailLoading(false));
   }, [selectedId, view]);
 
+  // Delete manuscript
+  const handleDelete = async (manuscriptId: string, manuscript: ManuscriptRow) => {
+    // Only allow delete if editor hasn't started review
+    if (['EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED', 'REJECTED'].includes(manuscript.status)) {
+      setError('Cannot delete manuscript once editorial review has begun');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to delete this manuscript?')) return;
+
+    setDeleteLoading(manuscriptId);
+    try {
+      const { error: deleteError } = await supabase
+        .from('manuscripts')
+        .delete()
+        .eq('id', manuscriptId);
+
+      if (deleteError) throw deleteError;
+
+      setItems(items.filter(m => m.id !== manuscriptId));
+      setError('');
+    } catch (e: any) {
+      setError(e.message || 'Failed to delete manuscript');
+    } finally {
+      setDeleteLoading(null);
+    }
+  };
+
   const selected = selectedDetail || items.find((m) => m.id === selectedId) as any || null;
-  const detailPaper = useMemo(() => {
-    if (!selected) return null;
-    return {
-      ...selected,
-      author: selected.author_name || selected.authorName || currentUser?.name || 'Author',
-      receivedAt: selected.submitted_at || selected.uploaded_at || selected.uploadedAt || '08 June 2026',
-      fileName: selected.file_name || selected.fileName,
-      fileSize: selected.file_size || selected.fileSize,
-      uploadedFiles: selected.uploaded_files || selected.uploadedFiles || [],
-      discussions: selected.discussions || selected.discussion_threads || [],
-      reviewers: selected.reviewers || [],
-      stage: selected.stage || '',
-      raw: selected
-    };
-  }, [selected, currentUser?.name]);
 
   if (view === 'new') {
     return (
       <NewSubmissionFlow
         currentUser={currentUser ?? null}
         onCancel={() => { setView('list'); load(); }}
-        onSubmit={(paperObj) => {
-          submitFromWizard(paperObj).catch((e: any) => setError(e.message || 'Could not submit manuscript.'));
-        }}
+        onSubmit={() => { setView('list'); load(); }}
+      />
+    );
+  }
+
+  if (view === 'discussion' && selectedId) {
+    return (
+      <ManuscriptDiscussion
+        manuscriptId={selectedId}
+        onBack={() => { setView('list'); setSelectedId(null); }}
+        currentUser={currentUser}
       />
     );
   }
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 flex flex-col font-sans">
-      <header className="bg-white border-b border-slate-200 px-8 py-3 flex items-center justify-between sticky top-0 z-30">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">My Manuscripts</h1>
-          <p className="text-xs text-slate-500 font-medium mt-0.5">{currentUser?.name} &middot; {currentUser?.email}</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {view !== 'new' && (
+    <div className="w-full min-h-screen bg-slate-100 flex flex-col md:flex-row font-sans">
+      {/* Dark Green Sidebar */}
+      {view === 'list' && (
+        <div className="w-full md:w-64 bg-white md:border-r border-slate-200 p-6 md:min-h-screen md:overflow-y-auto">
+          {/* Profile Card */}
+          <div className="bg-gradient-to-b from-[#1a4038] to-[#0f2e2a] text-white rounded-2xl p-5 mb-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/30 flex items-center justify-center border border-emerald-400/50">
+                <span className="text-lg">👤</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-black text-sm leading-tight">{currentUser?.name || 'Author'}</h3>
+                <p className="text-emerald-200/80 text-xs font-bold uppercase tracking-wide">AUTHOR</p>
+              </div>
+            </div>
+            <div className="space-y-3 border-t border-emerald-800/40 pt-3">
+              <div>
+                <p className="text-emerald-100/70 text-xs uppercase tracking-wider font-semibold mb-1">Active Submissions:</p>
+                <p className="text-2xl font-black text-emerald-300">{items.length}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Menu */}
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-widest font-bold text-slate-400 px-2 mb-3">MY SUBMISSIONS</p>
+            {[
+              { id: 'active', label: 'Active', count: items.filter(m => !['REJECTED', 'PUBLISHED'].includes(m.status)).length, icon: '📤' },
+              { id: 'review', label: 'Under Review', count: statusCounts.underReview, icon: '👀' },
+              { id: 'revisions', label: 'Revisions', count: statusCounts.revisionRequested, icon: '✏️' },
+              { id: 'accepted', label: 'Accepted', count: statusCounts.accepted, icon: '✅' },
+              { id: 'rejected', label: 'Rejected', count: statusCounts.rejected, icon: '❌' },
+              { id: 'published', label: 'Published', count: statusCounts.published, icon: '📰' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all font-semibold text-xs text-slate-700 hover:bg-slate-100"
+              >
+                <div className="flex items-center gap-2">
+                  <span>{item.icon}</span>
+                  <span>{item.label}</span>
+                </div>
+                {item.count > 0 && (
+                  <span className="bg-slate-100 rounded-full px-2 py-0.5 text-[10px] font-bold text-slate-600">{item.count}</span>
+                )}
+              </button>
+            ))}
+
+            <p className="text-xs uppercase tracking-widest font-bold text-slate-400 px-2 mb-3 mt-4">ACTIONS</p>
             <button
-              onClick={() => { setView('new'); setSelectedId(null); }}
-              className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer"
+              onClick={() => setView('new')}
+              className="w-full rounded-lg bg-[#008751] hover:bg-[#007043] text-white px-3 py-2.5 text-left font-semibold text-sm transition"
             >
-              <Plus className="w-4 h-4" /> New Submission
+              + New Submission
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header */}
+        <header className="bg-white border-b border-slate-200 px-6 md:px-8 py-3 flex items-center justify-between sticky top-0 z-30 flex-shrink-0">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">My Manuscripts</h1>
+            <p className="text-xs text-slate-500 font-medium mt-0.5">{currentUser?.name} • {currentUser?.email}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {view !== 'new' && (
+              <button
+                onClick={() => setView('new')}
+                className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4" /> New Submission
+              </button>
+            )}
+            <button onClick={onSignOut} className="text-sm font-semibold text-red-600 hover:text-red-700 px-3 py-1.5 cursor-pointer">
+              Log Out
+            </button>
+          </div>
+        </header>
+
+        {/* Main Content Area */}
+        <main className="flex-1 overflow-y-auto bg-slate-100">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4 m-6 mb-4">
+              {error}
+            </div>
           )}
-          <button onClick={onSignOut} className="text-sm font-semibold text-red-600 hover:text-red-700 px-3 py-1.5 cursor-pointer">
-            Log Out
-          </button>
-        </div>
-      </header>
 
-        <div className="bg-white border-b border-slate-200 px-8 py-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-widest text-slate-500 font-medium">Submission Dashboard</p>
-              <h2 className="text-lg font-semibold text-slate-900 mt-1">Your manuscripts at a glance</h2>
-            </div>
-            <div className="relative w-full lg:max-w-md">
-              <input
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by title, ID, or author"
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
-              />
-            </div>
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
-              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Submitted</p>
-              <p className="mt-2 text-xl font-semibold text-slate-900">{statusCounts.submitted}</p>
-            </div>
-            <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
-              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Under Review</p>
-              <p className="mt-2 text-xl font-semibold text-slate-900">{statusCounts.underReview}</p>
-            </div>
-            <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
-              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Awaiting Decision</p>
-              <p className="mt-2 text-xl font-semibold text-slate-900">{statusCounts.awaitingDecision}</p>
-            </div>
-            <div className="rounded-lg bg-slate-50 border border-slate-200 p-4">
-              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Revisions</p>
-              <p className="mt-2 text-xl font-semibold text-slate-900">{statusCounts.revisionRequested}</p>
-            </div>
-          </div>
-        </div>
+          {view === 'detail' && selected && (
+            <OjsSubmissionDetail
+              paper={selected}
+              onBack={() => { setView('list'); setSelectedId(null); }}
+              currentUser={currentUser}
+            />
+          )}
 
-      <main className={`flex-1 w-full px-0 py-6`}>
-        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">{error}</div>}
-
-        {view === 'list' && (
-          <div className="grid grid-cols-12 gap-6 px-8">
-            <aside className="col-span-12 md:col-span-3 lg:col-span-3 xl:col-span-2 bg-gradient-to-b from-emerald-50 to-emerald-25 border-2 border-emerald-200 rounded-xl p-4 shadow-sm h-fit sticky top-20">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h2 className="text-base font-semibold text-emerald-900">Dashboard</h2>
-                </div>
-                <span className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-emerald-600 text-white text-xs font-semibold">{items.length}</span>
-              </div>
-              <nav className="space-y-1">
+          {view === 'list' && (
+            <div className="p-6 md:p-8 max-w-7xl mx-auto w-full">
+              {/* Stats Cards */}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
                 {[
-                  { label: 'Active', count: items.length, icon: Inbox },
-                  { label: 'Revisions', count: statusCounts.revisionRequested, icon: AlertCircle },
-                  { label: 'Submitted', count: statusCounts.awaitingDecision, icon: Archive },
-                  { label: 'Incomplete', count: items.filter((m) => m.status === 'DRAFT').length, icon: XCircle },
-                  { label: 'Scheduled', count: statusCounts.accepted, icon: Clock },
-                  { label: 'Published', count: statusCounts.published, icon: CheckCircle },
-                  { label: 'Declined', count: statusCounts.rejected, icon: XCircle }
+                  { label: 'Submitted', count: statusCounts.submitted },
+                  { label: 'Under Review', count: statusCounts.underReview },
+                  { label: 'Awaiting Decision', count: statusCounts.awaitingDecision },
+                  { label: 'Revisions', count: statusCounts.revisionRequested }
                 ].map((item) => (
-                  <button
-                    key={item.label}
-                    type="button"
-                    className="w-full flex items-center justify-between gap-2 rounded-lg border-2 border-emerald-200 bg-white hover:bg-emerald-50 px-2.5 py-1.5 text-left text-sm font-medium text-emerald-900 hover:border-emerald-400 transition"
-                  >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <item.icon className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                      <span className="truncate text-sm">{item.label}</span>
-                    </span>
-                    <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-300 flex-shrink-0">{item.count}</span>
-                  </button>
-                ))}
-              </nav>
-              <div className="mt-3 border-t-2 border-emerald-200 pt-2 space-y-1.5">
-                <div className="font-semibold text-emerald-900 text-xs uppercase tracking-wide">Actions</div>
-                <button onClick={() => setView('new')} className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 px-2.5 py-1.5 text-left font-semibold text-white transition text-sm">+ New submission</button>
-                <button onClick={() => alert('Open issues panel placeholder')} className="w-full rounded-lg border-2 border-emerald-300 bg-white hover:bg-emerald-50 px-2.5 py-1.5 text-left text-emerald-700 hover:border-emerald-400 transition text-sm">Issues</button>
-              </div>
-            </aside>
-
-            <div className="col-span-12 md:col-span-9 lg:col-span-9 xl:col-span-10 space-y-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="space-y-1.5">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs uppercase tracking-wide font-semibold text-emerald-700">
-                    <span>/queue/submitted</span>
+                  <div key={item.label} className="rounded-lg bg-white border border-slate-200 p-4 shadow-sm">
+                    <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">{item.label}</p>
+                    <p className="mt-2 text-2xl font-bold text-slate-900">{item.count}</p>
                   </div>
-                  <h2 className="text-lg font-semibold text-slate-900">Active submissions</h2>
-                  <p className="text-sm text-slate-600">Manage your active tasks, review stages, and submission progress.</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => alert('Open filter options')}
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
-                  >
+                ))}
+              </div>
+
+              {/* Search & Title */}
+              <div className="bg-white border border-slate-200 rounded-lg p-4 mb-6 shadow-sm">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs uppercase tracking-wide font-semibold text-emerald-700 mb-2">
+                      <span>/submissions/queue</span>
+                    </div>
+                    <h2 className="text-lg font-semibold text-slate-900">Active submissions</h2>
+                    <p className="text-sm text-slate-600">Manage your submissions and track their progress through the editorial workflow.</p>
+                  </div>
+                  <button className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition">
                     Filters
                   </button>
-                  <button
-                    onClick={() => setView('new')}
-                    className="rounded-lg bg-[#008751] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#007043] transition"
-                  >
-                    + New Submission
-                  </button>
                 </div>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                {[
-                  { label: 'SUBMITTED', count: statusCounts.submitted },
-                  { label: 'UNDER REVIEW', count: statusCounts.underReview },
-                  { label: 'REVISION REQUIRED', count: statusCounts.revisionRequested },
-                  { label: 'REVISION PROCESSING', count: statusCounts.revisionProcessing }
-                ].map((item) => (
-                  <div key={item.label} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                    <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">{item.label}</p>
-                    <p className="mt-2 text-xl font-semibold text-slate-900">{item.count}</p>
-                  </div>
-                ))}
+              {/* Search Box */}
+              <div className="bg-white border border-slate-200 rounded-lg p-4 mb-6 shadow-sm">
+                <input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search by manuscript ID or title..."
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
+                />
               </div>
 
-              <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-sm">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="text-sm font-medium text-slate-600">Search papers, authors...</div>
-                  <div className="relative w-full lg:max-w-md">
-                    <input
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Search papers, authors..."
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
+              {/* Manuscript Table */}
               <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
-                <div className="border-b border-slate-100 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600">Manuscript queue</div>
+                <div className="border-b border-slate-100 bg-slate-50 px-6 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Manuscript Queue</p>
+                </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[900px] text-left text-sm">
-                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600 font-semibold">
-                      <tr>
-                        <th className="px-4 py-3">Manuscript ID</th>
-                        <th className="px-4 py-3">Title</th>
-                        <th className="px-4 py-3">Date Submitted</th>
-                        <th className="px-4 py-3">Current Status</th>
-                        <th className="px-4 py-3">Progress Timeline</th>
-                        <th className="px-4 py-3">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {filteredItems.map((m) => (
-                        <tr key={m.id} className="hover:bg-slate-50 transition">
-                          <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.id}</td>
-                          <td className="px-4 py-3">
-                            <div className="font-medium text-slate-900 text-sm">{m.title}</div>
-                            <div className="mt-0.5 text-xs text-slate-500">By {m.author_name} • Section: Articles • Doc: {m.file_name || 'test.pdf'}</div>
-                          </td>
-                          <td className="px-4 py-3 text-slate-600 text-sm">{formatDate(m.submitted_at)}</td>
-                          <td className="px-4 py-3">
-                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold uppercase text-emerald-700">{m.status.replace(/_/g, ' ')}</span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2 text-xs text-slate-500">
-                              {['Intake', 'Evaluation', 'Revision', 'Production', 'Published'].map((step, idx) => {
-                                const activeSteps = ['SUBMITTED', 'EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED'].indexOf(m.status);
-                                const isCompleted = idx <= Math.max(0, activeSteps);
-                                return (
-                                  <span key={step} className={`inline-flex h-3 w-3 rounded-full ${isCompleted ? 'bg-emerald-600' : 'bg-slate-200'}`} />
-                                );
-                              })}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 space-x-2">
-                            <button
-                              onClick={() => { setSelectedId(m.id); setView('detail'); }}
-                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
-                            >
-                              View
-                            </button>
-                            <button className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition">
-                              Contact
-                            </button>
-                            <button className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition">
-                              Delete
-                            </button>
-                          </td>
+                  {loading ? (
+                    <div className="flex items-center justify-center py-24 text-slate-400">
+                      <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading manuscripts...
+                    </div>
+                  ) : filteredItems.length === 0 ? (
+                    <div className="text-center py-16 px-6">
+                      <FileText className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                      <p className="text-sm font-bold text-slate-600">No manuscripts found</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {searchTerm ? 'Try a different search term' : 'Click "New Submission" to submit your first manuscript.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-sm min-w-[1000px]">
+                      <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600 font-semibold border-b border-slate-200">
+                        <tr>
+                          <th className="px-6 py-3">Manuscript ID</th>
+                          <th className="px-6 py-3">Title</th>
+                          <th className="px-6 py-3">Date Submitted</th>
+                          <th className="px-6 py-3">Current Status</th>
+                          <th className="px-6 py-3">Progress Timeline</th>
+                          <th className="px-6 py-3">Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filteredItems.map((m) => (
+                          <tr key={m.id} className="hover:bg-slate-50 transition">
+                            <td className="px-6 py-4 font-mono text-xs text-slate-500 whitespace-nowrap">{m.id}</td>
+                            <td className="px-6 py-4">
+                              <div className="font-medium text-slate-900 text-sm max-w-xs truncate">{m.title}</div>
+                              <div className="mt-0.5 text-xs text-slate-500">Section: {m.section || 'Articles'}</div>
+                            </td>
+                            <td className="px-6 py-4 text-slate-600 text-sm whitespace-nowrap">{formatDate(m.submitted_at)}</td>
+                            <td className="px-6 py-4">
+                              <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase ${STATUS_STYLES[m.status]}`}>
+                                {m.status.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-1.5">
+                                {getProgressTimeline(m.status).map((completed, idx) => (
+                                  <span
+                                    key={idx}
+                                    className={`inline-flex h-3 w-3 rounded-full transition ${
+                                      completed ? 'bg-[#008751]' : 'bg-slate-300'
+                                    }`}
+                                    title={PROGRESS_STEPS[idx]}
+                                  />
+                                ))}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 space-x-2 whitespace-nowrap">
+                              <button
+                                onClick={() => { setSelectedId(m.id); setView('detail'); }}
+                                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
+                              >
+                                View
+                              </button>
+                              <button
+                                onClick={() => { setSelectedId(m.id); setView('discussion'); }}
+                                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
+                              >
+                                Contact
+                              </button>
+                              <button
+                                onClick={() => handleDelete(m.id, m)}
+                                disabled={deleteLoading === m.id || ['EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED', 'REJECTED'].includes(m.status)}
+                                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {deleteLoading === m.id ? <Loader2 className="w-3 h-3 animate-spin inline" /> : 'Delete'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </div>
             </div>
-          </div>
-        )}
-
-        {view === 'detail' && detailPaper && (
-          <OjsSubmissionDetail
-            paper={detailPaper}
-            onBack={() => { setView('list'); setSelectedId(null); }}
-            currentUser={currentUser}
-          />
-        )}
-      </main>
-    </div>
-  );
-}
-
-function ManuscriptList({ items, loading, onOpen }: { items: ManuscriptRow[]; loading: boolean; onOpen: (id: string) => void }) {
-  if (loading) {
-    return <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>;
-  }
-  if (items.length === 0) {
-    return (
-      <div className="text-center py-24 bg-white border border-dashed border-slate-300 rounded-2xl">
-        <FileText className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-        <p className="text-sm font-bold text-slate-600">No manuscripts yet</p>
-        <p className="text-xs text-slate-400 mt-1">Click "New Submission" to submit your first manuscript.</p>
+          )}
+        </main>
       </div>
-    );
-  }
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-      <table className="w-full text-left text-sm">
-        <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
-          <tr>
-            <th className="px-4 py-3">ID</th>
-            <th className="px-4 py-3">Title</th>
-            <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3">Submitted</th>
-            <th className="px-4 py-3"></th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {items.map((m) => (
-            <tr key={m.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(m.id)}>
-              <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.id}</td>
-              <td className="px-4 py-3 font-bold text-slate-800">{m.title}</td>
-              <td className="px-4 py-3"><StatusBadge status={m.status} /></td>
-              <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(m.submitted_at)}</td>
-              <td className="px-4 py-3 text-right text-[#008751] font-bold text-xs">View &rarr;</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
-
-/** Maps the submission wizard's completed-paper shape onto a real DRAFT
- * manuscript + contributors + suggested reviewers, then submits it for real. */
-async function submitFromWizard(paperObj: any): Promise<void> {
-  const contributors = (paperObj.contributors || []).map((c: any) => ({
-    name: `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-    email: c.email || '',
-    affiliation: c.affiliation || '',
-    role: c.role || (c.isPrincipalContact ? 'Primary Author' : 'Co-Author')
-  }));
-  const suggestedReviewers = (paperObj.reviewerSuggestions || []).map((r: any) => ({
-    name: r.name, email: r.email, note: r.reason || ''
-  }));
-  const id = await createDraftManuscript({
-    title: paperObj.title || 'Untitled Manuscript',
-    abstract: paperObj.abstract || '',
-    references: '',
-    isDoubleBlind: true,
-    coverLetter: paperObj.coverLetter || '',
-    language: paperObj.language || 'en',
-    contributors,
-    suggestedReviewers
-  });
-  await submitManuscript(id);
-}
-
-

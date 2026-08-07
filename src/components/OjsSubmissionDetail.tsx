@@ -843,11 +843,11 @@ export default function OjsSubmissionDetail({
       <aside id="ojs-left-sidebar-navigation" className="w-full md:w-64 bg-white border-r border-[#d1e7dd] flex flex-col shrink-0 p-5 space-y-7 text-left font-sans">
         
         {/* Section A: Workflow headings and items */}
-        <div className="space-y-3">
-          <span className="block text-[11px] font-semibold uppercase tracking-widest text-[#004d2e] font-mono">
+        <div className="space-y-2.5">
+          <span className="block text-[10px] font-semibold uppercase tracking-widest text-[#004d2e] font-mono">
             Workflow
           </span>
-          <nav className="flex flex-col space-y-1">
+          <nav className="flex flex-col space-y-0.5">
             {[
               { id: 'SUBMISSION', label: 'Submission', icon: FileText, badge: null },
               { id: 'REVIEW', label: 'Review', icon: MessageSquare, badge: 2 },
@@ -864,19 +864,19 @@ export default function OjsSubmissionDetail({
                     setActiveTab(item.id);
                     setViewState('DASHBOARD');
                   }}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-all duration-150 ${
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[13px] font-semibold transition-all duration-150 ${
                     isActive
-                      ? 'bg-emerald-100/75 text-[#005a36] border-l-[4px] border-[#008751] shadow-3xs'
+                      ? 'bg-emerald-100/75 text-[#005a36] border-l-[3px] border-[#008751] shadow-2xs'
                       : 'text-slate-900 hover:bg-emerald-50/50 hover:text-emerald-950'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <IconComp className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-700'}`} />
+                  <div className="flex items-center gap-2.5">
+                    <IconComp className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-600'}`} />
                     <span>{item.label}</span>
                   </div>
                   {item.badge !== null && (
-                    <span className={`text-[11px] font-semibold font-mono px-2 py-0.5 rounded-full ${
-                      isActive ? 'bg-[#008751] text-white' : 'bg-slate-200 text-slate-900'
+                    <span className={`text-[10px] font-semibold font-mono px-1.5 py-0.5 rounded-full ${
+                      isActive ? 'bg-[#008751] text-white' : 'bg-slate-200 text-slate-700'
                     }`}>
                       {item.badge}
                     </span>
@@ -888,14 +888,14 @@ export default function OjsSubmissionDetail({
         </div>
 
         {/* Section B: Publication headings and items with checkmarks */}
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           <div className="flex items-center justify-between">
-            <span className="block text-[11px] font-semibold uppercase tracking-widest text-[#004d2e] font-mono">
+            <span className="block text-[10px] font-semibold uppercase tracking-widest text-[#004d2e] font-mono">
               Publication
             </span>
-            <ChevronUp className="w-3.5 h-3.5 text-[#004d2e] font-bold" />
+            <ChevronUp className="w-3 h-3 text-[#004d2e] font-bold" />
           </div>
-          <nav className="flex flex-col space-y-1">
+          <nav className="flex flex-col space-y-0.5">
             {[
               { id: 'TITLE_ABSTRACT', label: 'Title & Abstract', icon: FileText },
               { id: 'CONTRIBUTORS', label: 'Contributors', icon: Globe },
@@ -912,20 +912,20 @@ export default function OjsSubmissionDetail({
                     setActiveTab(item.id);
                     setViewState('DASHBOARD');
                   }}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-all duration-150 ${
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[13px] font-semibold transition-all duration-150 ${
                     isActive
-                      ? 'bg-emerald-100/75 text-[#005a36] border-l-[4px] border-[#008751] shadow-3xs'
+                      ? 'bg-emerald-100/75 text-[#005a36] border-l-[3px] border-[#008751] shadow-2xs'
                       : 'text-slate-900 hover:bg-emerald-50/50 hover:text-emerald-950'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <item.icon className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-700'}`} />
+                  <div className="flex items-center gap-2.5">
+                    <item.icon className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-600'}`} />
                     <span>{item.label}</span>
                   </div>
-                  
-                  {/* Circular check mark badge inside a green ring or indicator */}
-                  <div className="w-4 h-4 rounded-full bg-[#008751] text-white flex items-center justify-center shadow-3xs">
-                    <Check className="w-2.5 h-2.5 stroke-[4.5]" />
+
+                  {/* Circular check mark badge */}
+                  <div className="w-3.5 h-3.5 rounded-full bg-[#008751] text-white flex items-center justify-center shadow-2xs">
+                    <Check className="w-2 h-2 stroke-[3]" />
                   </div>
                 </button>
               );
@@ -934,22 +934,22 @@ export default function OjsSubmissionDetail({
         </div>
 
         {/* Section C: Need Help? guideline box card at the bottom */}
-        <div className="mt-auto pt-4">
-          <div id="ojs-help-box-card" className="border border-slate-200 rounded-xl p-4 bg-white space-y-3 text-left">
+        <div className="mt-auto pt-3">
+          <div id="ojs-help-box-card" className="border border-slate-200 rounded-lg p-3 bg-white space-y-2 text-left">
             <div className="flex items-center gap-2">
-              <HelpCircle className="w-4.5 h-4.5 text-[#008751]" />
-              <strong className="text-sm font-bold text-slate-800">Need Help?</strong>
+              <HelpCircle className="w-4 h-4 text-[#008751]" />
+              <strong className="text-xs font-bold text-slate-800">Need Help?</strong>
             </div>
-            <p className="text-xs text-slate-500 leading-normal">
-              Read our author guidelines or contact editorial support.
+            <p className="text-[11px] text-slate-600 leading-snug">
+              View author guidelines or contact support.
             </p>
             <button
               id="guidelines-button"
               onClick={() => alert("Simulating scholarly writer and peer review workflow directories.")}
-              className="w-full flex items-center justify-center gap-2 py-2 bg-[#f8fcf9] hover:bg-[#edf7f1] border border-slate-200 text-slate-700 text-xs font-bold rounded-lg transition duration-150 cursor-pointer"
+              className="w-full flex items-center justify-center gap-2 py-1.5 bg-[#f8fcf9] hover:bg-[#edf7f1] border border-slate-200 text-slate-700 text-[11px] font-bold rounded-lg transition duration-150 cursor-pointer"
             >
-              <span>View Guidelines</span>
-              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+              <span>Guidelines</span>
+              <ExternalLink className="w-3 h-3 text-slate-400" />
             </button>
           </div>
         </div>
@@ -957,16 +957,25 @@ export default function OjsSubmissionDetail({
       </aside>
 
       {/* ======= MAIN VIEWPORTS: HERO HEADER CONTAINER + DOUBLE COLUMN STACKS ======= */}
-      <div id="ojs-main-panel-content" className="flex-grow flex flex-col p-6 space-y-6 overflow-y-auto w-full">
-        
+      <div id="ojs-main-panel-content" className="flex-grow flex flex-col p-4 space-y-4 overflow-y-auto w-full">
+
         {isSubmissionDashboard ? (
           /* ======================= PREMIUM IMAGE-MATCHING DASHBOARD ======================= */
-          <div className="space-y-6 w-full animate-in fade-in duration-200">
+          <div className="space-y-4 w-full animate-in fade-in duration-200">
+            {/* Back Button */}
+            <button
+              onClick={onBack}
+              className="inline-flex items-center gap-2 text-[#008751] hover:text-[#007043] font-semibold text-sm mb-2 hover:bg-emerald-50 px-2 py-1.5 rounded-lg transition"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Back to Submissions</span>
+            </button>
+
             {/* Top Header Row with dynamic/stat values matching screenshot */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-emerald-200 gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 border-b border-emerald-200 gap-3">
               <div className="text-left">
-                <h1 className="text-[24px] font-semibold text-black tracking-tight leading-none">Submission</h1>
-                <p className="text-[14px] text-[#005e38] mt-1.5 font-medium">Track and manage your manuscript submission.</p>
+                <h1 className="text-[20px] font-semibold text-black tracking-tight leading-none">Submission</h1>
+                <p className="text-[12px] text-[#005e38] mt-1 font-medium">Track and manage your manuscript submission.</p>
               </div>
               <div className="flex items-center gap-3">
                 {/* + New Submission Button */}
@@ -1000,191 +1009,172 @@ export default function OjsSubmissionDetail({
               <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full lg:min-w-0">
                 
                 {/* Manuscript Detail Banner */}
-                <div className="bg-gradient-to-br from-[#022c22] via-[#047857] to-[#065f46] border border-[#047857]/40 rounded-2xl p-6 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-md text-white">
+                <div className="bg-gradient-to-br from-[#022c22] via-[#047857] to-[#065f46] border border-[#047857]/40 rounded-xl p-4 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm text-white">
                   {/* Decorative background radial glow */}
-                  <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-                  
-                  <div className="space-y-2 text-left relative z-10 flex-grow">
-                    <span className="text-emerald-200 text-[13px] font-medium uppercase tracking-widest block font-mono">
+                  <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none -mr-16 -mt-16" />
+
+                  <div className="space-y-1.5 text-left relative z-10 flex-grow">
+                    <span className="text-emerald-200 text-[11px] font-medium uppercase tracking-widest block font-mono">
                       Manuscript ID: #{paper.id || "N/A"}
                     </span>
-                    <h2 className="text-white text-[24px] font-semibold font-sans tracking-tight leading-snug drop-shadow-xs">
-                      {paper.title || "Artificial Intelligence in Healthcare: Opportunities and Challenges"}
+                    <h2 className="text-white text-[18px] font-semibold font-sans tracking-tight leading-snug drop-shadow-xs">
+                      {paper.title || "Artificial Intelligence in Healthcare"}
                     </h2>
-                    
-                    {/* Metadata line */}
-                    <div className="flex flex-wrap items-center gap-x-5 gap-y-3 pt-3 text-[13px] text-emerald-100 font-medium">
-                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
-                        <Calendar className="w-4 h-4 text-emerald-300 shrink-0" />
-                        <span>Submitted On <strong className="text-white font-semibold ml-1 text-[14px]">{paper.receivedAt || "08 June 2026"}</strong></span>
+
+                    {/* Metadata line - compact horizontal layout */}
+                    <div className="flex flex-wrap items-center gap-3 pt-2 text-[11px] text-emerald-100 font-medium">
+                      <div className="flex items-center gap-1.5 bg-black/15 px-2.5 py-1 rounded-lg border border-white/5">
+                        <Calendar className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                        <span>{paper.receivedAt || "08 June 2026"}</span>
                       </div>
-                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
-                        <BookOpen className="w-4 h-4 text-emerald-300 shrink-0" />
-                        <span>Journal <strong className="text-white font-semibold ml-1 text-[14px]">Journal of AI in Medicine</strong></span>
+                      <div className="flex items-center gap-1.5 bg-black/15 px-2.5 py-1 rounded-lg border border-white/5">
+                        <BookOpen className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                        <span>Journal of AI in Medicine</span>
                       </div>
-                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
-                        <User className="w-4 h-4 text-emerald-300 shrink-0" />
-                        <span>Author <strong className="text-white font-semibold ml-1 text-[14px]">{paper.author || "Akshaya G"}</strong></span>
-                      </div>
-                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
-                        <User className="w-4 h-4 text-emerald-300 shrink-0" />
-                        <span>Corresponding Author <strong className="text-white font-semibold ml-1 text-[14px]">{paper.author || "Akshaya G"}</strong></span>
+                      <div className="flex items-center gap-1.5 bg-black/15 px-2.5 py-1 rounded-lg border border-white/5">
+                        <User className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                        <span>{paper.author || "Akshaya G"}</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Current Status sub-card on the right */}
-                  <div className="shrink-0 flex items-center gap-4 relative z-10 bg-white border border-emerald-500/20 p-5 rounded-2xl shadow-lg self-stretch md:self-auto flex-row justify-between md:justify-start">
-                    <div className="space-y-1 text-left">
-                      <span className="text-slate-800 text-[11px] font-semibold uppercase tracking-widest block">Current Status</span>
-                      <span className="bg-[#e6f7ef] text-[#008751] border-2 border-emerald-500/30 px-3.5 py-1.5 rounded-full text-[13px] font-bold inline-flex items-center gap-1.5 shadow-3xs">
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#008751]" />
+                  <div className="shrink-0 flex items-center gap-3 relative z-10 bg-white border border-emerald-500/20 p-3.5 rounded-xl shadow-md self-stretch md:self-auto flex-row justify-between md:justify-start">
+                    <div className="space-y-0.5 text-left">
+                      <span className="text-slate-800 text-[10px] font-semibold uppercase tracking-wider block">Status</span>
+                      <span className="bg-[#e6f7ef] text-[#008751] border border-emerald-500/30 px-3 py-1 rounded-full text-[12px] font-bold inline-flex items-center gap-1 shadow-3xs">
+                        <span className="w-2 h-2 rounded-full bg-[#008751]" />
                         Submitted
                       </span>
                     </div>
-                    
-                    {/* Cute document sheet with green check overlay */}
+
+                    {/* Document icon with check */}
                     <div className="relative">
-                      <div className="w-12 h-14 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-center shadow-xs relative">
-                        <FileText className="w-6 h-6 text-[#008751]" />
-                        <div className="absolute -bottom-1 -right-1 bg-[#008751] text-white rounded-full p-0.5 border-2 border-white shadow-2xs">
-                          <Check className="w-3 h-3 stroke-[3.5]" />
+                      <div className="w-10 h-12 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-center shadow-xs relative">
+                        <FileText className="w-5 h-5 text-[#008751]" />
+                        <div className="absolute -bottom-0.5 -right-0.5 bg-[#008751] text-white rounded-full p-0.5 border-2 border-white shadow-2xs">
+                          <Check className="w-2.5 h-2.5 stroke-[3]" />
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* 4-Metric Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* 4-Metric Grid - Compact, Equal Height */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Card 1: Files */}
-                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
-                      <FolderOpen className="w-5.5 h-5.5 stroke-[2.5]" />
+                  <div className="bg-white border border-emerald-200 rounded-lg p-4 shadow-xs flex flex-col justify-between h-full hover:border-[#008751] hover:shadow-sm transition duration-150">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-[#004d2e] shrink-0 border border-emerald-200">
+                        <FolderOpen className="w-4.5 h-4.5 stroke-[2]" />
+                      </div>
+                      <div className="text-left flex-1 min-w-0">
+                        <span className="text-slate-600 text-[11px] font-semibold uppercase tracking-wider block">Files</span>
+                        <div className="text-xl font-bold text-black mt-0.5">{uploadedFiles.length}</div>
+                        <span className="text-slate-700 text-[10px] block font-medium">Uploaded</span>
+                      </div>
                     </div>
-                    <div className="text-left space-y-0.5">
-                      <span className="text-black text-[13px] font-normal uppercase tracking-wider block">Files</span>
-                      <div className="text-2xl font-semibold text-black leading-none">{uploadedFiles.length}</div>
-                      <span className="text-slate-900 text-[11px] block font-medium">Files Uploaded</span>
-                      <button 
-                        onClick={() => document.getElementById("uploaded-files-card")?.scrollIntoView({ behavior: 'smooth' })}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <span>View Files</span>
-                        <span>→</span>
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => document.getElementById("uploaded-files-card")?.scrollIntoView({ behavior: 'smooth' })}
+                      className="text-[#008751] hover:text-[#007043] text-[10px] font-semibold mt-2 inline-flex items-center gap-0.5"
+                    >
+                      <span>View Files</span>
+                      <span>→</span>
+                    </button>
                   </div>
 
                   {/* Card 2: Discussions */}
-                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
-                      <MessageSquare className="w-5.5 h-5.5 stroke-[2.5]" />
-                    </div>
-                    <div className="text-left space-y-0.5">
-                      <span className="text-black text-[13px] font-normal uppercase tracking-wider block">Discussions</span>
-                      <div className="text-2xl font-semibold text-black leading-none">
-                        {manuscriptDetails?.discussions?.length || 0}
+                  <div className="bg-white border border-emerald-200 rounded-lg p-4 shadow-xs flex flex-col justify-between h-full hover:border-[#008751] hover:shadow-sm transition duration-150">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-[#004d2e] shrink-0 border border-emerald-200">
+                        <MessageSquare className="w-4.5 h-4.5 stroke-[2]" />
                       </div>
-                      <span className="text-slate-900 text-[11px] block font-medium">
-                        {manuscriptDetails?.discussions?.length === 1 ? 'Message' : 'Messages'}
-                      </span>
-                      <button
-                        onClick={() => document.getElementById("discussions-card")?.scrollIntoView({ behavior: 'smooth' })}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <span>{manuscriptDetails?.discussions?.length ? 'Open' : 'Start'}</span>
-                        <span>→</span>
-                      </button>
+                      <div className="text-left flex-1 min-w-0">
+                        <span className="text-slate-600 text-[11px] font-semibold uppercase tracking-wider block">Discussions</span>
+                        <div className="text-xl font-bold text-black mt-0.5">{manuscriptDetails?.discussions?.length || 0}</div>
+                        <span className="text-slate-700 text-[10px] block font-medium">Messages</span>
+                      </div>
                     </div>
+                    <button
+                      onClick={() => document.getElementById("discussions-card")?.scrollIntoView({ behavior: 'smooth' })}
+                      className="text-[#008751] hover:text-[#007043] text-[10px] font-semibold mt-2 inline-flex items-center gap-0.5"
+                    >
+                      <span>{manuscriptDetails?.discussions?.length ? 'Open' : 'Start'}</span>
+                      <span>→</span>
+                    </button>
                   </div>
 
                   {/* Card 3: Editorial Team */}
-                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
-                      <User className="w-5.5 h-5.5 stroke-[2.5]" />
+                  <div className="bg-white border border-emerald-200 rounded-lg p-4 shadow-xs flex flex-col justify-between h-full hover:border-[#008751] hover:shadow-sm transition duration-150">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-[#004d2e] shrink-0 border border-emerald-200">
+                        <User className="w-4.5 h-4.5 stroke-[2]" />
+                      </div>
+                      <div className="text-left flex-1 min-w-0">
+                        <span className="text-slate-600 text-[11px] font-semibold uppercase tracking-wider block">Editorial Team</span>
+                        {manuscriptDetails?.editorAssignments && manuscriptDetails.editorAssignments.length > 0 ? (
+                          <>
+                            <div className="text-sm font-bold text-black mt-0.5 truncate" title={userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id)?.name || 'Assigned'}>
+                              {userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id)?.name || 'Editor'}
+                            </div>
+                            <span className="text-slate-700 text-[10px] block font-medium">Confirmed</span>
+                          </>
+                        ) : (
+                          <>
+                            <div className="text-sm font-bold text-slate-400 mt-0.5">No editor</div>
+                            <span className="text-slate-600 text-[10px] block font-medium">Pending</span>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <div className="text-left space-y-0.5 overflow-hidden">
-                      <span className="text-black text-[13px] font-normal uppercase tracking-wider block">Editorial Team</span>
-                      {manuscriptDetails?.editorAssignments && manuscriptDetails.editorAssignments.length > 0 ? (
-                        <>
-                          <div className="text-sm font-semibold text-black leading-none truncate font-sans" title={userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id)?.name || 'Assigned'}>
-                            {userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id)?.name || 'Editor Assigned'}
-                          </div>
-                          <span className="text-slate-900 text-[11px] block font-medium">
-                            {manuscriptDetails.editorAssignments[0].status === 'ACCEPTED' ? 'Editor Confirmed' : 'Awaiting Acceptance'}
-                          </span>
-                          <button
-                            onClick={() => {
-                              const editor = userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id);
-                              alert(`Editor: ${editor?.name}\nEmail: ${editor?.email}\nStatus: ${manuscriptDetails.editorAssignments[0].status}`);
-                            }}
-                            className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
-                          >
-                            <span>View Details</span>
-                            <span>→</span>
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <div className="text-sm font-semibold text-slate-400">No editor assigned yet</div>
-                          <span className="text-slate-500 text-[11px] block font-medium">Pending assignment</span>
-                        </>
-                      )}
-                    </div>
+                    <button
+                      onClick={() => {
+                        const editor = manuscriptDetails?.editorAssignments?.[0];
+                        if (editor) {
+                          alert(`Editor: ${userProfiles.get(editor.editor_id)?.name}\nStatus: ${editor.status}`);
+                        }
+                      }}
+                      className="text-[#008751] hover:text-[#007043] text-[10px] font-semibold mt-2 inline-flex items-center gap-0.5"
+                    >
+                      <span>Details</span>
+                      <span>→</span>
+                    </button>
                   </div>
 
                   {/* Card 4: Important Dates */}
-                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
-                      <Calendar className="w-5.5 h-5.5 stroke-[2.5]" />
-                    </div>
-                    <div className="text-left space-y-0.5">
-                      <span className="text-black text-[13px] font-normal uppercase tracking-wider block">Important Dates</span>
-                      <div className="text-[11px] font-medium text-slate-900 leading-tight">
-                        <div>
-                          Submitted <strong className="text-black font-semibold">
-                            {manuscriptDetails?.manuscript?.submitted_at
-                              ? formatDate(manuscriptDetails.manuscript.submitted_at)
-                              : '--'}
-                          </strong>
-                        </div>
-                        {manuscriptDetails?.revisions && manuscriptDetails.revisions.length > 0 && (
-                          <div className="mt-0.5">
-                            Last Revision <strong className="text-black font-semibold">
-                              {formatDate(manuscriptDetails.revisions[manuscriptDetails.revisions.length - 1].requested_at)}
-                            </strong>
-                          </div>
-                        )}
+                  <div className="bg-white border border-emerald-200 rounded-lg p-4 shadow-xs flex flex-col justify-between h-full hover:border-[#008751] hover:shadow-sm transition duration-150">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-[#004d2e] shrink-0 border border-emerald-200">
+                        <Calendar className="w-4.5 h-4.5 stroke-[2]" />
                       </div>
-                      <button
-                        onClick={() => {
-                          const dates = manuscriptDetails ? {
-                            submitted: manuscriptDetails.manuscript?.submitted_at ? formatDateTime(manuscriptDetails.manuscript.submitted_at) : 'N/A',
-                            status: manuscriptDetails.manuscript?.status || 'N/A'
-                          } : {};
-                          alert(`Manuscript Timeline:\nSubmitted: ${dates.submitted}\nCurrent Status: ${dates.status}`);
-                        }}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-normal text-[11px] block mt-1 flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <span>View Calendar</span>
-                        <span>→</span>
-                      </button>
+                      <div className="text-left flex-1 min-w-0">
+                        <span className="text-slate-600 text-[11px] font-semibold uppercase tracking-wider block">Dates</span>
+                        <div className="text-[10px] font-medium text-slate-900 mt-0.5 leading-tight">
+                          <div>Submitted: <strong>{manuscriptDetails?.manuscript?.submitted_at ? formatDate(manuscriptDetails.manuscript.submitted_at) : '--'}</strong></div>
+                        </div>
+                      </div>
                     </div>
+                    <button
+                      onClick={() => alert("View full timeline")}
+                      className="text-[#008751] hover:text-[#007043] text-[10px] font-semibold mt-2 inline-flex items-center gap-0.5"
+                    >
+                      <span>Calendar</span>
+                      <span>→</span>
+                    </button>
                   </div>
                 </div>
 
                 {/* Submission Workflow horizontal stepper */}
-                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-6 shadow-xs text-left">
-                  <h3 className="text-black text-[18px] font-semibold tracking-tight mb-6">Submission Workflow</h3>
-                  
+                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl p-4 shadow-xs text-left">
+                  <h3 className="text-black text-[16px] font-semibold tracking-tight mb-4">Submission Workflow</h3>
+
                   <div className="relative flex items-center justify-between">
                     {/* Background connecting line */}
-                    <div className="absolute top-4 left-4 right-4 h-0.5 bg-emerald-200 z-0">
+                    <div className="absolute top-3 left-3 right-3 h-0.5 bg-emerald-200 z-0">
                       {/* Completed progress fill */}
                       <div className="absolute top-0 left-0 w-[20%] h-full bg-[#008751]" />
                     </div>
-                    
+
                     {[
                       { label: "Submitted", sub: "08 Jun 2026", status: "completed" },
                       { label: "Editor Assigned", sub: "In Progress", status: "active" },
@@ -1195,16 +1185,16 @@ export default function OjsSubmissionDetail({
                     ].map((step, idx) => {
                       let circleStyle = "bg-white border-emerald-200 text-[#004d2e]";
                       let labelStyle = "text-slate-800 font-medium";
-                      let subStyle = "text-slate-900 font-normal";
-                      
+                      let subStyle = "text-slate-700 font-normal";
+
                       if (step.status === "completed") {
-                        circleStyle = "bg-[#008751] border-[#008751] text-white shadow-3xs";
-                        labelStyle = "text-black font-bold text-[12px]";
-                        subStyle = "text-slate-800 font-medium text-[11px]";
+                        circleStyle = "bg-[#008751] border-[#008751] text-white shadow-2xs";
+                        labelStyle = "text-black font-bold text-[11px]";
+                        subStyle = "text-slate-800 font-medium text-[10px]";
                       } else if (step.status === "active") {
                         circleStyle = "border-2 border-[#008751] bg-[#eefcf5] text-[#008751] ring-2 ring-[#008751]/10";
-                        labelStyle = "text-[#005a36] font-bold text-[12px] bg-emerald-100/70 px-1.5 py-0.5 rounded border border-emerald-200 shadow-3xs";
-                        subStyle = "text-emerald-800 font-bold text-[11px]";
+                        labelStyle = "text-[#005a36] font-bold text-[11px] bg-emerald-100/70 px-1.5 py-0.5 rounded border border-emerald-200 shadow-2xs";
+                        subStyle = "text-emerald-800 font-bold text-[10px]";
                       } else {
                         circleStyle = "bg-slate-50 border-emerald-100 text-slate-500";
                         labelStyle = "text-slate-900 font-medium text-[11px]";
@@ -1213,17 +1203,17 @@ export default function OjsSubmissionDetail({
                       
                       return (
                         <div key={idx} className="relative z-10 flex flex-col items-center flex-1 text-center">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 text-xs transition duration-150 ${circleStyle}`}>
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center border-2 text-xs transition duration-150 ${circleStyle}`}>
                             {step.status === "completed" ? (
-                              <Check className="w-4 h-4 stroke-[4]" />
+                              <Check className="w-3.5 h-3.5 stroke-[4]" />
                             ) : step.status === "active" ? (
-                              <span className="w-2.5 h-2.5 rounded-full bg-[#008751]" />
+                              <span className="w-2 h-2 rounded-full bg-[#008751]" />
                             ) : (
-                              <span className="w-2 h-2 bg-slate-300 rounded-full" />
+                              <span className="w-1.5 h-1.5 bg-slate-300 rounded-full" />
                             )}
                           </div>
-                          <span className={`text-[10px] sm:text-[11px] mt-2 block tracking-tight ${labelStyle}`}>{step.label}</span>
-                          <span className={`text-[9px] sm:text-[10px] mt-0.5 block ${subStyle}`}>{step.sub}</span>
+                          <span className={`text-[9px] sm:text-[10px] mt-1.5 block tracking-tight ${labelStyle}`}>{step.label}</span>
+                          <span className={`text-[8px] sm:text-[9px] mt-0.5 block ${subStyle}`}>{step.sub}</span>
                         </div>
                       );
                     })}
@@ -1231,67 +1221,67 @@ export default function OjsSubmissionDetail({
                 </div>
 
                 {/* Uploaded Files and Pre-Review Discussions Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full">
                   {/* Uploaded Files Panel */}
-                  <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left flex flex-col justify-between min-h-[540px]">
+                  <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl p-4 shadow-xs text-left flex flex-col justify-between min-h-[500px]">
                     <div>
-                      <input 
-                        type="file" 
-                        ref={fileInputRef} 
-                        onChange={handleRealFileUpload} 
-                        className="hidden" 
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleRealFileUpload}
+                        className="hidden"
                       />
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3 border-emerald-100">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b pb-2.5 border-emerald-100">
                         <div className="flex items-center gap-2">
-                          <h3 className="text-black text-[18px] font-semibold tracking-tight">Uploaded Files</h3>
-                          <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                            Supabase Connected
+                          <h3 className="text-black text-[16px] font-semibold tracking-tight">Uploaded Files</h3>
+                          <span className="text-[9px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            Synced
                           </span>
                         </div>
-                        
+
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isUploading}
-                            className="border border-emerald-600 bg-[#008751] hover:bg-[#007043] text-white text-[13px] font-bold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer shadow-3xs disabled:opacity-50"
+                            className="border border-emerald-600 bg-[#008751] hover:bg-[#007043] text-white text-[12px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer shadow-2xs disabled:opacity-50"
                           >
-                            <Plus className="w-4 h-4 text-white stroke-[3]" />
-                            <span>{isUploading ? "Uploading..." : "Upload New File"}</span>
+                            <Plus className="w-3.5 h-3.5 text-white stroke-[3]" />
+                            <span className="hidden sm:inline">{isUploading ? "Uploading..." : "Upload"}</span>
+                            <span className="sm:hidden">Upload</span>
                           </button>
-                          
+
                           <button
                             onClick={() => handleSimulateUpload(false, true)}
-                            title="Simulate adding sample file"
-                            className="border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[#005a36] text-[12px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-3xs"
+                            title="Add demo file"
+                            className="border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[#005a36] text-[11px] font-bold px-2 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-2xs"
                           >
                             <span>+ Demo</span>
                           </button>
                         </div>
                       </div>
                       
-                      <div className="mt-4 overflow-x-auto rounded-xl border border-emerald-50">
+                      <div className="mt-3 overflow-x-auto rounded-lg border border-emerald-100">
                         <table className="w-full text-left text-xs border-collapse">
                           <thead>
-                            <tr className="text-[13px] font-normal uppercase tracking-wider text-[#004d2e] border-b border-emerald-200 bg-emerald-50/50">
-                              <th className="p-3 font-bold">File Name</th>
-                              <th className="p-3 font-bold">Type</th>
-                              <th className="p-3 font-bold">Size</th>
-                              <th className="p-3 font-bold">Uploaded On</th>
-                              <th className="p-3 text-center font-bold">Actions</th>
+                            <tr className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 border-b border-emerald-100 bg-slate-50">
+                              <th className="px-3 py-2 font-bold">Name</th>
+                              <th className="px-3 py-2 font-bold">Type</th>
+                              <th className="px-3 py-2 font-bold">Size</th>
+                              <th className="px-3 py-2 font-bold">Date</th>
+                              <th className="px-3 py-2 text-center font-bold">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-emerald-50 bg-white">
                             {uploadedFiles.map((file, i) => {
-                              // Icon coloring depending on file type extension
                               let fileIconColor = "text-rose-600";
                               if (file.name.endsWith(".docx")) fileIconColor = "text-blue-600";
                               else if (file.name.endsWith(".zip")) fileIconColor = "text-amber-600";
-                              
+
                               return (
-                                <tr key={file.id || i} className="hover:bg-emerald-50/30 transition">
-                                  <td className="p-3">
-                                    <button 
+                                <tr key={file.id || i} className="hover:bg-emerald-50/50 transition">
+                                  <td className="px-3 py-2">
+                                    <button
                                       onClick={() => {
                                         setPreviewFileName(file.name);
                                         setPreviewFileType(file.type || 'Document');
@@ -1300,40 +1290,40 @@ export default function OjsSubmissionDetail({
                                       }}
                                       className="flex items-center gap-2 max-w-[150px] sm:max-w-none text-left hover:underline cursor-pointer group"
                                     >
-                                      <FileText className={`w-4.5 h-4.5 ${fileIconColor} shrink-0 stroke-[2]`} />
-                                      <span className="text-[14px] font-semibold text-black truncate group-hover:text-[#008751]" title={file.name}>{file.name}</span>
+                                      <FileText className={`w-4 h-4 ${fileIconColor} shrink-0 stroke-[2]`} />
+                                      <span className="text-[12px] font-semibold text-black truncate group-hover:text-[#008751]" title={file.name}>{file.name}</span>
                                     </button>
                                   </td>
-                                  <td className="p-3 text-[14px] font-medium text-slate-900">{file.type}</td>
-                                  <td className="p-3 text-[14px] font-medium text-slate-950 font-mono">{file.size}</td>
-                                  <td className="p-3 text-[14px] font-medium text-slate-950 font-mono">{file.date}</td>
-                                  <td className="p-3">
-                                    <div className="flex items-center justify-center gap-1.5">
-                                      <button 
+                                  <td className="px-3 py-2 text-[12px] font-medium text-slate-700">{file.type}</td>
+                                  <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.size}</td>
+                                  <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.date}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <button
                                         onClick={() => {
                                           setPreviewFileName(file.name);
                                           setPreviewFileType(file.type || 'Document');
                                           setPreviewFileSize(file.size || '1.2 MB');
                                           setPreviewModalOpen(true);
                                         }}
-                                        className="p-1.5 hover:bg-emerald-50 rounded text-slate-900 hover:text-[#008751] transition border border-transparent hover:border-emerald-200 cursor-pointer"
-                                        title="View file"
+                                        className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
+                                        title="View"
                                       >
-                                        <Eye className="w-4 h-4" />
+                                        <Eye className="w-3.5 h-3.5" />
                                       </button>
-                                      <a 
-                                        href={file.url || '#'} 
+                                      <a
+                                        href={file.url || '#'}
                                         download={file.name}
                                         onClick={(e) => {
                                           if (!file.url) {
                                             e.preventDefault();
-                                            alert(`Downloading document file: ${file.name}`);
+                                            alert(`Downloading: ${file.name}`);
                                           }
                                         }}
-                                        className="p-1.5 hover:bg-emerald-50 rounded text-slate-900 hover:text-[#008751] transition border border-transparent hover:border-emerald-200 cursor-pointer"
-                                        title="Download file"
+                                        className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
+                                        title="Download"
                                       >
-                                        <Download className="w-4.5 h-4.5" />
+                                        <Download className="w-3.5 h-3.5" />
                                       </a>
                                     </div>
                                   </td>
@@ -1345,13 +1335,13 @@ export default function OjsSubmissionDetail({
                       </div>
                     </div>
  
-                    <div className="border-t pt-4 border-emerald-100 mt-4">
+                    <div className="border-t pt-3 border-emerald-100 mt-3">
                       <button
                         onClick={() => alert("Downloading all matching document publication files recursively as a single zip file.")}
-                        className="inline-flex items-center gap-2 text-[13px] font-bold text-[#008751] hover:text-[#007043] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-4 py-2 rounded-xl transition cursor-pointer shadow-3xs"
+                        className="inline-flex items-center gap-2 text-[12px] font-bold text-[#008751] hover:text-[#007043] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg transition cursor-pointer shadow-2xs"
                       >
-                        <Download className="w-4.5 h-4.5 text-[#008751] stroke-[2.5]" />
-                        <span>Download All Files</span>
+                        <Download className="w-3.5 h-3.5 text-[#008751] stroke-[2]" />
+                        <span>Download All</span>
                       </button>
                     </div>
                   </div>
@@ -1361,33 +1351,32 @@ export default function OjsSubmissionDetail({
                     
                     {activeThreadId === null ? (
                       /* ========== DISCUSSION FORUM THREAD LIST (SECOND IMAGE) ========== */
-                      <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl overflow-hidden shadow-xs text-left p-5 flex flex-col justify-between h-[540px] relative">
-                        
+                      <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl overflow-hidden shadow-xs text-left p-4 flex flex-col justify-between h-[500px] relative">
+
                         {/* Header Row */}
-                        <div className="flex items-center justify-between shrink-0">
+                        <div className="flex items-center justify-between shrink-0 gap-2">
                           <div className="flex items-center gap-2">
-                            <span className="w-3 h-3 rounded-full bg-[#008751]"></span>
-                            <h3 className="text-black text-[18px] font-semibold tracking-tight">
+                            <span className="w-2.5 h-2.5 rounded-full bg-[#008751]"></span>
+                            <h3 className="text-black text-[16px] font-semibold tracking-tight">
                               Discussions
                             </h3>
-                            <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
-                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                              Supabase Synced
+                            <span className="text-[9px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                              Synced
                             </span>
                           </div>
-                          
+
                           <button
                             onClick={() => setViewState('ADD_DISCUSSION')}
-                            className="bg-[#eefcf4] border-2 border-[#008751]/30 text-[#004d2e] hover:bg-[#e1f9eb] px-4 py-2 rounded-xl text-[14px] font-bold flex items-center gap-1.5 cursor-pointer transition shadow-3xs"
+                            className="bg-[#eefcf4] border border-[#008751]/30 text-[#004d2e] hover:bg-[#e1f9eb] px-3 py-1.5 rounded-lg text-[12px] font-bold flex items-center gap-1 cursor-pointer transition shadow-2xs"
                           >
-                            <Plus className="w-4 h-4 text-[#008751] stroke-[3]" />
-                            <span>New Discussion</span>
+                            <Plus className="w-3.5 h-3.5 text-[#008751] stroke-[3]" />
+                            <span className="hidden sm:inline">New</span>
                           </button>
                         </div>
 
                         {/* Tabs Row */}
-                        <div className="flex items-center justify-between border-b border-emerald-100 pb-0.5 mt-4 shrink-0">
-                          <div className="flex gap-4 text-[14px] font-semibold text-slate-800">
+                        <div className="flex items-center justify-start border-b border-emerald-100 pb-2 mt-3 shrink-0 gap-4 text-[12px] font-semibold text-slate-700">
                             <button
                               onClick={() => setActiveDiscussionTab('ALL')}
                               className={`pb-2.5 px-0.5 relative cursor-pointer ${
@@ -1446,7 +1435,6 @@ export default function OjsSubmissionDetail({
                               <Filter className="w-4 h-4 stroke-[2.5]" />
                             </button>
                           </div>
-                        </div>
 
                         {/* Search field if active */}
                         {showSearch && (

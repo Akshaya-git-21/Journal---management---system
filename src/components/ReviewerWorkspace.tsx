@@ -218,39 +218,110 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
 }
 
 function ManuscriptList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) => void }) {
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  const handleDownload = async (e: React.MouseEvent, manuscriptId: string) => {
+    e.stopPropagation();
+    setDownloading(manuscriptId);
+    try {
+      // In a real implementation, this would download the manuscript file
+      // For now, just show a success message
+      setTimeout(() => {
+        alert(`Downloading manuscript ${manuscriptId}...`);
+        setDownloading(null);
+      }, 1000);
+    } catch (error) {
+      console.error('Download failed:', error);
+      setDownloading(null);
+    }
+  };
+
   if (rows.length === 0) {
     return <div className="text-center py-16 bg-white border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">No assignments in this category.</div>;
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {rows.map(({ manuscript, assignment }) => (
         <div
           key={manuscript.id}
-          onClick={() => onOpen(manuscript.id)}
-          className="bg-white border border-slate-200 rounded-xl p-5 hover:border-[#008751] hover:shadow-md transition-all cursor-pointer"
+          className="bg-white border border-slate-200 rounded-xl p-6 hover:border-[#008751] hover:shadow-lg transition-all"
         >
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start justify-between gap-6 mb-4">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2">
-                <span className="font-mono text-xs text-slate-400">{manuscript.id}</span>
-                <span className="px-2 py-1 rounded text-xs font-bold bg-amber-100 text-amber-700">
-                  {assignment.status === 'INVITED' ? 'INVITATION' : 'ACCEPTED FOR REVIEW'}
+                <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">{manuscript.id}</span>
+                <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                  assignment.status === 'INVITED' ? 'bg-amber-100 text-amber-700' :
+                  assignment.status === 'ACCEPTED' ? 'bg-blue-100 text-blue-700' :
+                  assignment.status === 'SUBMITTED' ? 'bg-emerald-100 text-emerald-700' :
+                  'bg-red-100 text-red-700'
+                }`}>
+                  {assignment.status === 'INVITED' ? 'ASSIGNMENT STATUS: INVITED' :
+                   assignment.status === 'ACCEPTED' ? 'ASSIGNMENT STATUS: ACCEPTED FOR REVIEW' :
+                   assignment.status === 'SUBMITTED' ? 'REVIEW SUBMITTED' :
+                   'DECLINED'}
                 </span>
               </div>
-              <h3 className="font-black text-base text-slate-900 mb-2 leading-snug">{manuscript.title}</h3>
-              <p className="text-sm text-slate-600 leading-relaxed">{manuscript.abstract?.substring(0, 150)}...</p>
-              {assignment.status === 'ACCEPTED' && (
-                <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-                  <p className="text-xs font-bold text-emerald-800">⚙️ Reviewer Evaluation Pending Submission</p>
-                  <p className="text-xs text-emerald-700 mt-1">This manuscript is waiting for your manual scholarly critique. Please review the blinded PDF galley proof thoroughly and compile your assessment score indices, recommendation and reports.</p>
+              <h3 className="font-black text-lg text-slate-900 mb-2 leading-tight">{manuscript.title}</h3>
+              <p className="text-sm text-slate-600 leading-relaxed mb-3">{manuscript.abstract?.substring(0, 200)}...</p>
+
+              {/* Metadata Row */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mb-4 pb-4 border-t border-slate-100 pt-4">
+                <div>
+                  <p className="text-slate-500 font-semibold mb-1">Manuscript Status</p>
+                  <p className="text-slate-900 font-bold">{manuscript.status?.replace(/_/g, ' ')}</p>
                 </div>
+                <div>
+                  <p className="text-slate-500 font-semibold mb-1">Double-Blind Status</p>
+                  <p className="text-emerald-700 font-bold">🔒 Double-Blind Seal Active</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 font-semibold mb-1">Assigned Date</p>
+                  <p className="text-slate-900 font-bold">{assignment.assigned_at ? new Date(assignment.assigned_at).toLocaleDateString() : 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 font-semibold mb-1">Due Date</p>
+                  <p className="text-red-700 font-bold">{assignment.due_at ? new Date(assignment.due_at).toLocaleDateString() : 'TBD'}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons Column */}
+            <div className="flex flex-col gap-2 min-w-max">
+              <button
+                onClick={(e) => handleDownload(e, manuscript.id)}
+                disabled={downloading === manuscript.id}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all disabled:opacity-50 whitespace-nowrap flex items-center gap-1.5"
+              >
+                {downloading === manuscript.id ? <Loader2 className="w-3 h-3 animate-spin" /> : '📥'}
+                Download Manuscript
+              </button>
+              {(assignment.status === 'INVITED' || assignment.status === 'ACCEPTED') && (
+                <button
+                  onClick={() => onOpen(manuscript.id)}
+                  className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white font-bold text-xs rounded-lg transition-all whitespace-nowrap"
+                >
+                  {assignment.status === 'INVITED' ? 'Accept/Decline' : 'Open Evaluation'}
+                </button>
+              )}
+              {assignment.status === 'SUBMITTED' && (
+                <button
+                  onClick={() => onOpen(manuscript.id)}
+                  className="px-4 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 font-bold text-xs rounded-lg transition-all whitespace-nowrap"
+                >
+                  View Review
+                </button>
               )}
             </div>
-            <div className="text-right">
-              <span className="text-[#008751] font-bold text-sm">Open →</span>
-            </div>
           </div>
+
+          {assignment.status === 'ACCEPTED' && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-xs font-bold text-blue-900">📝 Review Evaluation Pending Submission</p>
+              <p className="text-xs text-blue-800 mt-1">This manuscript is waiting for your manual scholarly critique. Please review the blinded PDF thoroughly and compile your assessment score indices, recommendation and reports.</p>
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -261,12 +332,27 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
   const { manuscript, assignment } = row;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [downloading, setDownloading] = useState(false);
 
   const respond = async (accept: boolean) => {
     setBusy(true); setError('');
     try { await respondToReviewInvite(assignment.id, accept); onChanged(); }
     catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
+  };
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      // In a real implementation, this would download the manuscript file from storage
+      setTimeout(() => {
+        alert(`Downloading manuscript ${manuscript.id}...`);
+        setDownloading(false);
+      }, 1000);
+    } catch (e: any) {
+      setError('Download failed: ' + e.message);
+      setDownloading(false);
+    }
   };
 
   return (
@@ -277,13 +363,39 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
 
       <div className="bg-white border border-slate-200 rounded-xl p-6">
         <div className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <p className="font-mono text-xs text-slate-400">{manuscript.id}</p>
-            <h2 className="text-lg font-black text-slate-900 mt-1">{manuscript.title}</h2>
+          <div className="flex-1">
+            <p className="font-mono text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded w-fit">{manuscript.id}</p>
+            <h2 className="text-lg font-black text-slate-900 mt-2">{manuscript.title}</h2>
+            <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
+              <div>
+                <p className="text-xs text-slate-500 font-semibold">Manuscript Status</p>
+                <p className="text-sm font-bold text-slate-900">{manuscript.status.replace(/_/g, ' ')}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 font-semibold">Double-Blind</p>
+                <p className="text-sm font-bold text-emerald-700">🔒 Active</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 font-semibold">Assignment Status</p>
+                <p className={`text-sm font-bold ${
+                  assignment.status === 'INVITED' ? 'text-amber-700' :
+                  assignment.status === 'ACCEPTED' ? 'text-blue-700' :
+                  assignment.status === 'SUBMITTED' ? 'text-emerald-700' :
+                  'text-red-700'
+                }`}>
+                  {assignment.status}
+                </p>
+              </div>
+            </div>
           </div>
-          <span className="px-2.5 py-1 rounded text-xs font-bold bg-amber-100 text-amber-700">
-            {manuscript.status.replace(/_/g, ' ')}
-          </span>
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all disabled:opacity-50 whitespace-nowrap flex items-center gap-1.5"
+          >
+            {downloading ? <Loader2 className="w-3 h-3 animate-spin" /> : '📥'}
+            Download PDF
+          </button>
         </div>
         <p className="text-sm text-slate-600 leading-relaxed">{manuscript.abstract}</p>
       </div>
@@ -292,9 +404,10 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
 
       {assignment.status === 'INVITED' && (
         <div className="bg-white border border-slate-200 rounded-xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-3">Accept or Decline Review Invitation</h3>
-          <div className="flex gap-2">
-            <button disabled={busy} onClick={() => respond(true)} className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2.5 rounded-lg cursor-pointer disabled:opacity-50 transition-all">
+          <h3 className="text-sm font-black text-slate-900 mb-4">📋 Accept or Decline Review Invitation</h3>
+          <p className="text-xs text-slate-600 mb-4">Do you accept this peer review invitation? You can decline if this manuscript is outside your area of expertise or you have a conflict of interest.</p>
+          <div className="flex gap-3">
+            <button disabled={busy} onClick={() => respond(true)} className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-5 py-3 rounded-lg cursor-pointer disabled:opacity-50 transition-all flex-1">
               <Check className="w-4 h-4" /> ACCEPT REVIEW INVITATION
             </button>
             <button disabled={busy} onClick={() => respond(false)} className="flex items-center gap-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold px-4 py-2.5 rounded-lg cursor-pointer disabled:opacity-50 transition-all">
@@ -309,11 +422,85 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
       )}
 
       {assignment.status === 'SUBMITTED' && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6 text-xs text-emerald-800 space-y-2">
-          <p className="font-black text-sm">✓ Review Submitted</p>
-          <p><strong>Recommendation:</strong> {assignment.recommendation?.replace(/_/g, ' ')}</p>
-          <p><strong>Comments to Author:</strong> {assignment.comments_to_author}</p>
-          <p><strong>Comments to Editor:</strong> {assignment.comments_to_editor}</p>
+        <div className="space-y-4">
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <p className="font-black text-sm text-emerald-900">✓ Review Submitted</p>
+                <p className="text-xs text-emerald-700 mt-1">Your review has been successfully submitted and locked for editing.</p>
+              </div>
+              <span className="bg-emerald-200 text-emerald-900 px-3 py-1 rounded-full text-xs font-bold">READ-ONLY</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              <div>
+                <p className="text-emerald-700 font-semibold mb-1">Submitted At</p>
+                <p className="text-emerald-900 font-bold">{assignment.submitted_at ? new Date(assignment.submitted_at).toLocaleString() : 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-emerald-700 font-semibold mb-1">Recommendation</p>
+                <p className="text-emerald-900 font-bold">{assignment.recommendation?.replace(/_/g, ' ') || 'N/A'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-xl p-6">
+            <h3 className="text-sm font-black text-slate-900 mb-4">📋 Review Details (Read-Only)</h3>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-900 mb-2">Scores</label>
+                {assignment.scores && (
+                  <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded">
+                    {Object.entries(assignment.scores).map(([key, value]) => (
+                      <div key={key} className="flex justify-between">
+                        <span className="text-slate-600">{key.replace(/([A-Z])/g, ' $1')}</span>
+                        <span className="font-bold text-slate-900">{value}/10</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-900 mb-2">Comments to Author</label>
+                <div className="p-3 bg-slate-50 rounded border border-slate-200 text-xs text-slate-900 min-h-20">
+                  {assignment.comments_to_author || 'No comments provided'}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-900 mb-2">Strengths</label>
+                  <div className="p-3 bg-emerald-50 rounded border border-emerald-200 text-xs text-emerald-900 min-h-20">
+                    {assignment.strengths || 'No strengths noted'}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-900 mb-2">Weaknesses</label>
+                  <div className="p-3 bg-orange-50 rounded border border-orange-200 text-xs text-orange-900 min-h-20">
+                    {assignment.weaknesses || 'No weaknesses noted'}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-900 mb-2">Mandatory Revisions</label>
+                <div className="p-3 bg-slate-50 rounded border border-slate-200 text-xs text-slate-900 min-h-20">
+                  {assignment.mandatory_revisions || 'No revisions requested'}
+                </div>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <label className="block text-xs font-bold text-blue-900 mb-2">📋 Confidential Editor Comments</label>
+                <div className="p-3 bg-white rounded border border-blue-200 text-xs text-slate-900 min-h-20">
+                  {assignment.comments_to_editor || 'No confidential comments provided'}
+                </div>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-500 italic mt-4">This review is locked and cannot be edited. Contact the coordinator if you need to make changes.</p>
+          </div>
         </div>
       )}
     </div>
@@ -322,12 +509,12 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
 
 interface ScoreState {
   scientificMerit: number; noveltyInnovation: number; methodologyQuality: number;
-  literatureAdequacy: number; ethicalCompliance: number; dataReliability: number; writingQuality: number;
+  literatureAdequacy: number; ethicalCompliance: number; dataReliability: number; writingQuality: number; overallRecommendationScore: number;
 }
 
 function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: ManuscriptRow; assignmentId: string; onSubmitted: () => void }) {
   const [scores, setScores] = useState<ScoreState>({
-    scientificMerit: 5, noveltyInnovation: 5, methodologyQuality: 5, literatureAdequacy: 5, ethicalCompliance: 5, dataReliability: 5, writingQuality: 5
+    scientificMerit: 0, noveltyInnovation: 0, methodologyQuality: 0, literatureAdequacy: 0, ethicalCompliance: 0, dataReliability: 0, writingQuality: 0, overallRecommendationScore: 0
   });
   const [recommendation, setRecommendation] = useState<ReviewerRecommendation>('MINOR_REVISION');
   const [commentsToAuthor, setCommentsToAuthor] = useState('');
@@ -337,17 +524,103 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
   const [revisions, setRevisions] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [showModal, setShowModal] = useState(true);
+  const [lastSaveTime, setLastSaveTime] = useState<string | null>(null);
 
   const setScore = (key: keyof ScoreState, value: number) => setScores((s) => ({ ...s, [key]: value }));
 
+  const saveDraft = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await supabase
+        .from('review_drafts')
+        .upsert(
+          {
+            assignment_id: assignmentId,
+            scores: scores,
+            recommendation: recommendation,
+            comments_to_author: commentsToAuthor,
+            comments_to_editor: commentsToEditor,
+            strengths: strengths,
+            weaknesses: weaknesses,
+            mandatory_revisions: revisions,
+            last_saved_at: new Date().toISOString(),
+          },
+          { onConflict: 'assignment_id' }
+        );
+      setLastSaveTime(new Date().toLocaleTimeString());
+      setSuccess('Draft saved successfully');
+      setTimeout(() => setSuccess(''), 2000);
+    } catch (e: any) {
+      setError('Failed to save draft: ' + e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Auto-save every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (commentsToAuthor || commentsToEditor || strengths || weaknesses || revisions) {
+        saveDraft();
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [scores, recommendation, commentsToAuthor, commentsToEditor, strengths, weaknesses, revisions, assignmentId]);
+
+  const validateForm = (): string | null => {
+    // Check all scores are filled
+    const allScoresFilled = scoreFields.every(([key]) => scores[key] > 0);
+    if (!allScoresFilled) {
+      return 'Please provide scores for all evaluation criteria (1-10 scale).';
+    }
+
+    // Check qualitative fields
+    if (!commentsToAuthor.trim()) {
+      return 'Comments to Authors is required.';
+    }
+    if (!strengths.trim()) {
+      return 'Strengths of Manuscript is required.';
+    }
+    if (!weaknesses.trim()) {
+      return 'Weaknesses of Manuscript is required.';
+    }
+    if (!revisions.trim()) {
+      return 'Mandatory Revisions is required.';
+    }
+
+    // Check recommendation is selected
+    if (!recommendation) {
+      return 'Please select a recommendation.';
+    }
+
+    return null;
+  };
+
   const submit = async () => {
+    const validationError = validateForm();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
     setBusy(true); setError('');
     try {
-      await submitReview(assignmentId, { ...scores, recommendation, commentsToAuthor, commentsToEditor });
-      onSubmitted();
+      await submitReview(assignmentId, {
+        ...scores,
+        recommendation,
+        commentsToAuthor,
+        commentsToEditor,
+        strengths,
+        weaknesses,
+        mandatory_revisions: revisions
+      });
+      setSuccess('Review submitted successfully!');
+      setTimeout(() => onSubmitted(), 1500);
     } catch (e: any) {
-      setError(e.message);
+      setError(e.message || 'Failed to submit review');
     } finally {
       setBusy(false);
     }
@@ -359,8 +632,11 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
     ['scientificMerit', 'SCIENTIFIC MERIT'],
     ['noveltyInnovation', 'NOVELTY & INNOVATION'],
     ['methodologyQuality', 'METHODOLOGY QUALITY'],
-    ['literatureAdequacy', 'VALIDITY OF RESULTS'],
+    ['literatureAdequacy', 'LITERATURE REVIEW'],
+    ['dataReliability', 'RESULTS & VALIDITY'],
+    ['writingQuality', 'WRITING QUALITY'],
     ['ethicalCompliance', 'ETHICAL STANDARDS'],
+    ['overallRecommendationScore', 'OVERALL RECOMMENDATION SCORE'],
   ];
 
   return (
@@ -395,20 +671,31 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-black text-sm text-slate-900">EVALUATION CRITERIA</h3>
-              <span className="text-xs font-bold text-blue-600">8 Metrics Required</span>
+              <span className="text-xs font-bold text-blue-600">Scale: 1 (Poor) to 10 (Excellent)</span>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-5">
               {scoreFields.map(([key, label], idx) => (
-                <div key={key}>
-                  <label className="block text-xs font-black text-slate-900 mb-2">{idx + 1}. {label}</label>
-                  <p className="text-xs text-slate-600 mb-2">
-                    {key === 'scientificMerit' && 'Original contribution study rigor, hypotheses soundness, and scientific logic.'}
-                    {key === 'noveltyInnovation' && 'Breakthrough contributions, conceptual uniqueness, and modern relevance.'}
-                    {key === 'methodologyQuality' && 'Experimental setup, database design parameters, and verification rigor.'}
-                    {key === 'literatureAdequacy' && 'Mathematical reproducibility, statistical proof margins, and validation accuracy.'}
-                    {key === 'ethicalCompliance' && 'Dual-blind seal protection, potential conflicts check, and strict moral bounds.'}
-                  </p>
-                  <div className="flex gap-2">
+                <div key={key} className="border-b border-slate-200 pb-5 last:border-b-0">
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex-1">
+                      <label className="block text-xs font-black text-slate-900 mb-1">{idx + 1}. {label}</label>
+                      <p className="text-xs text-slate-600">
+                        {key === 'scientificMerit' && 'Original contribution and study rigor'}
+                        {key === 'noveltyInnovation' && 'Breakthrough contributions and uniqueness'}
+                        {key === 'methodologyQuality' && 'Experimental setup and verification rigor'}
+                        {key === 'literatureAdequacy' && 'Mathematical reproducibility and accuracy'}
+                        {key === 'dataReliability' && 'Data quality and statistical validity'}
+                        {key === 'writingQuality' && 'Clarity of presentation and writing'}
+                        {key === 'ethicalCompliance' && 'Research ethics and moral bounds'}
+                        {key === 'overallRecommendationScore' && 'Manual comprehensive peer rating evaluating overall scientific substance'}
+                      </p>
+                    </div>
+                    <label className="flex items-center gap-1 text-xs text-slate-600 font-semibold">
+                      <input type="checkbox" className="w-4 h-4 rounded" />
+                      N/A
+                    </label>
+                  </div>
+                  <div className="flex gap-1 mb-2">
                     {Array.from({ length: 10 }).map((_, i) => (
                       <button
                         key={i + 1}
@@ -416,44 +703,46 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
                         className={`w-8 h-8 rounded font-bold text-xs transition-all ${
                           scores[key] === i + 1
                             ? 'bg-[#008751] text-white'
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
                         }`}
                       >
                         {i + 1}
                       </button>
                     ))}
-                    <button className="text-xs text-slate-500 hover:text-slate-700 font-bold">N/A</button>
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-1">SCORE SELECTION: {scores[key]} / 10</p>
+                  <p className="text-[10px] text-blue-600 font-bold">SCORE SELECTION: {scores[key]} / 10</p>
                 </div>
               ))}
             </div>
           </div>
 
           {/* Recommendation */}
-          <div>
-            <h3 className="font-black text-sm text-slate-900 mb-4">REVIEWER RECOMMENDATION</h3>
-            <p className="text-xs text-slate-600 mb-3">Please choose your definitive recommendation.</p>
-            <div className="space-y-2">
+          <div className="border-t border-slate-200 pt-6">
+            <h3 className="font-black text-sm text-slate-900 mb-4">FINAL RECOMMENDATION</h3>
+            <p className="text-xs text-slate-600 mb-4">Please select only one final recommendation for this manuscript.</p>
+            <div className="grid grid-cols-1 gap-3">
               {[
-                { value: 'ACCEPT', label: 'Accept Manuscript', desc: 'Suitable for immediate publication as is' },
-                { value: 'MINOR_REVISION', label: 'Minor Revisions', desc: 'Requires petty refinements or polishing' },
-                { value: 'MAJOR_REVISION', label: 'Major Revisions', desc: 'Requires substantial conceptual refinements' },
-                { value: 'REJECT', label: 'Reject Manuscript', desc: 'Not suitable for presentation or publication' },
-                { value: 'ADDITIONAL_REVIEW', label: 'Additional Review Required', desc: 'Requires further rounds of expert assessment' },
+                { value: 'ACCEPT', label: '✅ Accept', desc: 'Suitable for immediate publication as is', color: 'emerald' },
+                { value: 'MINOR_REVISION', label: '🟡 Minor Revision', desc: 'Requires minor refinements or polishing', color: 'amber' },
+                { value: 'MAJOR_REVISION', label: '🟠 Major Revision', desc: 'Requires substantial conceptual refinements', color: 'orange' },
+                { value: 'REJECT', label: '🔴 Reject', desc: 'Not suitable for presentation or publication', color: 'red' },
               ].map((option) => (
-                <label key={option.value} className="flex items-start gap-3 p-3 border border-slate-200 rounded-lg hover:border-[#008751] hover:bg-slate-50 cursor-pointer transition-all">
+                <label key={option.value} className={`flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                  recommendation === option.value
+                    ? `border-[#008751] bg-emerald-50`
+                    : `border-slate-200 hover:border-[#008751] hover:bg-slate-50`
+                }`}>
                   <input
                     type="radio"
                     name="recommendation"
                     value={option.value}
                     checked={recommendation === option.value}
                     onChange={(e) => setRecommendation(e.target.value as ReviewerRecommendation)}
-                    className="w-4 h-4 mt-0.5"
+                    className="w-4 h-4 mt-0.5 accent-[#008751]"
                   />
                   <div className="flex-1">
                     <p className="font-bold text-sm text-slate-900">{option.label}</p>
-                    <p className="text-xs text-slate-600">{option.desc}</p>
+                    <p className="text-xs text-slate-600 mt-0.5">{option.desc}</p>
                   </div>
                 </label>
               ))}
@@ -463,90 +752,106 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
           {/* Qualitative Appraisals */}
           <div>
             <h3 className="font-black text-sm text-slate-900 mb-3">QUALITATIVE APPRAISALS</h3>
-            <p className="text-xs text-slate-600 mb-3">Provide detailed, comprehensive reports inside these specific comments gates.</p>
+            <p className="text-xs text-slate-600 mb-4">Provide detailed, comprehensive reports inside these specific comments gates.</p>
 
-            <label className="block mb-4">
-              <p className="text-xs font-bold text-slate-900 mb-2">1. Comments to Authors <span className="text-red-600">*</span></p>
-              <p className="text-[11px] text-slate-500 mb-1">Visible to authors</p>
+            <label className="block mb-5 pb-5 border-b border-slate-200">
+              <p className="text-xs font-bold text-slate-900 mb-1">1. Comments to Authors <span className="text-red-600">*</span></p>
+              <p className="text-[11px] text-slate-500 mb-2">Visible to authors</p>
               <textarea
                 value={commentsToAuthor}
                 onChange={(e) => setCommentsToAuthor(e.target.value)}
                 rows={4}
                 placeholder="Provide feedback visible to the authors..."
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
               />
             </label>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 gap-4 mb-5">
               <label>
                 <p className="text-xs font-bold text-slate-900 mb-2">Strengths of Manuscript <span className="text-red-600">*</span></p>
-                <textarea
-                  value={strengths}
-                  onChange={(e) => setStrengths(e.target.value)}
-                  rows={3}
-                  placeholder="List key strengths..."
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans"
-                />
+                <div className="relative">
+                  <textarea
+                    value={strengths}
+                    onChange={(e) => setStrengths(e.target.value)}
+                    rows={4}
+                    placeholder="List key strengths..."
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
+                  />
+                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600 text-lg">✏️</button>
+                </div>
               </label>
               <label>
                 <p className="text-xs font-bold text-slate-900 mb-2">Weaknesses of Manuscript <span className="text-red-600">*</span></p>
-                <textarea
-                  value={weaknesses}
-                  onChange={(e) => setWeaknesses(e.target.value)}
-                  rows={3}
-                  placeholder="List key weaknesses..."
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans"
-                />
+                <div className="relative">
+                  <textarea
+                    value={weaknesses}
+                    onChange={(e) => setWeaknesses(e.target.value)}
+                    rows={4}
+                    placeholder="List key weaknesses..."
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
+                  />
+                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600 text-lg">✏️</button>
+                </div>
               </label>
               <label>
                 <p className="text-xs font-bold text-slate-900 mb-2">Mandatory Revisions <span className="text-red-600">*</span></p>
-                <textarea
-                  value={revisions}
-                  onChange={(e) => setRevisions(e.target.value)}
-                  rows={3}
-                  placeholder="List mandatory changes..."
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans"
-                />
+                <div className="relative">
+                  <textarea
+                    value={revisions}
+                    onChange={(e) => setRevisions(e.target.value)}
+                    rows={4}
+                    placeholder="List mandatory changes..."
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
+                  />
+                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600 text-lg">✏️</button>
+                </div>
               </label>
             </div>
 
-            <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
-              <p className="text-xs font-bold text-emerald-900 mb-1">📋 Confidential Editor Note</p>
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
+              <p className="text-xs font-bold text-emerald-900 mb-1">📋 Confidential Comments to Editor</p>
               <p className="text-xs text-emerald-800">Private feedback regarding manuscript novelty or scientific validity. Locked strictly to editors.</p>
               <textarea
                 value={commentsToEditor}
                 onChange={(e) => setCommentsToEditor(e.target.value)}
-                rows={3}
+                rows={4}
                 placeholder="Private notes for editors only..."
-                className="w-full border border-emerald-300 rounded-lg px-3 py-2 text-xs font-sans mt-2 bg-white"
+                className="w-full border border-emerald-300 rounded-lg px-3 py-2 text-xs font-sans mt-2 bg-white focus:border-emerald-400 focus:outline-none"
               />
             </div>
           </div>
 
-          <p className="text-xs text-slate-500 italic">All edits draft-saved inside local memory.</p>
+          <p className="text-xs text-slate-500 italic">All edits auto-saved to Supabase every 30 seconds. {lastSaveTime && <span className="text-emerald-600 font-semibold">Last saved: {lastSaveTime}</span>}</p>
         </div>
 
         {/* Modal Footer */}
-        <div className="border-t border-slate-200 p-4 flex items-center justify-end gap-3 bg-slate-50">
-          <button
-            onClick={() => setShowModal(false)}
-            className="px-4 py-2.5 border border-slate-300 text-slate-700 font-bold text-xs rounded-lg hover:bg-slate-100 transition-all"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => alert('Draft saved to local memory')}
-            className="px-4 py-2.5 border border-blue-300 text-blue-700 font-bold text-xs rounded-lg hover:bg-blue-50 transition-all"
-          >
-            Save Draft
-          </button>
-          <button
-            disabled={busy}
-            onClick={submit}
-            className="px-4 py-2.5 bg-[#008751] hover:bg-[#007043] text-white font-bold text-xs rounded-lg cursor-pointer disabled:opacity-50 transition-all flex items-center gap-1.5"
-          >
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} SUBMIT EVALUATION
-          </button>
+        <div className="border-t border-slate-200 p-4 flex items-center justify-between bg-slate-50">
+          <div className="text-xs text-slate-600">
+            {success && <span className="text-emerald-600 font-semibold">✓ {success}</span>}
+            {error && <span className="text-red-600 font-semibold">✗ {error}</span>}
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowModal(false)}
+              className="px-4 py-2.5 border border-slate-300 text-slate-700 font-bold text-xs rounded-lg hover:bg-slate-100 transition-all"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveDraft}
+              disabled={busy}
+              className="px-4 py-2.5 border border-blue-300 text-blue-700 font-bold text-xs rounded-lg hover:bg-blue-50 transition-all disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Save Draft
+            </button>
+            <button
+              disabled={busy}
+              onClick={submit}
+              className="px-4 py-2.5 bg-[#008751] hover:bg-[#007043] text-white font-bold text-xs rounded-lg cursor-pointer disabled:opacity-50 transition-all flex items-center gap-1.5"
+            >
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} SUBMIT REVIEW
+            </button>
+          </div>
         </div>
       </div>
     </div>
