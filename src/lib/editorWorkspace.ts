@@ -337,3 +337,115 @@ export async function subscribeToReviewerChanges(
 
   return () => channel.unsubscribe();
 }
+
+/** PHASE 3: Collaboration Functions */
+
+export async function postDiscussion(
+  manuscriptId: string,
+  senderId: string,
+  message: string,
+  discussionType: 'GENERAL' | 'EDITORIAL' | 'REVIEWER_SUGGESTION' = 'GENERAL'
+): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('manuscript_discussions')
+      .insert({
+        manuscript_id: manuscriptId,
+        sender_id: senderId,
+        message: message,
+        discussion_type: discussionType,
+        created_at: new Date().toISOString(),
+        is_internal: discussionType === 'EDITORIAL'
+      });
+
+    if (error) throw new Error(error.message);
+  } catch (error) {
+    console.error('Error posting discussion:', error);
+    throw error;
+  }
+}
+
+export async function subscribeToDiscussions(
+  manuscriptId: string,
+  onUpdate: (discussions: DiscussionRow[]) => void
+): Promise<() => void> {
+  const channel = supabase
+    .channel(`manuscript:${manuscriptId}:discussions`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'manuscript_discussions',
+        filter: `manuscript_id=eq.${manuscriptId}`
+      },
+      async () => {
+        const discussions = await getDiscussions(manuscriptId);
+        onUpdate(discussions);
+      }
+    )
+    .subscribe();
+
+  return () => channel.unsubscribe();
+}
+
+export async function postInternalNote(
+  manuscriptId: string,
+  editorId: string,
+  note: string
+): Promise<void> {
+  return postDiscussion(
+    manuscriptId,
+    editorId,
+    note,
+    'EDITORIAL'
+  );
+}
+
+export async function submitReviewerSuggestion(
+  manuscriptId: string,
+  reviewerId: string,
+  suggestion: string,
+  confidence: number
+): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('reviewer_suggestions')
+      .insert({
+        manuscript_id: manuscriptId,
+        reviewer_id: reviewerId,
+        suggestion_text: suggestion,
+        confidence_score: confidence,
+        submitted_at: new Date().toISOString()
+      });
+
+    if (error) throw new Error(error.message);
+  } catch (error) {
+    console.error('Error submitting reviewer suggestion:', error);
+    throw error;
+  }
+}
+
+export async function notifyCoordinator(
+  manuscriptId: string,
+  editorId: string,
+  messageType: 'READY_FOR_REVIEW' | 'REVIEWS_COMPLETE' | 'DECISION_READY',
+  details?: string
+): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('editor_notifications')
+      .insert({
+        manuscript_id: manuscriptId,
+        sender_id: editorId,
+        notification_type: messageType,
+        message: details || `Notification: ${messageType}`,
+        created_at: new Date().toISOString()
+      });
+
+    if (error) throw new Error(error.message);
+  } catch (error) {
+    console.error('Error sending notification:', error);
+    throw error;
+  }
+}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Role, ManuscriptStatus, ReviewerRecommendation } from '../types';
 import {
-  ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow,
+  ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, DiscussionRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getRevisions, subscribeToManuscripts,
   respondToEditorAssignment, submitEditorAssessment, submitEditorRecommendation, publishDecision,
   getManuscript, getContributors, getDiscussions
@@ -20,6 +20,10 @@ import {
   removeReviewerAssignment,
   updateReviewerStatus,
   subscribeToReviewerChanges,
+  postDiscussion,
+  subscribeToDiscussions,
+  postInternalNote,
+  notifyCoordinator,
   formatDate,
   formatDateTime
 } from '../lib/editorWorkspace';
@@ -370,7 +374,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [revisions, setRevisions] = useState<RevisionRow[]>(initialRevisions || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'reviews' | 'history' | 'revisions' | 'comments'>('title');
+  const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments'>('title');
   const [activePublication, setActivePublication] = useState<'title' | 'contributors' | 'metadata' | 'references' | 'galleries' | 'jats' | 'permissions' | 'issue'>('title');
   const [currentPage, setCurrentPage] = useState(1);
   const [decisionLetter, setDecisionLetter] = useState('');
@@ -380,6 +384,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   // Phase 2: Reviewer Management
   const [showAssignReviewersModal, setShowAssignReviewersModal] = useState(false);
   const [selectedReviewerIds, setSelectedReviewerIds] = useState<Set<string>>(new Set());
+
+  // Phase 3: Collaboration
+  const [discussions, setDiscussions] = useState<DiscussionRow[]>(details.discussions || []);
+  const [newComment, setNewComment] = useState('');
+  const [newInternalNote, setNewInternalNote] = useState('');
+  const [showInternalNotes, setShowInternalNotes] = useState(false);
 
   const handleAcceptAssignment = async () => {
     setBusy(true);
@@ -477,15 +487,76 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     setSelectedReviewerIds(newSet);
   };
 
+  // Phase 3: Collaboration Handlers
+  const handlePostComment = async () => {
+    if (!newComment.trim()) {
+      setError('Please enter a comment');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const { data } = await supabase.auth.getUser();
+      if (!data.user?.id) throw new Error('Not authenticated');
+
+      await postDiscussion(
+        manuscript.id,
+        data.user.id,
+        newComment,
+        'GENERAL'
+      );
+      setNewComment('');
+      setDiscussions([...discussions, {
+        id: Date.now().toString(),
+        manuscript_id: manuscript.id,
+        sender_id: data.user.id,
+        message: newComment,
+        created_at: new Date().toISOString()
+      } as DiscussionRow]);
+      onChanged();
+    } catch (e: any) {
+      setError(e.message || 'Failed to post comment');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePostInternalNote = async () => {
+    if (!newInternalNote.trim()) {
+      setError('Please enter an internal note');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const { data } = await supabase.auth.getUser();
+      if (!data.user?.id) throw new Error('Not authenticated');
+
+      await postInternalNote(
+        manuscript.id,
+        data.user.id,
+        newInternalNote
+      );
+      setNewInternalNote('');
+      setShowInternalNotes(false);
+      onChanged();
+    } catch (e: any) {
+      setError(e.message || 'Failed to post internal note');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const tabs = [
     { id: 'title', label: 'Title & Abstract' },
     { id: 'contributors', label: 'Contributors' },
     { id: 'files', label: 'Files for Review' },
     { id: 'evaluation', label: 'Editor Evaluation' },
     { id: 'reviews', label: 'Reviews' },
+    { id: 'suggestions', label: 'Suggestions' },
     { id: 'history', label: 'Review History' },
     { id: 'revisions', label: 'Revisions' },
-    { id: 'comments', label: 'Comments' }
+    { id: 'comments', label: 'Collaboration' }
   ];
 
   return (
@@ -565,6 +636,44 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               <p className="text-xs text-slate-500">No status history available.</p>
             )}
           </div>
+        </div>
+
+        {/* COORDINATOR NOTIFICATIONS */}
+        <div className="mb-6 bg-white border border-slate-200 rounded-lg p-4">
+          <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">COORDINATOR ACTIONS</p>
+          <div className="space-y-2">
+            <button
+              onClick={() => {
+                notifyCoordinator(manuscript.id, currentUser?.email || 'unknown', 'READY_FOR_REVIEW', 'Reviewers assigned and ready for review');
+                setError('Notification sent to coordinator');
+                setTimeout(() => setError(''), 3000);
+              }}
+              className="w-full text-left text-xs px-3 py-2 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100 font-bold transition"
+            >
+              ✓ Ready for Review
+            </button>
+            <button
+              onClick={() => {
+                notifyCoordinator(manuscript.id, currentUser?.email || 'unknown', 'REVIEWS_COMPLETE', 'All reviews received and compiled');
+                setError('Notification sent to coordinator');
+                setTimeout(() => setError(''), 3000);
+              }}
+              className="w-full text-left text-xs px-3 py-2 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 font-bold transition"
+            >
+              ✓ Reviews Complete
+            </button>
+            <button
+              onClick={() => {
+                notifyCoordinator(manuscript.id, currentUser?.email || 'unknown', 'DECISION_READY', 'Final editorial decision submitted');
+                setError('Notification sent to coordinator');
+                setTimeout(() => setError(''), 3000);
+              }}
+              className="w-full text-left text-xs px-3 py-2 bg-purple-50 text-purple-700 rounded hover:bg-purple-100 font-bold transition"
+            >
+              ✓ Decision Ready
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mt-3 text-center">Alerts coordination team</p>
         </div>
 
         {/* NEED HELP */}
@@ -993,6 +1102,49 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               </div>
             )}
 
+            {activeTab === 'suggestions' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">REVIEWER SUGGESTIONS ({details.suggestedReviewers?.length || 0})</h3>
+                {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.suggestedReviewers.map((reviewer) => {
+                      const isAssigned = reviewerAssignments?.some(r => r.reviewer_id === reviewer.id);
+                      return (
+                        <div key={reviewer.id} className={`border rounded-lg p-4 ${isAssigned ? 'bg-emerald-50 border-emerald-200' : 'border-slate-200'}`}>
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex-1">
+                              <p className="font-semibold text-slate-900">{reviewer.name}</p>
+                              <p className="text-xs text-slate-600">{reviewer.email}</p>
+                              {reviewer.expertise && (
+                                <p className="text-xs text-slate-500 mt-1">Expertise: {reviewer.expertise}</p>
+                              )}
+                            </div>
+                            <div className="text-right">
+                              {isAssigned ? (
+                                <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded">✓ Assigned</span>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setSelectedReviewerIds(new Set([reviewer.id]));
+                                    setShowAssignReviewersModal(true);
+                                  }}
+                                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700"
+                                >
+                                  Assign →
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No suggested reviewers available for this manuscript.</div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'history' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
                 <h3 className="text-sm font-black text-slate-900 mb-4">REVIEW HISTORY ({details.statusHistory?.length || 0})</h3>
@@ -1020,23 +1172,108 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
 
             {activeTab === 'comments' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <h3 className="text-sm font-black text-slate-900 mb-4">DISCUSSIONS ({details.discussions?.length || 0})</h3>
-                {details.discussions && details.discussions.length > 0 ? (
-                  <div className="space-y-4">
-                    {details.discussions.map((discussion, idx) => (
-                      <div key={idx} className="border border-slate-200 rounded p-4">
-                        <div className="flex items-start justify-between mb-2">
-                          <p className="font-semibold text-slate-900">
-                            {details.profiles.get(discussion.sender_id)?.name || 'Unknown User'}
-                          </p>
-                          <p className="text-xs text-slate-500">{formatDateTime(discussion.created_at)}</p>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-sm font-black text-slate-900">DISCUSSION & COLLABORATION ({discussions?.length || 0})</h3>
+                  <button
+                    onClick={() => setShowInternalNotes(!showInternalNotes)}
+                    className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                  >
+                    <FileText className="w-3 h-3" /> {showInternalNotes ? 'Hide' : 'Show'} Internal Notes
+                  </button>
+                </div>
+
+                {/* Discussion Posts */}
+                <div className="mb-6">
+                  <h4 className="text-xs font-bold text-slate-700 mb-4">TEAM DISCUSSIONS</h4>
+                  {discussions && discussions.length > 0 ? (
+                    <div className="space-y-4 mb-6">
+                      {discussions.filter(d => !(d as any).is_internal).map((discussion, idx) => (
+                        <div key={idx} className="border border-slate-200 rounded p-4 hover:bg-slate-50">
+                          <div className="flex items-start justify-between mb-2">
+                            <div>
+                              <p className="font-semibold text-slate-900">
+                                {details.profiles.get(discussion.sender_id)?.name || 'Unknown User'}
+                              </p>
+                              <p className="text-xs text-slate-500">{details.profiles.get(discussion.sender_id)?.role || 'Member'}</p>
+                            </div>
+                            <p className="text-xs text-slate-500">{formatDateTime(discussion.created_at)}</p>
+                          </div>
+                          <p className="text-sm text-slate-700 mt-2">{discussion.message}</p>
                         </div>
-                        <p className="text-sm text-slate-700">{discussion.message}</p>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500 mb-6">No discussions yet. Start a discussion below.</p>
+                  )}
+
+                  {/* Post Comment Form */}
+                  <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                    <textarea
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      placeholder="Add a team discussion comment..."
+                      className="w-full text-xs border border-slate-300 rounded px-3 py-2 mb-3 focus:outline-none focus:border-emerald-500"
+                      rows={3}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handlePostComment}
+                        disabled={busy || !newComment.trim()}
+                        className="flex-1 bg-emerald-600 text-white text-xs font-bold py-2 rounded hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        {busy ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : <Send className="w-3 h-3 inline mr-1" />}
+                        Post Comment
+                      </button>
+                    </div>
                   </div>
-                ) : (
-                  <div className="text-center py-8 text-slate-400 text-sm">No comments yet.</div>
+                </div>
+
+                {/* Internal Notes Section */}
+                {showInternalNotes && (
+                  <div className="pt-6 border-t border-slate-200">
+                    <h4 className="text-xs font-bold text-slate-700 mb-4 flex items-center gap-2">
+                      <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                      EDITOR INTERNAL NOTES (Private)
+                    </h4>
+                    {discussions && discussions.filter(d => (d as any).is_internal).length > 0 ? (
+                      <div className="space-y-3 mb-6 bg-amber-50 border border-amber-200 rounded p-4">
+                        {discussions.filter(d => (d as any).is_internal).map((discussion, idx) => (
+                          <div key={idx} className="border-b border-amber-200 pb-3 last:border-0">
+                            <div className="flex items-start justify-between mb-1">
+                              <p className="font-semibold text-amber-900 text-xs">
+                                {details.profiles.get(discussion.sender_id)?.name || 'Unknown'}
+                              </p>
+                              <p className="text-xs text-amber-700">{formatDateTime(discussion.created_at)}</p>
+                            </div>
+                            <p className="text-xs text-amber-800">{discussion.message}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 mb-6">No internal notes yet.</p>
+                    )}
+
+                    {/* Post Internal Note Form */}
+                    <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+                      <textarea
+                        value={newInternalNote}
+                        onChange={(e) => setNewInternalNote(e.target.value)}
+                        placeholder="Add a private internal note (visible only to editors)..."
+                        className="w-full text-xs border border-amber-300 rounded px-3 py-2 mb-3 bg-white focus:outline-none focus:border-amber-500"
+                        rows={3}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handlePostInternalNote}
+                          disabled={busy || !newInternalNote.trim()}
+                          className="flex-1 bg-amber-600 text-white text-xs font-bold py-2 rounded hover:bg-amber-700 disabled:opacity-50"
+                        >
+                          {busy ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : <Save className="w-3 h-3 inline mr-1" />}
+                          Post Internal Note
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
