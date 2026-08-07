@@ -832,15 +832,52 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
 
             {activeTab === 'contributors' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <h3 className="text-sm font-black text-slate-900 mb-4">Manuscript Contributors</h3>
-                <div className="text-center py-8 text-slate-400 text-sm">No contributors data available.</div>
+                <h3 className="text-sm font-black text-slate-900 mb-4">Manuscript Contributors ({details.contributors?.length || 0})</h3>
+                {details.contributors && details.contributors.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.contributors.map((contributor, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4">
+                        <p className="font-semibold text-slate-900">{contributor.name}</p>
+                        <p className="text-sm text-slate-600">{contributor.role}</p>
+                        {contributor.affiliation && <p className="text-xs text-slate-500 mt-1">{contributor.affiliation}</p>}
+                        {contributor.email && <p className="text-xs text-slate-500">Email: {contributor.email}</p>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No contributors data available.</div>
+                )}
               </div>
             )}
 
             {activeTab === 'files' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <h3 className="text-sm font-black text-slate-900 mb-4">FILES FOR REVIEW</h3>
-                <div className="text-center py-8 text-slate-400 text-sm">No files available.</div>
+                <h3 className="text-sm font-black text-slate-900 mb-4">FILES FOR REVIEW ({details.files?.length || 0})</h3>
+                {details.files && details.files.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.files.map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 transition">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📄</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          {file.public_url && (
+                            <>
+                              <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
+                              <a href={file.public_url} download className="text-slate-600 hover:text-slate-900 p-2">📥</a>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No files available.</div>
+                )}
               </div>
             )}
 
@@ -850,8 +887,22 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
 
             {activeTab === 'history' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <h3 className="text-sm font-black text-slate-900 mb-4">REVIEW HISTORY</h3>
-                <div className="text-center py-8 text-slate-400 text-sm">No history available.</div>
+                <h3 className="text-sm font-black text-slate-900 mb-4">REVIEW HISTORY ({details.statusHistory?.length || 0})</h3>
+                {details.statusHistory && details.statusHistory.length > 0 ? (
+                  <div className="space-y-4">
+                    {details.statusHistory.map((item, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <p className="font-semibold text-slate-900">{item.status}</p>
+                          <p className="text-xs text-slate-500">{formatDateTime(item.created_at)}</p>
+                        </div>
+                        {item.notes && <p className="text-sm text-slate-600">{item.notes}</p>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No history available.</div>
+                )}
               </div>
             )}
 
@@ -861,8 +912,24 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
 
             {activeTab === 'comments' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <h3 className="text-sm font-black text-slate-900 mb-4">COMMENTS</h3>
-                <div className="text-center py-8 text-slate-400 text-sm">No comments yet.</div>
+                <h3 className="text-sm font-black text-slate-900 mb-4">DISCUSSIONS ({details.discussions?.length || 0})</h3>
+                {details.discussions && details.discussions.length > 0 ? (
+                  <div className="space-y-4">
+                    {details.discussions.map((discussion, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <p className="font-semibold text-slate-900">
+                            {details.profiles.get(discussion.sender_id)?.name || 'Unknown User'}
+                          </p>
+                          <p className="text-xs text-slate-500">{formatDateTime(discussion.created_at)}</p>
+                        </div>
+                        <p className="text-sm text-slate-700">{discussion.message}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No comments yet.</div>
+                )}
               </div>
             )}
           </div>
