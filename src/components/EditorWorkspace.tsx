@@ -3,10 +3,22 @@ import { Role, ManuscriptStatus, ReviewerRecommendation } from '../types';
 import {
   ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getRevisions, subscribeToManuscripts,
-  respondToEditorAssignment, submitEditorAssessment, submitEditorRecommendation, publishDecision
+  respondToEditorAssignment, submitEditorAssessment, submitEditorRecommendation, publishDecision,
+  getManuscript, getContributors, getDiscussions
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
-import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings } from 'lucide-react';
+import {
+  loadEditorAssignments,
+  loadEditorDashboardData,
+  handleEditorAssignmentResponse,
+  submitEvaluationToSupabase,
+  loadDraftEvaluation,
+  subscribeToEditorDashboard,
+  formatDate,
+  formatDateTime,
+  EditorDashboardData
+} from '../lib/editorWorkspace';
+import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send } from 'lucide-react';
 import RevisionReview from './RevisionReview';
 
 interface EditorWorkspaceProps {
@@ -52,14 +64,14 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   const load = async () => {
     try {
       const { data } = await supabase.auth.getUser();
-      const manuscripts = await listManuscripts();
-      const withAssignments: Row[] = [];
-      for (const m of manuscripts) {
-        const assignments = await getEditorAssignments(m.id);
-        const mine = assignments.find((a) => a.editor_id === data.user?.id);
-        if (mine) withAssignments.push({ manuscript: m, assignment: mine });
+      if (!data.user?.id) {
+        setLoading(false);
+        return;
       }
-      setRows(withAssignments);
+      const assignments = await loadEditorAssignments(data.user.id);
+      setRows(assignments);
+    } catch (error) {
+      console.error('Error loading assignments:', error);
     } finally {
       setLoading(false);
     }
