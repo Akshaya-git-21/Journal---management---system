@@ -8,11 +8,12 @@ import {
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
 import {
-  loadEditorAssignments,
-  loadEditorDashboardData,
-  handleEditorAssignmentResponse,
-  submitEvaluationToSupabase,
-  loadDraftEvaluation,
+  getEditorAssignedManuscripts,
+  subscribeToEditorAssignments,
+  EditorManuscriptDetails,
+  respondToAssignment,
+  formatDate,
+  formatDateTime,
   subscribeToEditorDashboard,
   formatDate,
   formatDateTime,
@@ -48,10 +49,8 @@ function StatusBadge({ status }: { status: ManuscriptStatus }) {
   );
 }
 
-interface Row { manuscript: ManuscriptRow; assignment: EditorAssignmentRow; }
-
 export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
-  const [rows, setRows] = useState<Row[]>([]);
+  const [rows, setRows] = useState<EditorManuscriptDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -68,8 +67,8 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
         setLoading(false);
         return;
       }
-      const assignments = await loadEditorAssignments(data.user.id);
-      setRows(assignments);
+      const details = await getEditorAssignedManuscripts(data.user.id);
+      setRows(details);
     } catch (error) {
       console.error('Error loading assignments:', error);
     } finally {
@@ -96,9 +95,15 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
 
   useEffect(() => {
     load();
-    const unsubscribe = subscribeToManuscripts(load);
+    if (!currentUser?.email) return;
+
+    // Subscribe to real-time updates
+    const { data } = await supabase.auth.getUser();
+    if (!data.user?.id) return;
+
+    const unsubscribe = subscribeToEditorAssignments(data.user.id, setRows);
     return unsubscribe;
-  }, []);
+  }, [currentUser?.email]);
 
   const selected = rows.find((r) => r.manuscript.id === selectedManuscriptId) || null;
   const toggleSection = (section: string) => {
