@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Role, ManuscriptStatus } from '../types';
+import { Role, ManuscriptStatus, Manuscript } from '../types';
 import {
   ManuscriptRow,
   listManuscripts,
   getManuscript,
   subscribeToManuscripts
 } from '../lib/workflow';
-import { supabase } from '../lib/supabase';
+import { supabase, upsertManuscriptToDb } from '../lib/supabase';
 import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
@@ -156,12 +156,68 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
   const selected = selectedDetail || items.find((m) => m.id === selectedId) as any || null;
 
+  // Handle manuscript submission from NewSubmissionFlow
+  const handleNewSubmission = async (paperDetails: any) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError('Not authenticated');
+        return;
+      }
+
+      // Generate manuscript ID (JMS-YYYY-XXXXX format)
+      const manuscriptId = `JMS-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+
+      // Create Manuscript object from submission data
+      const newManuscript: Manuscript = {
+        id: manuscriptId,
+        title: paperDetails.title || 'Untitled Manuscript',
+        abstract: paperDetails.abstract || '',
+        references: '',
+        isDoubleBlind: paperDetails.isDoubleBlind || false,
+        coverLetter: paperDetails.coverLetter || '',
+        fileName: paperDetails.fileName || null,
+        fileSize: paperDetails.fileSize || null,
+        uploadedAt: new Date().toISOString(),
+        storagePath: paperDetails.storagePath || null,
+        publicUrl: paperDetails.publicUrl || null,
+        uploadedFiles: paperDetails.additionalFiles || [],
+        contributors: paperDetails.contributors || [],
+        status: 'SUBMITTED' as ManuscriptStatus,
+        submittedAt: new Date().toISOString(),
+        reviewers: [],
+        suggestedReviewers: paperDetails.reviewerSuggestions || [],
+        discussions: [],
+        doi: null,
+        volume: null,
+        issue: null,
+        publishedAt: null,
+        authorId: user.id,
+        authorName: currentUser?.name || 'Unknown Author',
+        authorEmail: currentUser?.email || user.email || '',
+        submissionStep: 9,
+        editorsNotes: '',
+        language: paperDetails.language || 'English'
+      };
+
+      // Save manuscript to Supabase
+      await upsertManuscriptToDb(newManuscript);
+
+      // Refresh the list to show the new manuscript
+      await load();
+      setView('list');
+    } catch (err: any) {
+      setError(err.message || 'Failed to submit manuscript');
+      console.error('Submission error:', err);
+    }
+  };
+
   if (view === 'new') {
     return (
       <NewSubmissionFlow
         currentUser={currentUser ?? null}
         onCancel={() => { setView('list'); load(); }}
-        onSubmit={() => { setView('list'); load(); }}
+        onSubmit={handleNewSubmission}
       />
     );
   }
