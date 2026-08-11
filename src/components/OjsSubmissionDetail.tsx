@@ -527,6 +527,7 @@ export default function OjsSubmissionDetail({
             storagePath: f.storage_path,
             publicUrl: f.public_url
           }));
+          console.log('[FILE_DEBUG] Formatted files:', formattedFiles.map(f => ({ name: f.name, type: f.type, publicUrl: f.publicUrl })));
           setUploadedFiles(formattedFiles);
 
           // Convert discussions to message format
@@ -1303,6 +1304,7 @@ export default function OjsSubmissionDetail({
                                     <div className="flex items-center justify-center gap-1">
                                       <button
                                         onClick={() => {
+                                          console.log('[EYE_ICON] Clicked file:', { name: file.name, type: file.type, publicUrl: file.publicUrl });
                                           setPreviewFileName(file.name);
                                           setPreviewFileType(file.type || 'Document');
                                           setPreviewFileSize(file.size || '1.2 MB');
