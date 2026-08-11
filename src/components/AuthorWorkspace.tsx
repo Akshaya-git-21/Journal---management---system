@@ -283,8 +283,9 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
             <p className="text-xs uppercase tracking-widest font-bold text-slate-400 px-2 mb-3 mt-4">ACTIONS</p>
             <button
+              type="button"
               onClick={() => setView('new')}
-              className="w-full rounded-lg bg-[#008751] hover:bg-[#007043] text-white px-3 py-2.5 text-left font-semibold text-sm transition"
+              className="w-full rounded-lg bg-[#008751] hover:bg-[#007043] text-white px-3 py-2.5 text-left font-semibold text-sm transition cursor-pointer"
             >
               + New Submission
             </button>
