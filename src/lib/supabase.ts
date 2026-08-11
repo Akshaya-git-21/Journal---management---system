@@ -119,6 +119,28 @@ export async function getManuscriptsFromDb(): Promise<Manuscript[]> {
 }
 
 /**
+ * Ensure the current user has an ACTIVE AUTHOR profile via server-side RPC.
+ * Bypasses RLS by using a SECURITY DEFINER function.
+ */
+export async function ensureAuthorProfile(): Promise<void> {
+  try {
+    console.log('[PROFILE] Ensuring AUTHOR profile via RPC...');
+
+    const { data, error } = await supabase.rpc('ensure_author_profile');
+
+    if (error) {
+      console.error('[PROFILE] RPC error:', error.message);
+      throw error;
+    }
+
+    console.log('[PROFILE] AUTHOR profile is ready:', data);
+  } catch (err: any) {
+    console.warn('[PROFILE] Error ensuring profile:', err.message);
+    // Don't fail the entire operation, just log the warning
+  }
+}
+
+/**
  * Save or update a manuscript in Supabase
  */
 export async function upsertManuscriptToDb(manuscript: Manuscript): Promise<void> {
@@ -280,32 +302,45 @@ export async function deleteManuscriptFromDb(id: string): Promise<void> {
 
 /**
  * Upload a file to Supabase storage 'manuscripts' bucket
+ * Uses user ID as path prefix since manuscript ID doesn't exist yet during submission
  */
-export async function uploadManuscriptFile(file: File, manuscriptId: string): Promise<{ path: string; publicUrl: string }> {
-  const fileExt = file.name.split('.').pop();
-  const filePath = `${manuscriptId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+export async function uploadManuscriptFile(file: File, manuscriptId?: string): Promise<{ path: string; publicUrl: string }> {
+  try {
+    // Get current authenticated user ID
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (!user || userError) {
+      throw new Error('User not authenticated');
+    }
 
-  // Upload file
-  const { data, error } = await supabase.storage
-    .from('manuscript-files')
-    .upload(filePath, file, {
-      cacheControl: '3600',
-      upsert: true
-    });
+    // Use user ID as path prefix (manuscript ID will be set when syncing to database)
+    const filePathPrefix = user.id;
+    const filePath = `${filePathPrefix}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
 
-  if (error) {
-    throw new Error(error.message);
+    // Upload file
+    const { data, error } = await supabase.storage
+      .from('manuscript-files')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true
+      });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('manuscript-files')
+      .getPublicUrl(filePath);
+
+    return {
+      path: data.path,
+      publicUrl: urlData.publicUrl
+    };
+  } catch (err: any) {
+    console.error('[File Upload Error]:', err.message);
+    throw err;
   }
-
-  // Get public URL
-  const { data: urlData } = supabase.storage
-    .from('manuscript-files')
-    .getPublicUrl(filePath);
-
-  return {
-    path: data.path,
-    publicUrl: urlData.publicUrl
-  };
 }
 
 /**

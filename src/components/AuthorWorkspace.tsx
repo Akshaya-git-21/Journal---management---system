@@ -7,7 +7,7 @@ import {
   subscribeToManuscripts,
   getManuscriptFiles
 } from '../lib/workflow';
-import { supabase, upsertManuscriptToDb } from '../lib/supabase';
+import { supabase, upsertManuscriptToDb, ensureAuthorProfile } from '../lib/supabase';
 import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
@@ -59,20 +59,28 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   // Load manuscripts for current user
   const load = async () => {
     try {
+      console.log('[LOAD] Starting to fetch manuscripts...');
       const { data: userData } = await supabase.auth.getUser();
+      console.log('[LOAD] Current user ID:', userData.user?.id);
+
       if (!userData.user?.id) {
         setError('Not authenticated');
+        console.log('[LOAD] ERROR: Not authenticated');
         return;
       }
 
       // Fetch manuscripts for this user
+      console.log('[LOAD] Querying manuscripts table where author_id =', userData.user.id);
       const { data, error: queryError } = await supabase
         .from('manuscripts')
         .select('*')
         .eq('author_id', userData.user.id)
         .order('submitted_at', { ascending: false });
 
+      console.log('[LOAD] Query result - error:', queryError, 'data count:', data?.length);
       if (queryError) throw queryError;
+
+      console.log('[LOAD] Fetched manuscripts:', data?.map((m: any) => ({ id: m.id, title: m.title, author_id: m.author_id, submitted_at: m.submitted_at })));
 
       // Fetch files for each manuscript
       const manuscriptsWithFiles = await Promise.all(
@@ -82,11 +90,12 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         })
       );
 
+      console.log('[LOAD] Setting items with', manuscriptsWithFiles.length, 'manuscripts');
       setItems((manuscriptsWithFiles || []) as ManuscriptRow[]);
       setError('');
     } catch (e: any) {
       setError(e.message || 'Failed to load manuscripts');
-      console.error('Error loading manuscripts:', e);
+      console.error('[LOAD] Error loading manuscripts:', e);
     } finally {
       setLoading(false);
     }
@@ -169,16 +178,28 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   // Handle manuscript submission from NewSubmissionFlow
   const handleNewSubmission = async (paperDetails: any) => {
     try {
+      console.log('[SUBMIT] Starting new manuscript submission...');
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setError('Not authenticated');
+        console.log('[SUBMIT] ERROR: User not authenticated');
         return;
       }
 
-      console.log('[DEBUG] Starting manuscript submission for user:', user.id);
+      console.log('[SUBMIT] Current authenticated user ID:', user.id);
 
-      // Generate manuscript ID (JMS-YYYY-XXXXX format)
-      const manuscriptId = `JMS-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+      // Ensure author profile exists (SECURITY DEFINER RPC bypasses RLS)
+      console.log('[SUBMIT] Ensuring author profile exists...');
+      await ensureAuthorProfile();
+      console.log('[SUBMIT] Author profile ready');
+
+      // Use manuscript ID from paperDetails (generated in NewSubmissionFlow)
+      // This ensures consistency across the entire flow
+      const manuscriptId = paperDetails.id;
+      if (!manuscriptId) {
+        throw new Error('Manuscript ID not provided from submission');
+      }
+      console.log('[SUBMIT] Using manuscript ID:', manuscriptId);
 
       // Create Manuscript object from submission data
       const newManuscript: Manuscript = {
@@ -212,42 +233,75 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         language: paperDetails.language || 'English'
       };
 
-      console.log('[DEBUG] Manuscript object created:', { id: newManuscript.id, title: newManuscript.title, authorId: newManuscript.authorId });
+      console.log('[SUBMIT] Manuscript object created:', { id: newManuscript.id, title: newManuscript.title, authorId: newManuscript.authorId, submittedAt: newManuscript.submittedAt });
 
-      // Save manuscript to Supabase
-      await upsertManuscriptToDb(newManuscript);
-      console.log('[DEBUG] Manuscript saved to database successfully');
+      // First, insert manuscript record into database
+      console.log('[SUBMIT] Inserting manuscript record...');
+      const { data: insertResult, error: insertError } = await supabase
+        .from('manuscripts')
+        .insert([{
+          id: newManuscript.id,
+          title: newManuscript.title,
+          abstract: newManuscript.abstract,
+          references: newManuscript.references,
+          is_double_blind: newManuscript.isDoubleBlind,
+          cover_letter: newManuscript.coverLetter,
+          status: 'SUBMITTED',
+          author_id: user.id,
+          author_name: newManuscript.authorName,
+          author_email: newManuscript.authorEmail,
+          submitted_at: new Date().toISOString(),
+          language: newManuscript.language
+        }]);
 
-      // Sync uploaded files to manuscript_files table
+      if (insertError) {
+        throw new Error(`Failed to insert manuscript: ${insertError.message}`);
+      }
+
+      console.log('[SUBMIT] Manuscript record inserted successfully');
+
+      // Now sync uploaded files to manuscript_files table via server-side RPC
       if (paperDetails.uploadedFiles && paperDetails.uploadedFiles.length > 0) {
-        console.log('[DEBUG] Syncing files to manuscript_files table:', paperDetails.uploadedFiles);
-        for (const file of paperDetails.uploadedFiles) {
-          try {
-            await supabase
-              .from('manuscript_files')
-              .insert({
-                manuscript_id: manuscriptId,
-                file_name: file.fileName,
-                file_type: file.componentType,
-                file_size: file.fileSize,
-                storage_path: file.storagePath,
-                public_url: file.publicUrl,
-                uploaded_at: new Date().toISOString()
-              });
-          } catch (fileError) {
-            console.warn(`[DEBUG] Failed to sync file ${file.fileName}:`, fileError);
+        console.log('[SUBMIT] Syncing files to manuscript_files table:', paperDetails.uploadedFiles);
+
+        // Transform files to match the RPC parameter format
+        const filesForSync = paperDetails.uploadedFiles.map((file: any) => ({
+          file_name: file.fileName,
+          file_type: file.componentType,
+          file_size: file.fileSize,
+          storage_path: file.storagePath,
+          public_url: file.publicUrl
+        }));
+
+        try {
+          const { data: syncResult, error: syncError } = await supabase.rpc(
+            'sync_manuscript_files',
+            {
+              p_manuscript_id: manuscriptId,
+              p_files: filesForSync
+            }
+          );
+
+          if (syncError) {
+            console.warn('[SUBMIT] File sync RPC error:', syncError.message);
+          } else {
+            console.log('[SUBMIT] Files synced successfully:', syncResult);
           }
+        } catch (fileError) {
+          console.warn('[SUBMIT] Failed to sync files:', fileError);
         }
       }
 
       // Refresh the list to show the new manuscript
+      console.log('[SUBMIT] Calling load() to refresh manuscript list...');
       await load();
-      console.log('[DEBUG] Manuscript list refreshed');
+      console.log('[SUBMIT] Manuscript list refreshed, setting view to list');
       setView('list');
+      console.log('[SUBMIT] Submission complete!');
     } catch (err: any) {
       const errorMsg = err.message || 'Failed to submit manuscript';
       setError(errorMsg);
-      console.error('Submission error:', errorMsg, err);
+      console.error('[SUBMIT] Submission error:', errorMsg, err);
     }
   };
 
