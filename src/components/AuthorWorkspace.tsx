@@ -218,6 +218,28 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       await upsertManuscriptToDb(newManuscript);
       console.log('[DEBUG] Manuscript saved to database successfully');
 
+      // Sync uploaded files to manuscript_files table
+      if (paperDetails.uploadedFiles && paperDetails.uploadedFiles.length > 0) {
+        console.log('[DEBUG] Syncing files to manuscript_files table:', paperDetails.uploadedFiles);
+        for (const file of paperDetails.uploadedFiles) {
+          try {
+            await supabase
+              .from('manuscript_files')
+              .insert({
+                manuscript_id: manuscriptId,
+                file_name: file.fileName,
+                file_type: file.componentType,
+                file_size: file.fileSize,
+                storage_path: file.storagePath,
+                public_url: file.publicUrl,
+                uploaded_at: new Date().toISOString()
+              });
+          } catch (fileError) {
+            console.warn(`[DEBUG] Failed to sync file ${file.fileName}:`, fileError);
+          }
+        }
+      }
+
       // Refresh the list to show the new manuscript
       await load();
       console.log('[DEBUG] Manuscript list refreshed');
