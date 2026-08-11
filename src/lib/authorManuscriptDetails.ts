@@ -75,11 +75,12 @@ export async function fetchAuthorManuscriptDetails(
       throw new Error('Manuscript not found');
     }
 
-    // Fetch manuscript files
+    // Fetch manuscript files (excluding revision files)
     const { data: filesData, error: filesError } = await supabase
       .from('manuscript_files')
       .select('*')
       .eq('manuscript_id', manuscriptId)
+      .is('revision_id', null)
       .order('uploaded_at', { ascending: false });
 
     if (filesError) throw new Error(filesError.message);

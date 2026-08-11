@@ -390,8 +390,10 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
       const user = authData.user;
       setProgress(40);
 
-      // 2. Perform upload using required path: ${user.id}/${Date.now()}-${file.name}
-      const fileKey = `${user.id}/${Date.now()}-${file.name}`;
+      // 2. Perform upload using required path: ${user.id}/${Date.now()}_${file.name}
+      // Sanitize filename to avoid storage path issues
+      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+      const fileKey = `${user.id}/${Date.now()}_${sanitizedFileName}`;
       const { data, error } = await supabase.storage
         .from("manuscript-files")
         .upload(fileKey, file);
