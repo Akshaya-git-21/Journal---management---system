@@ -207,6 +207,19 @@ export async function getMyNotifications(unreadOnly: boolean = false): Promise<N
 // Manuscripts, contributors, suggested reviewers, discussions, profile pickers
 // ------------------------------------------
 
+export interface ManuscriptFileRow {
+  id: string;
+  manuscript_id: string;
+  revision_id: string | null;
+  file_name: string;
+  file_type: string;
+  file_size: string | null;
+  storage_path: string | null;
+  public_url: string | null;
+  uploaded_by: string | null;
+  uploaded_at: string;
+}
+
 export interface ManuscriptRow {
   id: string;
   title: string;
@@ -229,6 +242,7 @@ export interface ManuscriptRow {
   published_at: string | null;
   created_at: string;
   updated_at: string;
+  files?: ManuscriptFileRow[];
 }
 
 export interface ContributorRow {
@@ -294,6 +308,12 @@ export async function getManuscript(id: string): Promise<ManuscriptRow | null> {
   const { data, error } = await supabase.from('manuscripts').select('*').eq('id', id).maybeSingle();
   if (error) throw new Error(error.message);
   return data;
+}
+
+export async function getManuscriptFiles(manuscriptId: string): Promise<ManuscriptFileRow[]> {
+  const { data, error } = await supabase.from('manuscript_files').select('*').eq('manuscript_id', manuscriptId).is('revision_id', null).order('uploaded_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }
 
 export async function getContributors(manuscriptId: string): Promise<ContributorRow[]> {

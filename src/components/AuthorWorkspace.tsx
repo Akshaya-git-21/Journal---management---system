@@ -4,7 +4,8 @@ import {
   ManuscriptRow,
   listManuscripts,
   getManuscript,
-  subscribeToManuscripts
+  subscribeToManuscripts,
+  getManuscriptFiles
 } from '../lib/workflow';
 import { supabase, upsertManuscriptToDb } from '../lib/supabase';
 import NewSubmissionFlow from './NewSubmissionFlow';
@@ -72,7 +73,16 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         .order('submitted_at', { ascending: false });
 
       if (queryError) throw queryError;
-      setItems((data || []) as ManuscriptRow[]);
+
+      // Fetch files for each manuscript
+      const manuscriptsWithFiles = await Promise.all(
+        (data || []).map(async (manuscript) => {
+          const files = await getManuscriptFiles(manuscript.id);
+          return { ...manuscript, files };
+        })
+      );
+
+      setItems((manuscriptsWithFiles || []) as ManuscriptRow[]);
       setError('');
     } catch (e: any) {
       setError(e.message || 'Failed to load manuscripts');
@@ -401,6 +411,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                           <th className="px-6 py-3">Title</th>
                           <th className="px-6 py-3">Date Submitted</th>
                           <th className="px-6 py-3">Current Status</th>
+                          <th className="px-6 py-3">Files</th>
                           <th className="px-6 py-3">Progress Timeline</th>
                           <th className="px-6 py-3">Actions</th>
                         </tr>
@@ -418,6 +429,18 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                               <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase ${STATUS_STYLES[m.status]}`}>
                                 {m.status.replace(/_/g, ' ')}
                               </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2 text-sm text-slate-600">
+                                {m.files && m.files.length > 0 ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <FileText className="w-4 h-4 text-emerald-600" />
+                                    <span className="text-xs">{m.files.length} file{m.files.length !== 1 ? 's' : ''}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-slate-400">No files</span>
+                                )}
+                              </div>
                             </td>
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-1.5">
