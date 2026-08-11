@@ -192,6 +192,13 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
   // Trigger form validation warnings
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  // Submission state
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [submittedManuscriptId, setSubmittedManuscriptId] = useState<string | null>(null);
+
   // Initialize author details when mounted
   useEffect(() => {
     const authorName = currentUser?.name || "Dr. Ada Lovelace";
@@ -603,44 +610,89 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
     setReviewerSuggestions(prev => prev.filter(r => r.id !== id));
   };
 
-  // Final submit dispatcher
-  const triggerSubmitFinal = () => {
-    const nextIdVal = String(Math.floor(Math.random() * (9999 - 1000 + 1) + 1000));
-    setGeneratedId(nextIdVal);
+  // Final submit dispatcher with comprehensive validation and error handling
+  const triggerSubmitFinal = async () => {
+    // Prevent duplicate submissions
+    if (hasSubmitted || isSubmitting) {
+      setSubmitError('Submission already in progress or completed. Please wait...');
+      return;
+    }
 
-    // Find the Blind Manuscript file details (or whichever was uploaded)
-    const blindManuscriptFile = uploadedFiles.find(f => f.componentType === 'Blind Manuscript');
+    // Validate all required data before submission
+    const validationChecks = [
+      { condition: !title.trim(), message: 'Manuscript title is required' },
+      { condition: !abstract.trim(), message: 'Abstract is required' },
+      { condition: contributors.length === 0, message: 'At least one author is required' },
+      { condition: uploadedFiles.filter(f => f.componentType === 'Blind Manuscript').length === 0, message: 'Blind manuscript file is required' },
+      { condition: uploadedFiles.filter(f => f.componentType === 'Title Page').length === 0, message: 'Title page is required' },
+      { condition: uploadedFiles.filter(f => f.componentType === 'Author Form').length === 0, message: 'Author form is required' },
+    ];
 
-    // Save final state
-    const paperObj = {
-      id: nextIdVal,
-      author: contributors[0]?.lastName || (currentUser?.name ? currentUser.name.split(' ').slice(-1)[0] : "Lovelace"),
-      title: title.trim(),
-      stage: "Submission",
-      language: subLanguage,
-      section: subSection,
-      abstract: abstract.trim(),
-      receivedAt: new Date().toISOString().split('T')[0],
-      contributors: contributors,
-      additionalFiles: additionalFiles,
-      uploadedFileNames: uploadedFiles.map(f => f.fileName),
-      coverLetter: coverLetter,
-      reviewerSuggestions: reviewerSuggestions,
-      license: licenseType,
-      isOpenAccess: isOpenAccess,
-      // Pass the specific metadata for the manuscripts table
-      storagePath: blindManuscriptFile?.storagePath || null,
-      publicUrl: blindManuscriptFile?.publicUrl || null,
-      fileName: blindManuscriptFile?.fileName || null,
-      fileSize: blindManuscriptFile?.fileSize || null
-    };
+    const failedCheck = validationChecks.find(check => check.condition);
+    if (failedCheck) {
+      setSubmitError(failedCheck.message);
+      return;
+    }
 
-    // Callback back to AuthorWorkspace state synchronizer
-    onSubmit(paperObj);
-    localStorage.removeItem('ojs_submission_cached_draft');
+    setIsSubmitting(true);
+    setSubmitError(null);
+    setSubmitSuccess(false);
 
-    // Move to completion screen
-    setCurrentStep(9);
+    try {
+      // Generate unique manuscript ID (JMS-YYYY-XXXXX format)
+      const nextIdVal = `JMS-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+      setGeneratedId(nextIdVal);
+      setSubmittedManuscriptId(nextIdVal);
+
+      // Find the Blind Manuscript file details
+      const blindManuscriptFile = uploadedFiles.find(f => f.componentType === 'Blind Manuscript');
+
+      // Build comprehensive submission object
+      const paperObj = {
+        id: nextIdVal,
+        author: contributors[0]?.lastName || (currentUser?.name ? currentUser.name.split(' ').slice(-1)[0] : "Lovelace"),
+        title: title.trim(),
+        stage: "Submission",
+        language: subLanguage,
+        section: subSection,
+        abstract: abstract.trim(),
+        receivedAt: new Date().toISOString().split('T')[0],
+        contributors: contributors,
+        additionalFiles: additionalFiles,
+        uploadedFileNames: uploadedFiles.map(f => f.fileName),
+        uploadedFiles: uploadedFiles,
+        coverLetter: coverLetter,
+        reviewerSuggestions: reviewerSuggestions,
+        license: licenseType,
+        isOpenAccess: isOpenAccess,
+        storagePath: blindManuscriptFile?.storagePath || null,
+        publicUrl: blindManuscriptFile?.publicUrl || null,
+        fileName: blindManuscriptFile?.fileName || null,
+        fileSize: blindManuscriptFile?.fileSize || null
+      };
+
+      // Callback back to AuthorWorkspace to save to database
+      await onSubmit(paperObj);
+
+      // Mark as submitted to prevent duplicates
+      setHasSubmitted(true);
+      setSubmitSuccess(true);
+
+      // Clear draft from localStorage
+      localStorage.removeItem('ojs_submission_cached_draft');
+
+      // Move to completion screen after brief delay to show success
+      setTimeout(() => {
+        setCurrentStep(9);
+      }, 800);
+
+    } catch (err: any) {
+      setSubmitError(err.message || 'Failed to submit manuscript. Please try again.');
+      setHasSubmitted(false);
+      console.error('Submission error:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -2765,6 +2817,30 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                 </div>
               </div>
 
+              {/* Error message display */}
+              {submitError && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-xl max-w-xl mx-auto space-y-2 text-center mt-4">
+                  <p className="text-xs font-semibold text-red-700">
+                    ⚠️ Submission Error
+                  </p>
+                  <p className="text-sm text-red-600 font-medium">
+                    {submitError}
+                  </p>
+                </div>
+              )}
+
+              {/* Success message display */}
+              {submitSuccess && (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl max-w-xl mx-auto space-y-2 text-center mt-4 animate-in fade-in">
+                  <p className="text-xs font-semibold text-emerald-700">
+                    ✅ Submission Successful
+                  </p>
+                  <p className="text-sm text-emerald-600 font-medium">
+                    Your manuscript has been successfully submitted. Manuscript ID: <strong>{submittedManuscriptId}</strong>
+                  </p>
+                </div>
+              )}
+
               {/* Explicit acknowledgement of finality */}
               <div className="p-5 bg-slate-100/50 border border-dashed border-emerald-300 rounded-2xl max-w-xl mx-auto space-y-2 text-center mt-4">
                 <p className="text-xs text-gray-500 font-normal leading-relaxed">
@@ -2920,9 +2996,20 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
               <button
                 type="button"
                 onClick={handleNext}
-                className="px-6 py-2.5 bg-[#008751] hover:bg-[#007043] text-white rounded-lg font-bold text-xs shadow-md shadow-emerald-100/80 transition cursor-pointer flex items-center gap-1.5"
+                disabled={isSubmitting || (currentStep === 8 && hasSubmitted)}
+                className="px-6 py-2.5 bg-[#008751] hover:bg-[#007043] disabled:bg-slate-400 text-white rounded-lg font-bold text-xs shadow-md shadow-emerald-100/80 transition cursor-pointer flex items-center gap-1.5 disabled:cursor-not-allowed"
               >
-                {currentStep === 8 ? (
+                {isSubmitting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-emerald-200 border-t-white rounded-full animate-spin" />
+                    Submitting...
+                  </>
+                ) : submitSuccess && currentStep === 8 ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-200" />
+                    Submitted Successfully!
+                  </>
+                ) : currentStep === 8 ? (
                   <>
                     <FileCheck className="w-4 h-4 text-emerald-200" />
                     Submit Academic Manuscript
