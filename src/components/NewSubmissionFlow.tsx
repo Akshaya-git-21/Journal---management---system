@@ -648,6 +648,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
       const blindManuscriptFile = uploadedFiles.find(f => f.componentType === 'Blind Manuscript');
 
       // Build comprehensive submission object
+      console.log('[SUBMISSION] Building paperObj with', uploadedFiles.length, 'files');
+      console.log('[SUBMISSION] Uploaded files:', uploadedFiles);
+
       const paperObj = {
         id: nextIdVal,
         author: contributors[0]?.lastName || (currentUser?.name ? currentUser.name.split(' ').slice(-1)[0] : "Lovelace"),
@@ -670,6 +673,8 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
         fileName: blindManuscriptFile?.fileName || null,
         fileSize: blindManuscriptFile?.fileSize || null
       };
+
+      console.log('[SUBMISSION] Final paperObj:', paperObj);
 
       // Callback back to AuthorWorkspace to save to database
       await onSubmit(paperObj);

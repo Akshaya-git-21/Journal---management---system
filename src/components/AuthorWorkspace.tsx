@@ -265,13 +265,23 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         console.log('[SUBMIT] Syncing files to manuscript_files table:', paperDetails.uploadedFiles);
 
         // Transform files to match the RPC parameter format
-        const filesForSync = paperDetails.uploadedFiles.map((file: any) => ({
-          file_name: file.fileName,
-          file_type: file.componentType,
-          file_size: file.fileSize,
-          storage_path: file.storagePath,
-          public_url: file.publicUrl
-        }));
+        const filesForSync = paperDetails.uploadedFiles.map((file: any) => {
+          console.log('[SUBMIT] Transforming file:', {
+            fileName: file.fileName,
+            componentType: file.componentType,
+            storagePath: file.storagePath,
+            publicUrl: file.publicUrl
+          });
+          return {
+            file_name: file.fileName,
+            file_type: file.componentType,
+            file_size: file.fileSize,
+            storage_path: file.storagePath,
+            public_url: file.publicUrl
+          };
+        });
+
+        console.log('[SUBMIT] Transformed files for sync:', filesForSync);
 
         try {
           const { data: syncResult, error: syncError } = await supabase.rpc(
@@ -283,13 +293,17 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           );
 
           if (syncError) {
-            console.warn('[SUBMIT] File sync RPC error:', syncError.message);
+            console.error('[SUBMIT] File sync RPC error:', syncError.message, syncError);
+            throw new Error(`File sync failed: ${syncError.message}`);
           } else {
             console.log('[SUBMIT] Files synced successfully:', syncResult);
           }
         } catch (fileError) {
-          console.warn('[SUBMIT] Failed to sync files:', fileError);
+          console.error('[SUBMIT] Failed to sync files:', fileError);
+          throw fileError;
         }
+      } else {
+        console.warn('[SUBMIT] No files to sync. uploadedFiles:', paperDetails.uploadedFiles);
       }
 
       // Refresh the list to show the new manuscript
