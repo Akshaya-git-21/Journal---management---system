@@ -127,6 +127,7 @@ export default function OjsSubmissionDetail({
   const [previewFileName, setPreviewFileName] = useState<string>("");
   const [previewFileType, setPreviewFileType] = useState<string>("");
   const [previewFileSize, setPreviewFileSize] = useState<string>("");
+  const [previewPublicUrl, setPreviewPublicUrl] = useState<string>("");
 
   // Real discussion messages from Supabase
   const [allMessages, setAllMessages] = useState<any[]>([]);
@@ -1286,6 +1287,7 @@ export default function OjsSubmissionDetail({
                                         setPreviewFileName(file.name);
                                         setPreviewFileType(file.type || 'Document');
                                         setPreviewFileSize(file.size || '1.2 MB');
+                                        setPreviewPublicUrl(file.publicUrl || '');
                                         setPreviewModalOpen(true);
                                       }}
                                       className="flex items-center gap-2 max-w-[150px] sm:max-w-none text-left hover:underline cursor-pointer group"
@@ -1304,6 +1306,7 @@ export default function OjsSubmissionDetail({
                                           setPreviewFileName(file.name);
                                           setPreviewFileType(file.type || 'Document');
                                           setPreviewFileSize(file.size || '1.2 MB');
+                                          setPreviewPublicUrl(file.publicUrl || '');
                                           setPreviewModalOpen(true);
                                         }}
                                         className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
@@ -1312,10 +1315,10 @@ export default function OjsSubmissionDetail({
                                         <Eye className="w-3.5 h-3.5" />
                                       </button>
                                       <a
-                                        href={file.url || '#'}
+                                        href={file.publicUrl || file.url || '#'}
                                         download={file.name}
                                         onClick={(e) => {
-                                          if (!file.url) {
+                                          if (!file.publicUrl && !file.url) {
                                             e.preventDefault();
                                             alert(`Downloading: ${file.name}`);
                                           }
@@ -3242,6 +3245,7 @@ export default function OjsSubmissionDetail({
           fileName={previewFileName}
           fileType={previewFileType}
           fileSize={previewFileSize}
+          publicUrl={previewPublicUrl}
         />
       )}
 

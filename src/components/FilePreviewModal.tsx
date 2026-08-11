@@ -11,14 +11,16 @@ interface FilePreviewModalProps {
   fileName: string;
   fileType?: string;
   fileSize?: string;
+  publicUrl?: string;
 }
 
-export default function FilePreviewModal({ 
-  isOpen, 
-  onClose, 
-  fileName, 
+export default function FilePreviewModal({
+  isOpen,
+  onClose,
+  fileName,
   fileType = "Document",
-  fileSize = "1.2 MB"
+  fileSize = "1.2 MB",
+  publicUrl
 }: FilePreviewModalProps) {
   if (!isOpen) return null;
 
@@ -65,7 +67,7 @@ export default function FilePreviewModal({
                 </span>
               </h2>
               <p className="text-[10.5px] text-slate-400 font-mono font-medium mt-0.5">
-                Simulated Document Workspace • {fileSize} • Read-Only Sandbox
+                {publicUrl ? 'Live Document Preview' : 'Simulated Document Workspace'} • {fileSize} • Read-Only Sandbox
               </p>
             </div>
           </div>
@@ -176,7 +178,17 @@ export default function FilePreviewModal({
             >
 
               {/* ----------------- PDF VIEWER LAYOUT ----------------- */}
-              {isPdf && (
+              {isPdf && publicUrl && (
+                <iframe
+                  src={`${publicUrl}#toolbar=1&navpanes=0&scrollbar=1`}
+                  className="w-full h-[900px] rounded-lg shadow-xl border border-slate-200"
+                  style={{ minHeight: '900px' }}
+                  title="PDF Preview"
+                />
+              )}
+
+              {/* Simulated fallback for PDF without URL */}
+              {isPdf && !publicUrl && (
                 <div className="bg-white text-slate-800 p-12 sm:p-16 rounded-lg shadow-xl border border-slate-200 text-left min-h-[900px] leading-relaxed font-serif">
                   {/* Running Header */}
                   <div className="border-b border-slate-200 pb-3 mb-8 flex justify-between text-[10px] font-mono uppercase text-slate-400 font-extrabold tracking-wider">
