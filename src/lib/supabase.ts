@@ -177,15 +177,16 @@ export async function upsertManuscriptToDb(manuscript: Manuscript): Promise<void
           };
           const coreError = await tryUpsert(corePayload);
           if (coreError) {
-            console.warn("[Supabase] Fallback core upsert warning:", coreError.message);
+            throw new Error(`[Supabase] Manuscript upsert failed after all retries: ${coreError.message}`);
           }
         }
         return;
       }
-      console.warn("[Supabase Upsert Warning]:", error.message);
+      throw new Error(`[Supabase] Failed to save manuscript: ${error.message}`);
     }
   } catch (err: any) {
-    console.warn("[Supabase Upsert Exception Handled]:", err.message || err);
+    console.error("[Supabase Upsert Error]:", err.message || err);
+    throw err;
   }
 }
 

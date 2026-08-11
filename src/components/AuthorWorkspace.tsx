@@ -175,6 +175,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         return;
       }
 
+      console.log('[DEBUG] Starting manuscript submission for user:', user.id);
+
       // Generate manuscript ID (JMS-YYYY-XXXXX format)
       const manuscriptId = `JMS-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
@@ -210,15 +212,20 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         language: paperDetails.language || 'English'
       };
 
+      console.log('[DEBUG] Manuscript object created:', { id: newManuscript.id, title: newManuscript.title, authorId: newManuscript.authorId });
+
       // Save manuscript to Supabase
       await upsertManuscriptToDb(newManuscript);
+      console.log('[DEBUG] Manuscript saved to database successfully');
 
       // Refresh the list to show the new manuscript
       await load();
+      console.log('[DEBUG] Manuscript list refreshed');
       setView('list');
     } catch (err: any) {
-      setError(err.message || 'Failed to submit manuscript');
-      console.error('Submission error:', err);
+      const errorMsg = err.message || 'Failed to submit manuscript';
+      setError(errorMsg);
+      console.error('Submission error:', errorMsg, err);
     }
   };
 
