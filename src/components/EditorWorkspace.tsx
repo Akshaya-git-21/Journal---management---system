@@ -15,6 +15,7 @@ import {
   saveDraftEvaluation,
   getDraftEvaluation,
   submitAssessment,
+  submitRecommendation,
   publishFinalDecision,
   assignReviewers,
   removeReviewerAssignment,
@@ -71,6 +72,8 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
     reviewStages: false,
     copyedit: false
   });
+  const [showAcceptModal, setShowAcceptModal] = useState(false);
+  const [respondingToAssignment, setRespondingToAssignment] = useState(false);
 
   const load = async () => {
     try {
@@ -129,8 +132,50 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
 
-  if (selected) {
-    return <AssignmentDetail details={selected} onBack={() => setSelectedManuscriptId(null)} onChanged={load} currentUser={currentUser} />;
+  // Show accept/decline modal if assignment is INVITED
+  if (selected && selected.assignment.status === 'INVITED' && showAcceptModal) {
+    return (
+      <AcceptDeclineModal
+        details={selected}
+        onAccept={async () => {
+          setRespondingToAssignment(true);
+          try {
+            await respondToAssignment(selected.assignment.id, true);
+            setShowAcceptModal(false);
+            await load();
+          } catch (error: any) {
+            alert('Error accepting assignment: ' + error.message);
+          } finally {
+            setRespondingToAssignment(false);
+          }
+        }}
+        onDecline={async () => {
+          setRespondingToAssignment(true);
+          try {
+            await respondToAssignment(selected.assignment.id, false);
+            setShowAcceptModal(false);
+            setSelectedManuscriptId(null);
+            await load();
+          } catch (error: any) {
+            alert('Error declining assignment: ' + error.message);
+          } finally {
+            setRespondingToAssignment(false);
+          }
+        }}
+        isLoading={respondingToAssignment}
+      />
+    );
+  }
+
+  if (selected && selected.assignment.status === 'INVITED' && !showAcceptModal) {
+    setShowAcceptModal(true);
+  }
+
+  if (selected && selected.assignment.status === 'ACCEPTED') {
+    return <AssignmentDetail details={selected} onBack={() => {
+      setSelectedManuscriptId(null);
+      setShowAcceptModal(false);
+    }} onChanged={load} currentUser={currentUser} />;
   }
 
   return (
@@ -517,8 +562,20 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   };
 
   const handleEditorDecision = async (decision: 'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION' | 'REJECT') => {
-    setDecisionType(decision);
-    setShowDecisionModal(true);
+    setBusy(true);
+    setError('');
+    try {
+      // Call submitRecommendation which calls the submit_editor_recommendation RPC
+      await submitRecommendation(manuscript.id, decision);
+      showNotification('success', `Editorial recommendation submitted: ${decision.replace(/_/g, ' ')}`);
+      setDecisionType(decision);
+      onChanged();
+    } catch (e: any) {
+      setError(e.message || 'Failed to submit recommendation');
+      showNotification('error', e.message || 'Failed to submit recommendation');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submitEditorDecision = async () => {
@@ -526,12 +583,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     setBusy(true);
     setError('');
     try {
-      // Attempt to submit decision (may fail if RPC not available - still close modal)
+      // Note: This is for Coordinator final decision, not editor recommendation
+      // Leaving for backward compatibility if needed elsewhere
       try {
         await publishFinalDecision(manuscript.id, decisionType, decisionLetter);
       } catch (rpcError) {
         console.warn('Decision RPC failed (expected if not implemented):', rpcError);
-        // Continue anyway - close modal and show success
       }
 
       setShowDecisionModal(false);
@@ -2005,6 +2062,79 @@ function EditorEvaluationForm({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// NEW COMPONENT: Accept/Decline Modal for INVITED assignments
+function AcceptDeclineModal({
+  details,
+  onAccept,
+  onDecline,
+  isLoading
+}: {
+  details: EditorManuscriptDetails;
+  onAccept: () => Promise<void>;
+  onDecline: () => Promise<void>;
+  isLoading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-[#1a4038] to-[#0f2e2a] text-white p-6 rounded-t-2xl">
+          <h2 className="text-2xl font-black">Editorial Assignment</h2>
+          <p className="text-emerald-100 text-sm mt-1">You have been invited to evaluate a manuscript</p>
+        </div>
+
+        {/* Content */}
+        <div className="p-8">
+          <div className="mb-6">
+            <p className="text-slate-600 text-sm mb-4">
+              You have been assigned to provide an editorial assessment for:
+            </p>
+
+            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4">
+              <p className="font-bold text-slate-900 text-sm mb-2">{details.manuscript.title}</p>
+              <p className="text-xs text-slate-500 mb-2">
+                <strong>Author:</strong> {details.manuscript.author_name}
+              </p>
+              <p className="text-xs text-slate-600 line-clamp-2">
+                {details.manuscript.abstract}
+              </p>
+            </div>
+
+            <p className="text-sm text-slate-700 mb-4">
+              If you accept, you will evaluate this manuscript using our 7-criteria framework and recommend whether to proceed to peer review or request revisions.
+            </p>
+          </div>
+
+          {/* Buttons */}
+          <div className="space-y-3">
+            <button
+              onClick={onAccept}
+              disabled={isLoading}
+              className="w-full bg-emerald-600 text-white py-3 rounded-lg font-semibold hover:bg-emerald-700 disabled:opacity-50 transition flex items-center justify-center gap-2"
+            >
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-5 h-5" />}
+              {isLoading ? 'Processing...' : '✓ Accept Assignment'}
+            </button>
+
+            <button
+              onClick={onDecline}
+              disabled={isLoading}
+              className="w-full border-2 border-red-600 text-red-600 py-3 rounded-lg font-semibold hover:bg-red-50 disabled:opacity-50 transition flex items-center justify-center gap-2"
+            >
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <XIcon className="w-5 h-5" />}
+              {isLoading ? 'Processing...' : '✕ Decline Assignment'}
+            </button>
+          </div>
+
+          <p className="text-xs text-slate-500 text-center mt-4">
+            If you decline, the Coordinator will be notified and can assign another editor.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

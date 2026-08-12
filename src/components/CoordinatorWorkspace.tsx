@@ -1375,6 +1375,18 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
 
   useEffect(() => { load(); }, [manuscript.id]);
 
+  // Realtime subscription to reviewer_assignments for live 0/2 → 1/2 → 2/2 updates
+  useEffect(() => {
+    const channel = supabase
+      .channel(`reviewer_assignments:${manuscript.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviewer_assignments', filter: `manuscript_id=eq.${manuscript.id}` }, () => {
+        load();
+      })
+      .subscribe();
+
+    return () => { channel.unsubscribe(); };
+  }, [manuscript.id]);
+
   const activeEditorAssignment = editorAssignments.find((a) => a.status === 'ACCEPTED') || editorAssignments[0];
   const editorHasRecommended = !!activeEditorAssignment?.recommendation;
 
@@ -1495,21 +1507,67 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
       )}
       {reviewerAssignments.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-2"><Users className="w-4 h-4" /> Reviewers</h3>
-          <div className="space-y-3">
-            {reviewerAssignments.map((r) => (
-              <div key={r.id} className="border border-slate-100 rounded-lg p-3 text-xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-slate-700">{profiles[r.reviewer_id]?.name || r.reviewer_id}</span>
-                  <span className={`px-2 py-0.5 rounded-full font-bold uppercase text-[10px] ${
-                    r.status === 'SUBMITTED' ? 'bg-emerald-50 text-emerald-700' : r.status === 'DECLINED' ? 'bg-red-50 text-red-700' : r.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
-                  }`}>{r.status}</span>
+          <h3 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-2"><Users className="w-4 h-4" /> Reviewer Reports</h3>
+          <div className="space-y-4">
+            {reviewerAssignments.map((r, idx) => (
+              <div key={r.id} className="border border-slate-200 rounded-lg overflow-hidden">
+                <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-slate-900">Reviewer {idx + 1}</span>
+                    <p className="text-xs text-slate-600">{profiles[r.reviewer_id]?.name || r.reviewer_id}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {r.submitted_at && (
+                      <p className="text-xs text-slate-500">
+                        Submitted: {new Date(r.submitted_at).toLocaleString()}
+                      </p>
+                    )}
+                    <span className={`px-2 py-1 rounded-full font-bold uppercase text-[10px] ${
+                      r.status === 'SUBMITTED' ? 'bg-emerald-50 text-emerald-700' : r.status === 'DECLINED' ? 'bg-red-50 text-red-700' : r.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
+                    }`}>{r.status}</span>
+                  </div>
                 </div>
                 {r.status === 'SUBMITTED' && (
-                  <div className="mt-2 space-y-1 text-slate-600">
-                    <p><strong>Recommendation:</strong> {r.recommendation?.replace(/_/g, ' ')}</p>
-                    <p><strong>To Author:</strong> {r.comments_to_author}</p>
-                    <p><strong>To Editor:</strong> {r.comments_to_editor}</p>
+                  <div className="p-4 space-y-3">
+                    <div>
+                      <p className="text-xs font-bold text-slate-900 mb-2">Assessment Scores</p>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[
+                          {label: 'Scientific Merit', value: r.scientific_merit},
+                          {label: 'Novelty', value: r.novelty_innovation},
+                          {label: 'Methodology', value: r.methodology_quality},
+                          {label: 'Literature', value: r.literature_adequacy},
+                          {label: 'Ethics', value: r.ethical_compliance},
+                          {label: 'Data Reliability', value: r.data_reliability},
+                          {label: 'Writing', value: r.writing_quality}
+                        ].map((score) => (
+                          <div key={score.label} className="bg-white rounded px-2 py-1.5 border border-slate-200">
+                            <p className="text-slate-400 text-[10px] uppercase">{score.label}</p>
+                            <p className="font-black text-slate-800">{score.value ?? '--'}/10</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900 mb-1"><strong>Recommendation:</strong> {r.recommendation?.replace(/_/g, ' ')}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900 mb-1">To Author:</p>
+                      <p className="text-xs text-slate-600 bg-slate-50 p-2 rounded">{r.comments_to_author || '(No comments)'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900 mb-1">To Editor:</p>
+                      <p className="text-xs text-slate-600 bg-slate-50 p-2 rounded">{r.comments_to_editor || '(No comments)'}</p>
+                    </div>
+                  </div>
+                )}
+                {r.status !== 'SUBMITTED' && (
+                  <div className="p-4">
+                    <p className="text-xs text-slate-500">
+                      {r.status === 'INVITED' && '⏳ Awaiting reviewer response to invitation'}
+                      {r.status === 'ACCEPTED' && '✓ Reviewer has accepted and is preparing assessment'}
+                      {r.status === 'DECLINED' && '✕ Reviewer declined this assignment'}
+                    </p>
                   </div>
                 )}
               </div>
@@ -1653,14 +1711,14 @@ function PublishDecisionPanel({ busy, editorHasRecommended, recommendation, revi
         <div className="flex items-start justify-between mb-4">
           <div>
             <h3 className="text-sm font-black text-slate-900">Complete Review Package</h3>
-            <p className="text-xs text-slate-600 mt-1">All reviewer reports received • Editor recommendation ready</p>
+            <p className="text-xs text-slate-600 mt-1">All assessments compiled • Ready for final decision</p>
           </div>
           <span className={`px-3 py-1 rounded-full font-bold text-[11px] ${allReviewsIn ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-100 text-amber-700'}`}>
             {allReviewsIn ? '✓ READY' : `${submittedReviews.length}/2 REVIEWS IN`}
           </span>
         </div>
 
-        <div className="grid grid-cols-4 gap-2 mb-4">
+        <div className="grid grid-cols-3 gap-2 mb-4">
           {['SUMMARY', 'REVIEWERS', 'DECISION'].map((mode) => (
             <button
               key={mode}
@@ -1678,14 +1736,30 @@ function PublishDecisionPanel({ busy, editorHasRecommended, recommendation, revi
 
         {viewMode === 'SUMMARY' && (
           <div className="space-y-3 text-xs">
-            <div className="bg-white rounded-lg p-3 border border-slate-100">
-              <p className="font-bold text-slate-900 mb-1">Editor Assessment</p>
-              <p className="text-slate-600">Recommendation: <span className="font-bold text-[#008751]">{recommendation?.replace(/_/g, ' ')}</span></p>
+            <div className="bg-white rounded-lg p-4 border border-slate-100">
+              <p className="font-bold text-slate-900 mb-3">Editor Assessment</p>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  {label: 'Scientific Merit', key: 'scientific_merit'},
+                  {label: 'Novelty', key: 'novelty_innovation'},
+                  {label: 'Methodology', key: 'methodology_quality'},
+                  {label: 'Literature', key: 'literature_adequacy'},
+                  {label: 'Ethics', key: 'ethical_compliance'},
+                  {label: 'Data Reliability', key: 'data_reliability'},
+                  {label: 'Writing', key: 'writing_quality'}
+                ].map((score) => (
+                  <div key={score.key} className="bg-slate-50 rounded px-2 py-1.5 border border-slate-200">
+                    <p className="text-slate-400 text-[10px] uppercase">{score.label}</p>
+                    <p className="font-black text-slate-800">--/10</p>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-slate-600">Recommendation: <span className="font-bold text-[#008751]">{recommendation?.replace(/_/g, ' ')}</span></p>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="bg-white rounded-lg p-3 border border-slate-100">
                 <p className="text-slate-500 uppercase font-bold text-[10px] mb-1">Reviews Received</p>
-                <p className="text-2xl font-black text-slate-900">{submittedReviews.length}</p>
+                <p className="text-2xl font-black text-slate-900">{submittedReviews.length}/2</p>
               </div>
               <div className="bg-white rounded-lg p-3 border border-slate-100">
                 <p className="text-slate-500 uppercase font-bold text-[10px] mb-1">Status</p>
@@ -1741,9 +1815,17 @@ function PublishDecisionPanel({ busy, editorHasRecommended, recommendation, revi
 
         <div className="flex gap-2 mt-4 pt-4 border-t border-emerald-200">
           <button
-            onClick={() => alert('Returned to Editor for clarification')}
-            className="flex-1 px-3 py-2 border border-slate-300 text-slate-700 font-bold text-xs rounded-lg hover:bg-slate-50 transition"
+            onClick={() => {
+              const message = window.prompt('Request clarification from the editor:', 'Please clarify...');
+              if (message) {
+                alert(`Clarification request sent to editor: "${message}"`);
+                // This would call an RPC function to create a communication record
+                // await postDiscussionMessage(manuscript.id, message, 'EDITOR_CLARIFICATION');
+              }
+            }}
+            className="flex-1 px-3 py-2 border border-slate-300 text-slate-700 font-bold text-xs rounded-lg hover:bg-slate-50 transition flex items-center justify-center gap-1.5"
           >
+            <MessageCircle className="w-4 h-4" />
             Return to Editor
           </button>
           <button

@@ -177,19 +177,29 @@ export default function FilePreviewModal({
               className="w-full max-w-4xl shrink-0"
             >
 
-              {/* ----------------- PDF VIEWER LAYOUT ----------------- */}
+              {/* PDF VIEWER - Displays actual uploaded file from Supabase */}
               {isPdf && publicUrl && (
-                <iframe
-                  src={`${publicUrl}#toolbar=1&navpanes=0&scrollbar=1`}
-                  className="w-full h-[900px] rounded-lg shadow-xl border border-slate-200"
-                  style={{ minHeight: '900px' }}
-                  title="PDF Preview"
-                />
+                <div className="w-full flex flex-col gap-2">
+                  <iframe
+                    src={`${publicUrl}#toolbar=1&navpanes=0&scrollbar=1`}
+                    className="w-full h-[900px] rounded-lg shadow-xl border border-slate-200"
+                    style={{ minHeight: '900px' }}
+                    title="PDF Preview"
+                    onError={() => console.error('PDF failed to load from:', publicUrl)}
+                  />
+                  <div className="text-xs text-slate-500 font-mono text-center">
+                    Live document from Supabase storage
+                  </div>
+                </div>
               )}
 
-              {/* Simulated fallback for PDF without URL */}
+              {/* Fallback for PDF without live URL - Shows demo content */}
               {isPdf && !publicUrl && (
-                <div className="bg-white text-slate-800 p-12 sm:p-16 rounded-lg shadow-xl border border-slate-200 text-left min-h-[900px] leading-relaxed font-serif">
+                <div className="space-y-4">
+                  <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-lg text-xs font-medium">
+                    <strong>ℹ️ Demo Mode:</strong> No live URL available. Showing sample document. Upload a real PDF file to see the actual content.
+                  </div>
+                  <div className="bg-white text-slate-800 p-12 sm:p-16 rounded-lg shadow-xl border border-slate-200 text-left min-h-[900px] leading-relaxed font-serif">
                   {/* Running Header */}
                   <div className="border-b border-slate-200 pb-3 mb-8 flex justify-between text-[10px] font-mono uppercase text-slate-400 font-extrabold tracking-wider">
                     <span>Journal of Medical Systems • Research Article</span>
@@ -308,10 +318,11 @@ export default function FilePreviewModal({
                     <span>Page {currentPage} of 6</span>
                   </div>
                 </div>
+                </div>
               )}
 
 
-              {/* ----------------- WORD DOCUMENT LAYOUT ----------------- */}
+              {/* WORD DOCUMENT LAYOUT - Displays .docx files */}
               {isDocx && (
                 <div className="bg-white text-slate-800 p-12 sm:p-16 rounded-lg shadow-xl border border-slate-350 text-left min-h-[850px] leading-relaxed font-sans">
                   {/* Word-style blue banner at top */}

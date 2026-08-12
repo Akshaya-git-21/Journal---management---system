@@ -1304,11 +1304,19 @@ export default function OjsSubmissionDetail({
                                     <div className="flex items-center justify-center gap-1">
                                       <button
                                         onClick={() => {
-                                          console.log('[EYE_ICON] Clicked file:', { name: file.name, type: file.type, publicUrl: file.publicUrl });
+                                          const publicUrlValue = file.publicUrl || '';
+                                          console.log('[EYE_ICON] File preview clicked:', {
+                                            name: file.name,
+                                            type: file.type,
+                                            size: file.size,
+                                            publicUrl: publicUrlValue,
+                                            storagePath: file.storagePath,
+                                            hasPublicUrl: !!publicUrlValue
+                                          });
                                           setPreviewFileName(file.name);
                                           setPreviewFileType(file.type || 'Document');
                                           setPreviewFileSize(file.size || '1.2 MB');
-                                          setPreviewPublicUrl(file.publicUrl || '');
+                                          setPreviewPublicUrl(publicUrlValue);
                                           setPreviewModalOpen(true);
                                         }}
                                         className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"

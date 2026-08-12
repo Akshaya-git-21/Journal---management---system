@@ -392,28 +392,48 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
 
       // 2. Perform upload using required path: ${user.id}/${Date.now()}_${file.name}
       // Sanitize filename to avoid storage path issues
-      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       const fileKey = `${user.id}/${Date.now()}_${sanitizedFileName}`;
+
+      console.log("Uploading to Supabase with key:", fileKey, "File size:", file.size, "File type:", file.type);
+
       const { data, error } = await supabase.storage
         .from("manuscript-files")
-        .upload(fileKey, file);
+        .upload(fileKey, file, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: file.type || 'application/octet-stream'
+        });
 
       if (error) {
         console.error("Upload error:", error);
-        throw error;
+        throw new Error(`Supabase upload failed: ${error.message}`);
       }
 
       console.log("Upload success:", data);
       console.log("Storage path:", data.path);
       setProgress(85);
 
-      // 3. Get Public URL
+      // 3. Get Public URL - Make sure the path is correct
+      if (!data.path) {
+        throw new Error('File upload succeeded but no path returned from Supabase');
+      }
+
       const { data: urlData } = supabase.storage
         .from("manuscript-files")
         .getPublicUrl(data.path);
 
+      if (!urlData || !urlData.publicUrl) {
+        throw new Error('Failed to generate public URL for uploaded file');
+      }
+
       const publicUrl = urlData.publicUrl;
-      console.log("Public URL:", publicUrl);
+      console.log("File uploaded successfully:", {
+        path: data.path,
+        publicUrl: publicUrl,
+        fileSize: file.size,
+        fileName: file.name
+      });
       setProgress(100);
 
       const newFileObj = {
