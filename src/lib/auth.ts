@@ -178,6 +178,30 @@ export async function requestPasswordReset(email: string): Promise<void> {
 }
 
 /**
+ * Admin-only: Reset a user's password directly.
+ * Used by Coordinators for testing access to editor accounts.
+ * Returns the new password that was set.
+ */
+export async function resetUserPassword(userId: string, newPassword: string, authToken: string): Promise<void> {
+  const response = await fetch('/api/reset-user-password', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${authToken}`
+    },
+    body: JSON.stringify({
+      userId,
+      newPassword
+    })
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.error || 'Unable to reset password.');
+  }
+}
+
+/**
  * Resolves the currently active Supabase session (if any) into an AuthUser.
  * Used on app boot to restore a session without trusting client-stored role.
  * Silently signs out and returns null for any non-active session state.

@@ -9,6 +9,7 @@ import {
   subscribeToManuscripts, PublishDecision, getRevisions
 } from '../lib/workflow';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
+import EditorDetailsModal from './EditorDetailsModal';
 import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity } from 'lucide-react';
 
 interface CoordinatorWorkspaceProps {
@@ -71,6 +72,19 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [reviewerInviteSpecialty, setReviewerInviteSpecialty] = useState('');
   const [reviewerInvitePassword, setReviewerInvitePassword] = useState('');
   const [generatedReviewerCredentials, setGeneratedReviewerCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [selectedEditorForDetails, setSelectedEditorForDetails] = useState<ProfileRow | null>(null);
+  const [currentUserToken, setCurrentUserToken] = useState<string>('');
+
+  // Get current user's auth token for password reset
+  useEffect(() => {
+    const getToken = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        setCurrentUserToken(session.access_token);
+      }
+    };
+    getToken();
+  }, []);
 
   const resetInviteForm = () => {
     setInviteName('');
@@ -392,6 +406,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
                 onSearch={setEditorSearch}
                 onInvite={handleOpenInvite}
                 onExport={() => window.alert('Exported editorial board members.')}
+                onEditorDetails={setSelectedEditorForDetails}
               />
             ) : isReviewersSection ? (
               <ReviewerDirectoryScreen
@@ -497,6 +512,13 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
             onGeneratePassword={() => setReviewerInvitePassword(generateTempPassword())}
             onSubmit={handleSendReviewerInvite}
           />
+          {selectedEditorForDetails && (
+            <EditorDetailsModal
+              editor={selectedEditorForDetails}
+              onClose={() => setSelectedEditorForDetails(null)}
+              currentUserToken={currentUserToken}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -580,7 +602,7 @@ function PendingApprovalsScreen({ approvals, loading, onAction }: { approvals: P
   );
 }
 
-function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, onExport }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInvite: () => void; onExport: () => void; }) {
+function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, onExport, onEditorDetails }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInvite: () => void; onExport: () => void; onEditorDetails: (editor: ProfileRow) => void; }) {
   const [activeTab, setActiveTab] = useState<'ALL' | 'EDITORS' | 'ASSOCIATE' | 'SECTION'>('ALL');
   const totalMembers = profiles.length;
   const activeMembers = profiles.filter((p) => p.status === 'ACTIVE').length;
@@ -735,7 +757,7 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
                         </td>
                         <td className="px-4 py-4 text-slate-600">{joinedOn}</td>
                         <td className="px-4 py-4 text-slate-600">{lastActive}</td>
-                        <td className="px-4 py-4 text-right text-slate-500 hover:text-slate-900 cursor-pointer"><Eye className="h-4 w-4" /></td>
+                        <td className="px-4 py-4 text-right text-slate-500 hover:text-slate-900 cursor-pointer" onClick={() => onEditorDetails(profile)}><Eye className="h-4 w-4" /></td>
                       </tr>
                     );
                   })

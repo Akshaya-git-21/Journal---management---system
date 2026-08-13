@@ -60,8 +60,8 @@ export function mapDbToManuscript(dbItem: any): Manuscript {
     submissionStep: dbItem.submission_step ?? 1,
     editorsNotes: dbItem.editors_notes || '',
     language: dbItem.language || 'en',
-    assignedEditor: dbItem.assigned_editor || dbItem.assigned_to || null,
-    assignedEditorEmail: dbItem.assigned_editor_email || null
+    assignedEditor: null,
+    assignedEditorEmail: null
   };
 }
 
@@ -74,31 +74,18 @@ export function mapManuscriptToDb(m: Manuscript): any {
     references: m.references,
     is_double_blind: m.isDoubleBlind,
     cover_letter: m.coverLetter,
-    file_name: m.fileName,
-    file_size: m.fileSize,
-    uploaded_at: m.uploadedAt,
-    storage_path: m.storagePath || null,
-    public_url: m.publicUrl || null,
-    uploaded_files: m.uploadedFiles || [],
-    revisions: m.revisions || [],
-    contributors: m.contributors,
     status: m.status,
     submitted_at: m.submittedAt,
-    reviewers: m.reviewers,
-    suggested_reviewers: m.suggestedReviewers,
-    discussions: m.discussions,
-    doi: m.doi,
-    volume: m.volume,
-    issue: m.issue,
-    published_at: m.publishedAt,
     author_id: m.authorId,
     author_name: m.authorName,
     author_email: m.authorEmail,
     submission_step: m.submissionStep,
     editors_notes: m.editorsNotes,
     language: m.language || 'en',
-    assigned_editor: m.assignedEditor || null,
-    assigned_editor_email: m.assignedEditorEmail || null
+    doi: m.doi,
+    volume: m.volume,
+    issue: m.issue,
+    published_at: m.publishedAt
   };
 }
 
@@ -145,65 +132,17 @@ export async function ensureAuthorProfile(): Promise<void> {
  */
 export async function upsertManuscriptToDb(manuscript: Manuscript): Promise<void> {
   const dbPayload = mapManuscriptToDb(manuscript);
-  
+
   // Set updated timestamp
   dbPayload.updated_at = new Date().toISOString();
 
-  const tryUpsert = async (payload: any) => {
+  try {
     const { error } = await supabase
       .from('manuscripts')
-      .upsert(payload, { onConflict: 'id' });
-    return error;
-  };
-
-  try {
-    let error = await tryUpsert(dbPayload);
+      .upsert(dbPayload, { onConflict: 'id' });
 
     if (error) {
-      // If the error indicates missing columns, let's gracefully remove non-standard columns and retry
-      if (
-        error.message?.includes('references') || 
-        error.message?.includes('storage_path') || 
-        error.message?.includes('public_url') || 
-        error.message?.includes('schema cache') || 
-        error.message?.includes('column') ||
-        error.message?.includes('assigned_editor') ||
-        error.message?.includes('revisions')
-      ) {
-        console.warn("[Supabase] Custom columns missing in database. Retrying upsert with standard fallback columns...", error.message);
-        
-        // Strip non-standard columns on retry
-        const strippedPayload = { ...dbPayload };
-        delete strippedPayload.references;
-        delete strippedPayload.storage_path;
-        delete strippedPayload.public_url;
-        delete strippedPayload.uploaded_files;
-        delete strippedPayload.revisions;
-        delete strippedPayload.assigned_editor;
-        delete strippedPayload.assigned_editor_email;
-        delete strippedPayload.language;
-
-        const retryError = await tryUpsert(strippedPayload);
-        if (retryError) {
-          // If retry still fails, fall back to core standard columns
-          const corePayload = {
-            id: dbPayload.id,
-            title: dbPayload.title,
-            abstract: dbPayload.abstract,
-            status: dbPayload.status,
-            author_id: dbPayload.author_id,
-            author_name: dbPayload.author_name,
-            author_email: dbPayload.author_email,
-            submitted_at: dbPayload.submitted_at,
-            updated_at: dbPayload.updated_at
-          };
-          const coreError = await tryUpsert(corePayload);
-          if (coreError) {
-            throw new Error(`[Supabase] Manuscript upsert failed after all retries: ${coreError.message}`);
-          }
-        }
-        return;
-      }
+      console.error("[Supabase Upsert Error] Full error details:", error);
       throw new Error(`[Supabase] Failed to save manuscript: ${error.message}`);
     }
   } catch (err: any) {
@@ -245,16 +184,16 @@ export async function syncManuscriptFilesToSupabase(manuscriptId: string, upload
   try {
     const { data: existing } = await supabase
       .from('manuscripts')
-      .select('id, title, abstract, references, is_double_blind, cover_letter, file_name, file_size, uploaded_at, storage_path, public_url, uploaded_files, contributors, status, submitted_at, reviewers, suggested_reviewers, discussions, doi, volume, issue, published_at, author_id, author_name, author_email, submission_step, editors_notes, language')
+      .select('*')
       .eq('id', manuscriptId)
       .single();
 
     if (existing) {
-      const updatedItem = {
+      const updatedItem = mapManuscriptToDb({
         ...existing,
-        uploaded_files: uploadedFiles,
-        updated_at: new Date().toISOString()
-      };
+        uploadedFiles: uploadedFiles
+      } as Manuscript);
+      updatedItem.updated_at = new Date().toISOString();
       await supabase.from('manuscripts').upsert(updatedItem, { onConflict: 'id' });
     }
   } catch (err) {
@@ -269,16 +208,16 @@ export async function syncManuscriptDiscussionsToSupabase(manuscriptId: string, 
   try {
     const { data: existing } = await supabase
       .from('manuscripts')
-      .select('id, title, abstract, references, is_double_blind, cover_letter, file_name, file_size, uploaded_at, storage_path, public_url, uploaded_files, contributors, status, submitted_at, reviewers, suggested_reviewers, discussions, doi, volume, issue, published_at, author_id, author_name, author_email, submission_step, editors_notes, language')
+      .select('*')
       .eq('id', manuscriptId)
       .single();
 
     if (existing) {
-      const updatedItem = {
+      const updatedItem = mapManuscriptToDb({
         ...existing,
-        discussions: discussions,
-        updated_at: new Date().toISOString()
-      };
+        discussions: discussions
+      } as Manuscript);
+      updatedItem.updated_at = new Date().toISOString();
       await supabase.from('manuscripts').upsert(updatedItem, { onConflict: 'id' });
     }
   } catch (err) {

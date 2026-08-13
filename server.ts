@@ -17,6 +17,44 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Diagnostic endpoint to check auth user and profile existence
+  app.get("/api/diagnostic/user/:email", async (req, res) => {
+    const { email } = req.params;
+    try {
+      // Check if user exists in Supabase Auth
+      const { data: users, error: usersError } = await supabaseAdmin.auth.admin.listUsers();
+      const authUser = users?.users.find(u => u.email === email);
+
+      if (!authUser) {
+        return res.status(200).json({
+          email,
+          exists_in_auth: false,
+          message: `No auth user found for ${email}`
+        });
+      }
+
+      // Check if profile exists
+      const { data: profile, error: profileError } = await supabaseAdmin
+        .from('profiles')
+        .select('id, email, role, status')
+        .eq('id', authUser.id)
+        .single();
+
+      return res.status(200).json({
+        email,
+        exists_in_auth: true,
+        auth_user_id: authUser.id,
+        auth_confirmed: authUser.email_confirmed_at ? true : false,
+        auth_disabled: authUser.banned_until ? true : false,
+        profile_exists: !!profile,
+        profile: profile || null,
+        profile_error: profileError?.message || null,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || 'Diagnostic check failed' });
+    }
+  });
+
   app.post("/api/create-user", async (req, res) => {
     const { email, password, fullName, role, metadata } = req.body;
 
@@ -44,6 +82,74 @@ async function startServer() {
       return res.status(200).json({ user: data.user });
     } catch (error: any) {
       return res.status(500).json({ error: error?.message || 'Unable to create user account.' });
+    }
+  });
+
+  // Admin: Reset user password (Coordinator only)
+  app.post("/api/reset-user-password", async (req, res) => {
+    const { userId, newPassword } = req.body;
+
+    if (!userId || !newPassword) {
+      return res.status(400).json({ error: 'Missing userId or newPassword.' });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    }
+
+    try {
+      // Verify the caller is authenticated
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Unauthorized: Missing authentication token.' });
+      }
+
+      const token = authHeader.slice(7);
+
+      // Decode JWT token to get user ID (sub claim)
+      let callerUserId: string;
+      try {
+        const parts = token.split('.');
+        if (parts.length !== 3) {
+          return res.status(401).json({ error: 'Unauthorized: Invalid token format.' });
+        }
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+        callerUserId = payload.sub;
+        if (!callerUserId) {
+          return res.status(401).json({ error: 'Unauthorized: Invalid token payload.' });
+        }
+      } catch (decodeError: any) {
+        return res.status(401).json({ error: 'Unauthorized: Failed to decode token.' });
+      }
+
+      // Verify caller exists and get their role
+      const { data: callerProfile, error: profileError } = await supabaseAdmin
+        .from('profiles')
+        .select('role, status')
+        .eq('id', callerUserId)
+        .single();
+
+      if (profileError || !callerProfile) {
+        return res.status(403).json({ error: 'Forbidden: Unable to verify your authorization.' });
+      }
+
+      if (callerProfile.role !== 'COORDINATOR') {
+        return res.status(403).json({ error: 'Forbidden: Only Coordinators can reset user passwords.' });
+      }
+
+      // Use Supabase admin API to update password
+      const { data, error } = await supabaseAdmin.auth.admin.updateUserById(
+        userId,
+        { password: newPassword }
+      );
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      return res.status(200).json({ success: true, message: 'Password updated successfully.' });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || 'Unable to reset password.' });
     }
   });
 

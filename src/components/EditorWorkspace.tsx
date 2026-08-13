@@ -458,6 +458,10 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [evaluationSubmitted, setEvaluationSubmitted] = useState(false);
   const [showAcceptButton, setShowAcceptButton] = useState(assignment.status !== 'ACCEPTED');
 
+  // Peer Referee Suggestions
+  const [suggestedReviewers, setSuggestedReviewers] = useState<{ name: string; email: string; expertise: string }[]>([]);
+  const [suggestionForm, setSuggestionForm] = useState({ name: '', email: '', expertise: '' });
+
   // Phase 4: Set up real-time subscriptions for manuscript updates
   useEffect(() => {
     if (!manuscript.id) return;
@@ -596,6 +600,25 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleAddSuggestion = () => {
+    if (!suggestionForm.name.trim() || !suggestionForm.email.trim()) {
+      showNotification('error', 'Reviewer name and email are required');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(suggestionForm.email)) {
+      showNotification('error', 'Please enter a valid email address');
+      return;
+    }
+    setSuggestedReviewers([...suggestedReviewers, suggestionForm]);
+    setSuggestionForm({ name: '', email: '', expertise: '' });
+    showNotification('success', 'Reviewer suggestion added');
+  };
+
+  const handleRemoveSuggestion = (index: number) => {
+    setSuggestedReviewers(suggestedReviewers.filter((_, i) => i !== index));
+    showNotification('info', 'Reviewer suggestion removed');
   };
 
   const handleEditorDecision = async (decision: 'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION' | 'REJECT') => {
@@ -1453,6 +1476,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                 }}
                 isReadOnly={evaluationSubmitted}
                 onDecision={handleEditorDecision}
+                suggestedReviewers={suggestedReviewers}
               />
             )}
 
@@ -1777,21 +1801,56 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">SUGGEST PEER REFEREES</p>
               <p className="text-xs text-slate-600 mb-4">Suggest potential reviewers for this manuscript.</p>
               <div className="space-y-3 mb-4">
-                <input type="text" placeholder="Reviewer Name" className="w-full text-xs border border-slate-300 rounded px-3 py-2 focus:outline-none focus:border-emerald-500" />
-                <input type="email" placeholder="Reviewer Email" className="w-full text-xs border border-slate-300 rounded px-3 py-2 focus:outline-none focus:border-emerald-500" />
-                <input type="text" placeholder="Expertise / Specialization" className="w-full text-xs border border-slate-300 rounded px-3 py-2 focus:outline-none focus:border-emerald-500" />
+                <input
+                  type="text"
+                  placeholder="Reviewer Name"
+                  value={suggestionForm.name}
+                  onChange={(e) => setSuggestionForm({ ...suggestionForm, name: e.target.value })}
+                  className="w-full text-xs border border-slate-300 rounded px-3 py-2 focus:outline-none focus:border-emerald-500"
+                />
+                <input
+                  type="email"
+                  placeholder="Reviewer Email"
+                  value={suggestionForm.email}
+                  onChange={(e) => setSuggestionForm({ ...suggestionForm, email: e.target.value })}
+                  className="w-full text-xs border border-slate-300 rounded px-3 py-2 focus:outline-none focus:border-emerald-500"
+                />
+                <input
+                  type="text"
+                  placeholder="Expertise / Specialization"
+                  value={suggestionForm.expertise}
+                  onChange={(e) => setSuggestionForm({ ...suggestionForm, expertise: e.target.value })}
+                  className="w-full text-xs border border-slate-300 rounded px-3 py-2 focus:outline-none focus:border-emerald-500"
+                />
               </div>
-              <button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 rounded-lg transition flex items-center justify-center gap-2">
+              <button
+                onClick={handleAddSuggestion}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50"
+              >
                 <Plus className="w-3 h-3" /> Add Suggestion
               </button>
             </div>
 
             {/* SUGGESTED REVIEWERS */}
             <div className="bg-white border border-slate-200 rounded-lg p-4">
-              <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">SUGGESTED REVIEWERS ({details.suggestedReviewers?.length || 0})</p>
+              <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">SUGGESTED REVIEWERS ({suggestedReviewers.length + (details.suggestedReviewers?.length || 0)})</p>
               <div className="space-y-3">
+                {suggestedReviewers.map((reviewer, i) => (
+                  <div key={`new-${i}`} className="p-3 bg-emerald-50 rounded border border-emerald-200 hover:bg-emerald-100 transition">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                          <span>👤</span> {reviewer.name} <span className="text-[10px] bg-emerald-200 text-emerald-700 px-1.5 py-0.5 rounded">New</span>
+                        </p>
+                        <p className="text-xs text-slate-600">{reviewer.email}</p>
+                        {reviewer.expertise && <p className="text-xs text-slate-500 mt-1">Expertise: {reviewer.expertise}</p>}
+                      </div>
+                      <button onClick={() => handleRemoveSuggestion(i)} className="text-slate-400 hover:text-red-600 transition">🗑️</button>
+                    </div>
+                  </div>
+                ))}
                 {details.suggestedReviewers && details.suggestedReviewers.map((reviewer, i) => (
-                  <div key={i} className="p-3 bg-slate-50 rounded border border-slate-200 hover:bg-slate-100 transition">
+                  <div key={`saved-${i}`} className="p-3 bg-slate-50 rounded border border-slate-200 hover:bg-slate-100 transition">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <p className="text-sm font-semibold text-slate-900 flex items-center gap-2">
@@ -1799,12 +1858,13 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                         </p>
                         <p className="text-xs text-slate-600">{reviewer.email}</p>
                       </div>
-                      <button className="text-slate-400 hover:text-red-600">🗑️</button>
                     </div>
                   </div>
                 ))}
               </div>
-              <button className="text-xs text-emerald-600 font-bold hover:underline mt-3">View All Suggestions →</button>
+              {suggestedReviewers.length === 0 && (!details.suggestedReviewers || details.suggestedReviewers.length === 0) && (
+                <p className="text-xs text-slate-400 text-center py-4">No reviewers suggested yet</p>
+              )}
             </div>
           </aside>
         </div>
@@ -1963,12 +2023,14 @@ function EditorEvaluationForm({
   assignmentId,
   onSubmitted,
   isReadOnly = false,
-  onDecision
+  onDecision,
+  suggestedReviewers = []
 }: {
   assignmentId: string;
   onSubmitted: () => void;
   isReadOnly?: boolean;
   onDecision?: (type: 'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION' | 'REJECT') => void;
+  suggestedReviewers?: { name: string; email: string; expertise: string }[];
 }) {
   const [evalData, setEvalData] = useState<EditorEvalState>({
     scientificMerit: 0,
@@ -2051,6 +2113,12 @@ function EditorEvaluationForm({
     setBusy(true);
     setError('');
     try {
+      // Combine reviewers from form state and parent prop (from sidebar)
+      const allSuggestedReviewers = [
+        ...evalData.suggestedReviewers.filter(r => r.name.trim() && r.email.trim()),
+        ...suggestedReviewers.filter(r => r.name.trim() && r.email.trim())
+      ];
+
       await submitAssessment(assignmentId, {
         scientificMerit: evalData.scientificMerit,
         noveltyInnovation: evalData.noveltyInnovation,
@@ -2063,7 +2131,7 @@ function EditorEvaluationForm({
         weaknesses: evalData.weaknesses,
         mandatoryRevisions: evalData.mandatoryRevisions,
         commentsToCoordinator: evalData.commentsToAuthors,
-        suggestedReviewers: evalData.suggestedReviewers.filter(r => r.name.trim() && r.email.trim())
+        suggestedReviewers: allSuggestedReviewers
       });
       setSubmitted(true);
       onSubmitted();

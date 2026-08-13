@@ -704,9 +704,10 @@ begin
 end;
 $$;
 
--- Step: Editor reviews submitted reviewer feedback and gives a final
--- recommendation. Blocked until the manuscript is actually AWAITING_DECISION
--- (i.e. both reviews are in) -- fixes the old UI's bug of only requiring 1.
+-- Step: Editor reviews their own evaluation and gives a recommendation.
+-- Blocked until the editor's assessment has been submitted (assessment_status = 'SUBMITTED').
+-- The editor recommendation is SEPARATE from the coordinator's final decision.
+-- The editor recommendation can happen before reviewers are even assigned.
 create or replace function public.submit_editor_recommendation(p_manuscript_id text, p_recommendation text)
 returns public.editor_assignments language plpgsql security definer set search_path = public as $$
 declare m public.manuscripts; a public.editor_assignments;
@@ -714,7 +715,16 @@ begin
   select * into m from public.manuscripts where id = p_manuscript_id for update;
   if m.id is null then raise exception 'Manuscript not found'; end if;
   if m.assigned_editor_id is distinct from auth.uid() then raise exception 'Only the assigned editor may recommend'; end if;
-  if m.status is distinct from 'AWAITING_DECISION' then raise exception 'Not all reviews are in yet (status=%)', m.status; end if;
+
+  -- Editor can recommend after their assessment is submitted, regardless of reviewer status
+  select * into a from public.editor_assignments
+  where manuscript_id = p_manuscript_id and editor_id = auth.uid() and status = 'ACCEPTED'
+  order by assigned_at desc limit 1;
+  if a.id is null then raise exception 'No active editor assignment found'; end if;
+  if a.assessment_status is distinct from 'SUBMITTED' then
+    raise exception 'You must submit your evaluation before making a recommendation';
+  end if;
+
   if p_recommendation not in ('ACCEPT','MINOR_REVISION','MAJOR_REVISION','REJECT','ADDITIONAL_REVIEW') then
     raise exception 'Invalid recommendation';
   end if;
@@ -726,9 +736,12 @@ begin
 
   if a.id is null then raise exception 'No active editor assignment found'; end if;
 
-  perform public._record_transition(p_manuscript_id, 'AWAITING_DECISION', 'AWAITING_DECISION', 'submit_editor_recommendation');
+  -- Record the transition (manuscript status stays the same, this is just the recommendation)
+  perform public._record_transition(p_manuscript_id, m.status, m.status, 'submit_editor_recommendation');
+
+  -- Notify coordinator that editor recommendation is ready
   insert into public.workflow_notifications (recipient_id, type, manuscript_id, title, body)
-  select id, 'EDITOR_RECOMMENDATION_READY', p_manuscript_id, 'Editor recommendation ready to verify: ' || m.title, ''
+  select id, 'EDITOR_RECOMMENDATION_READY', p_manuscript_id, 'Editor recommendation ready: ' || m.title, ''
   from public.profiles where role = 'COORDINATOR' and status = 'ACTIVE';
 
   return a;
