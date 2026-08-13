@@ -11,6 +11,7 @@ import {
   getEditorAssignedManuscripts,
   subscribeToEditorAssignments,
   EditorManuscriptDetails,
+  ManuscriptFileRow,
   respondToAssignment,
   saveDraftEvaluation,
   getDraftEvaluation,
@@ -490,6 +491,42 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     };
   }, [manuscript.id, onChanged]);
 
+  // Subscribe to assignment status changes (INVITED → ACCEPTED)
+  useEffect(() => {
+    if (!assignment.id) return;
+
+    const channel = supabase
+      .channel(`assignment:${assignment.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'editor_assignments',
+          filter: `id=eq.${assignment.id}`
+        },
+        (payload) => {
+          const updatedAssignment = payload.new as EditorAssignmentRow;
+          console.log('[Realtime] Assignment status changed:', updatedAssignment.status);
+
+          // Update local state if status changed
+          if (updatedAssignment.status === 'ACCEPTED') {
+            setAssignmentAccepted(true);
+            setShowAcceptButton(false);
+            showNotification('success', 'Assignment accepted!');
+          } else if (updatedAssignment.status === 'DECLINED') {
+            showNotification('error', 'Assignment was declined');
+            setTimeout(() => onBack(), 2000);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [assignment.id, onBack]);
+
   // Phase 4: Notification helper
   const showNotification = (type: 'success' | 'error' | 'info', message: string) => {
     setNotification({ type, message });
@@ -719,6 +756,48 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     }
   };
 
+  // Compute workflow stages from manuscript status
+  const computeWorkflowStages = () => {
+    const status = manuscript.status;
+    const stages = [
+      { label: 'Submission', stage: 'SUBMITTED' },
+      { label: 'Review', stage: 'UNDER_REVIEW' },
+      { label: 'Copyediting', stage: 'AWAITING_DECISION' },
+      { label: 'Production', stage: 'PUBLISHED' }
+    ];
+
+    const statusOrder: Record<string, number> = {
+      'DRAFT': 0,
+      'SUBMITTED': 1,
+      'EDITOR_REVIEW': 1.5,
+      'UNDER_REVIEW': 2,
+      'REVISION_REQUESTED': 2.5,
+      'AWAITING_DECISION': 3,
+      'ACCEPTED': 3.5,
+      'PUBLISHED': 4,
+      'REJECTED': -1
+    };
+
+    const currentOrder = statusOrder[status] || 0;
+    return stages.map(stage => ({
+      ...stage,
+      done: statusOrder[stage.stage] <= currentOrder && currentOrder >= 0
+    }));
+  };
+
+  // Extract figures/media from uploaded files
+  const extractFigures = (): ManuscriptFileRow[] => {
+    if (!details.files) return [];
+    return details.files.filter(f =>
+      f.file_type && (
+        f.file_type.toLowerCase().includes('figure') ||
+        f.file_type.toLowerCase().includes('table') ||
+        f.file_type.toLowerCase().includes('image') ||
+        f.file_type.toLowerCase().includes('supplementary')
+      )
+    );
+  };
+
   const tabs = [
     { id: 'title', label: 'Title & Abstract' },
     { id: 'contributors', label: 'Contributors' },
@@ -758,12 +837,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
         <div className="mb-8">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">WORKFLOW</p>
           <div className="space-y-2">
-            {[
-              { label: 'Submission', done: true },
-              { label: 'Review', done: true },
-              { label: 'Copyediting', done: false },
-              { label: 'Production', done: false }
-            ].map((item) => (
+            {computeWorkflowStages().map((item) => (
               <div key={item.label} className="flex items-center gap-2">
                 {item.done ? (
                   <Check className="w-5 h-5 text-emerald-500 flex-shrink-0" />
@@ -1038,10 +1112,20 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                     <div className="bg-white border border-slate-200 rounded-lg p-8">
                       <h2 className="text-xl font-bold text-slate-900 mb-6">References</h2>
                       <div className="space-y-3">
-                        <p className="text-slate-700">[1] Author et al. (2023). Title of Reference. Journal Name, 45(3), 234-256.</p>
-                        <p className="text-slate-700">[2] Smith, J. (2022). Another Reference. Conference Proceedings, pp. 112-125.</p>
-                        <p className="text-slate-700">[3] Johnson & Brown. (2024). Recent Advances. Tech Review, 12(4), 45-67.</p>
-                        <p className="text-slate-500 text-sm mt-6">Total References: 34</p>
+                        {manuscript.references ? (
+                          <>
+                            {manuscript.references.split('\n').filter(ref => ref.trim()).map((ref, idx) => (
+                              <p key={idx} className="text-slate-700 leading-relaxed">{ref}</p>
+                            ))}
+                            <p className="text-slate-500 text-sm mt-6">
+                              Total References: {manuscript.references.split('\n').filter(ref => ref.trim()).length}
+                            </p>
+                          </>
+                        ) : (
+                          <div className="bg-slate-50 rounded-lg p-6 text-center">
+                            <p className="text-slate-600">No references submitted.</p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1051,13 +1135,50 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   <div className="max-w-4xl">
                     <div className="bg-white border border-slate-200 rounded-lg p-8">
                       <h2 className="text-xl font-bold text-slate-900 mb-6">Galleries & Figures</h2>
-                      <div className="grid grid-cols-2 gap-4">
-                        {['Figure 1', 'Figure 2', 'Table 1', 'Table 2'].map((item) => (
-                          <div key={item} className="border border-slate-200 rounded-lg p-8 bg-slate-50 flex items-center justify-center">
-                            <p className="text-slate-600 font-semibold">{item}</p>
+                      {(() => {
+                        const figures = extractFigures();
+                        return figures.length > 0 ? (
+                          <div className="grid grid-cols-2 gap-4">
+                            {figures.map((figure) => (
+                              <div key={figure.id} className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
+                                <div className="aspect-video bg-slate-100 flex items-center justify-center">
+                                  {figure.file_name.match(/\.(jpg|jpeg|png|gif|svg)$/i) ? (
+                                    <img
+                                      src={figure.public_url || ''}
+                                      alt={figure.file_name}
+                                      className="max-h-full max-w-full object-contain"
+                                    />
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-2">
+                                      <span className="text-2xl">📄</span>
+                                      <span className="text-xs text-slate-600">{figure.file_type}</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="p-3 bg-white border-t border-slate-200">
+                                  <p className="text-sm font-semibold text-slate-900 truncate">{figure.file_name}</p>
+                                  <p className="text-xs text-slate-500">{figure.file_size} • {formatDate(figure.uploaded_at)}</p>
+                                  {figure.public_url && (
+                                    <div className="flex gap-2 mt-2">
+                                      <a href={figure.public_url} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
+                                        View →
+                                      </a>
+                                      <a href={figure.public_url} download className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
+                                        Download →
+                                      </a>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        ) : (
+                          <div className="bg-slate-50 rounded-lg p-12 text-center">
+                            <div className="text-3xl mb-3">🖼️</div>
+                            <p className="text-slate-600">No figures or supplementary materials uploaded.</p>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}
@@ -1066,20 +1187,36 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   <div className="max-w-4xl">
                     <div className="bg-white border border-slate-200 rounded-lg p-8">
                       <h2 className="text-xl font-bold text-slate-900 mb-6">JATS XML</h2>
-                      <pre className="bg-slate-50 p-4 rounded border border-slate-200 text-xs overflow-x-auto">
-{`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE article PUBLIC "-//NLM//DTD JATS (Z39.96) Journal Archiving and Interchange DTD v1.2 20190208//EN"
-  "JATS-archivearticle1.dtd">
-<article xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:mml="http://www.w3.org/1998/Math/MathML">
-  <front>
-    <article-meta>
-      <title-group>
-        <article-title>${manuscript.title}</article-title>
-      </title-group>
-    </article-meta>
-  </front>
-</article>`}
-                      </pre>
+                      {(() => {
+                        const jatsFile = details.files?.find(f => f.file_type?.toLowerCase() === 'jats' || f.file_name?.toLowerCase().includes('.xml'));
+                        return jatsFile ? (
+                          <div className="space-y-4">
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                              <p className="text-sm text-emerald-700 font-semibold">✓ JATS XML file available</p>
+                            </div>
+                            <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                              <p className="text-xs text-slate-600 mb-3">File: {jatsFile.file_name}</p>
+                              <p className="text-xs text-slate-600 mb-4">Size: {jatsFile.file_size} • Uploaded: {formatDate(jatsFile.uploaded_at)}</p>
+                              {jatsFile.public_url && (
+                                <div className="flex gap-2">
+                                  <a href={jatsFile.public_url} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
+                                    View XML →
+                                  </a>
+                                  <a href={jatsFile.public_url} download className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
+                                    Download →
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-slate-50 rounded-lg p-12 text-center">
+                            <div className="text-3xl mb-3">📋</div>
+                            <p className="text-slate-600 mb-2">No JATS XML file available for this manuscript.</p>
+                            <p className="text-xs text-slate-500">JATS XML may be generated during the publication workflow.</p>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}
@@ -1088,18 +1225,30 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   <div className="max-w-4xl">
                     <div className="bg-white border border-slate-200 rounded-lg p-8">
                       <h2 className="text-xl font-bold text-slate-900 mb-6">Permissions & Disclosure</h2>
-                      <div className="space-y-4">
-                        <div className="border border-slate-200 rounded-lg p-4">
-                          <p className="font-semibold text-slate-900 mb-2">Conflict of Interest Disclosure</p>
-                          <p className="text-sm text-slate-600">✓ All authors have completed and submitted the COI disclosure form.</p>
-                        </div>
-                        <div className="border border-slate-200 rounded-lg p-4">
-                          <p className="font-semibold text-slate-900 mb-2">Copyright Transfer Agreement</p>
-                          <p className="text-sm text-slate-600">✓ Copyright transfer agreement signed by all authors.</p>
-                        </div>
-                        <div className="border border-slate-200 rounded-lg p-4">
-                          <p className="font-semibold text-slate-900 mb-2">Data Availability</p>
-                          <p className="text-sm text-slate-600">Datasets are available upon request from the corresponding author.</p>
+                      <div className="bg-slate-50 rounded-lg p-8 text-center">
+                        <div className="text-3xl mb-3">🔐</div>
+                        <p className="text-slate-600 mb-2">Permission and disclosure information from author submission.</p>
+                        <p className="text-xs text-slate-500 mb-6">Review the submitted manuscript and associated files above for disclosure statements.</p>
+                        <div className="bg-white border border-slate-200 rounded-lg p-4 text-left max-w-2xl mx-auto">
+                          <p className="text-xs font-semibold text-slate-600 mb-3">Items to verify:</p>
+                          <ul className="text-xs text-slate-600 space-y-2">
+                            <li className="flex items-start gap-2">
+                              <span className="text-slate-400">□</span>
+                              <span>Conflict of Interest disclosure form completed</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                              <span className="text-slate-400">□</span>
+                              <span>Copyright transfer agreement signed</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                              <span className="text-slate-400">□</span>
+                              <span>Data availability statement included</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                              <span className="text-slate-400">□</span>
+                              <span>Author funding/support declaration</span>
+                            </li>
+                          </ul>
                         </div>
                       </div>
                     </div>
@@ -1110,20 +1259,40 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   <div className="max-w-4xl">
                     <div className="bg-white border border-slate-200 rounded-lg p-8">
                       <h2 className="text-xl font-bold text-slate-900 mb-6">Issue Assignment</h2>
-                      <div className="space-y-4">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-600 mb-2">Target Volume</p>
-                          <p className="text-slate-900">Volume 45</p>
+                      {manuscript.volume || manuscript.issue ? (
+                        <div className="space-y-4">
+                          {manuscript.volume && (
+                            <div>
+                              <p className="text-sm font-semibold text-slate-600 mb-2">Volume</p>
+                              <p className="text-slate-900">{manuscript.volume}</p>
+                            </div>
+                          )}
+                          {manuscript.issue && (
+                            <div>
+                              <p className="text-sm font-semibold text-slate-600 mb-2">Issue</p>
+                              <p className="text-slate-900">{manuscript.issue}</p>
+                            </div>
+                          )}
+                          {manuscript.published_at && (
+                            <div>
+                              <p className="text-sm font-semibold text-slate-600 mb-2">Published Date</p>
+                              <p className="text-slate-900">{formatDate(manuscript.published_at)}</p>
+                            </div>
+                          )}
+                          {manuscript.doi && (
+                            <div>
+                              <p className="text-sm font-semibold text-slate-600 mb-2">DOI</p>
+                              <p className="text-slate-900 font-mono text-xs">{manuscript.doi}</p>
+                            </div>
+                          )}
                         </div>
-                        <div>
-                          <p className="text-sm font-semibold text-slate-600 mb-2">Target Issue</p>
-                          <p className="text-slate-900">Issue 3 (2025)</p>
+                      ) : (
+                        <div className="bg-slate-50 rounded-lg p-12 text-center">
+                          <div className="text-3xl mb-3">📰</div>
+                          <p className="text-slate-600 mb-1">No issue assigned yet.</p>
+                          <p className="text-xs text-slate-500">Issue assignment will occur during the publication workflow.</p>
                         </div>
-                        <div>
-                          <p className="text-sm font-semibold text-slate-600 mb-2">Expected Publication Date</p>
-                          <p className="text-slate-900">September 2025</p>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1155,22 +1324,30 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   {/* Document */}
                   <div className="bg-slate-50 p-12 min-h-[600px]">
                     <div className="bg-white p-12 max-w-3xl mx-auto">
-                      <h2 className="text-2xl font-bold text-center mb-6">{manuscript.title || 'Securing Decentralized Federated Learning Models Against Sybil Poisoning...'}</h2>
+                      <h2 className="text-2xl font-bold text-center mb-6">{manuscript.title}</h2>
                       <div className="text-center mb-4">
-                        <p className="text-sm text-slate-700">John Doe¹, Jane Smith², Michael Brown³</p>
+                        <p className="text-sm text-slate-700">
+                          {details.contributors && details.contributors.length > 0
+                            ? details.contributors.map((c, i) => `${c.name}${details.contributors && i < details.contributors.length - 1 ? ', ' : ''}`).join('') + (details.contributors.length > 0 ? '' : '')
+                            : manuscript.author_name}
+                        </p>
                       </div>
-                      <div className="text-center mb-8 text-xs text-slate-600 border-b border-slate-200 pb-6">
-                        <p>¹Department of Computer Science, University of Example</p>
-                        <p>²Institute of Technology, City, Country</p>
-                        <p>³AI Research Lab, Tech University, City, Country</p>
-                      </div>
+                      {details.contributors && details.contributors.length > 0 && (
+                        <div className="text-center mb-8 text-xs text-slate-600 border-b border-slate-200 pb-6">
+                          {details.contributors.map((c, i) => (
+                            <div key={i}>
+                              {c.affiliation && <p>{c.affiliation}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div className="mb-6">
-                        <p className="text-sm"><span className="font-semibold">Keywords:</span> <span className="italic text-emerald-600">Federated Learning, Sybil Attack, Model Security, Anomaly Detection, Reputation System</span></p>
+                        <p className="text-xs"><span className="font-semibold">Submitted:</span> <span className="text-slate-600">{formatDate(manuscript.submitted_at)}</span></p>
                       </div>
                       <div>
                         <h3 className="text-sm font-bold text-emerald-700 mb-3 uppercase">Abstract</h3>
                         <p className="text-sm text-slate-700 leading-relaxed">
-                          Federated Learning (FL) enables collaborative model training across decentralized devices without sharing raw data. However, it is vulnerable to malicious actions. This paper proposes a robust defense mechanism with integrated identity verification, reputation scoring, and anomaly detection to mitigate the impact of such attacks. Experimental results show our approach significantly improves model accuracy and resilience against Sybil attacks in non-IID settings.
+                          {manuscript.abstract || '(No abstract provided)'}
                         </p>
                       </div>
                     </div>
