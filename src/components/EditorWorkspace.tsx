@@ -1474,7 +1474,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   setEvaluationSubmitted(true);
                   onChanged();
                 }}
-                isReadOnly={evaluationSubmitted}
+                isReadOnly={false}
                 onDecision={handleEditorDecision}
                 suggestedReviewers={suggestedReviewers}
               />
@@ -2253,18 +2253,20 @@ function EditorEvaluationForm({
         )}
       </div>
 
-      {isReadOnly ? (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-          <p className="text-xs font-bold text-emerald-700 text-center">
-            ✓ Evaluation Submitted - Read-Only Mode
-          </p>
-          <p className="text-xs text-emerald-600 text-center mt-1">
-            Your evaluation has been locked. Contact the coordinator if you need to make changes.
-          </p>
-        </div>
-      ) : (
+      {/* Decision buttons always available - they are separate from evaluation submission */}
+      <div className="space-y-2 mt-6">
+        {isReadOnly && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-4">
+            <p className="text-xs font-bold text-emerald-700 text-center">
+              ✓ Evaluation Submitted
+            </p>
+            <p className="text-xs text-emerald-600 text-center">
+              Now provide your recommendation below
+            </p>
+          </div>
+        )}
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-slate-600 mb-2">FINAL DECISION:</div>
+          <div className="text-xs font-semibold text-slate-600 mb-2">EDITOR RECOMMENDATION:</div>
           <button
             disabled={busy}
             onClick={() => {
@@ -2306,7 +2308,7 @@ function EditorEvaluationForm({
             Reject Manuscript
           </button>
         </div>
-      )}
+      </div>
     </div>
   );
 }
