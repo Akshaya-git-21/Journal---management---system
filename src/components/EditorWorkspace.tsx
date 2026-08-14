@@ -35,6 +35,7 @@ import {
 } from '../lib/editorWorkspace';
 import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send } from 'lucide-react';
 import RevisionReview from './RevisionReview';
+import EditorManuscriptDetail from './EditorManuscriptDetail';
 
 interface EditorWorkspaceProps {
   manuscripts?: any[];
@@ -173,10 +174,15 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   }
 
   if (selected && selected.assignment.status === 'ACCEPTED') {
-    return <AssignmentDetail details={selected} onBack={() => {
-      setSelectedManuscriptId(null);
-      setShowAcceptModal(false);
-    }} onChanged={load} currentUser={currentUser} />;
+    return <EditorManuscriptDetail
+      manuscript={selected.manuscript}
+      onBack={() => {
+        setSelectedManuscriptId(null);
+        setShowAcceptModal(false);
+      }}
+      onChanged={load}
+      currentUserId={currentUser?.email || undefined}
+    />;
   }
 
   return (
@@ -2114,9 +2120,14 @@ function EditorEvaluationForm({
     setError('');
     try {
       // Combine reviewers from form state and parent prop (from sidebar)
+      // Transform expertise field to note field for database compatibility
       const allSuggestedReviewers = [
-        ...evalData.suggestedReviewers.filter(r => r.name.trim() && r.email.trim()),
-        ...suggestedReviewers.filter(r => r.name.trim() && r.email.trim())
+        ...evalData.suggestedReviewers
+          .filter(r => r.name.trim() && r.email.trim())
+          .map(r => ({ name: r.name, email: r.email, note: r.expertise })),
+        ...suggestedReviewers
+          .filter(r => r.name.trim() && r.email.trim())
+          .map(r => ({ name: r.name, email: r.email, note: r.expertise }))
       ];
 
       await submitAssessment(assignmentId, {
@@ -2253,7 +2264,7 @@ function EditorEvaluationForm({
         )}
       </div>
 
-      {/* Decision buttons always available - they are separate from evaluation submission */}
+      {/* Decision buttons - these now properly submit the assessment first, then the recommendation */}
       <div className="space-y-2 mt-6">
         {isReadOnly && (
           <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-4">
@@ -2269,40 +2280,28 @@ function EditorEvaluationForm({
           <div className="text-xs font-semibold text-slate-600 mb-2">EDITOR RECOMMENDATION:</div>
           <button
             disabled={busy}
-            onClick={() => {
-              saveDraft();
-              setTimeout(() => onDecision?.('ACCEPT'), 500);
-            }}
+            onClick={() => submit().then(() => onDecision?.('ACCEPT')).catch(e => console.error(e))}
             className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             Accept Manuscript
           </button>
           <button
             disabled={busy}
-            onClick={() => {
-              saveDraft();
-              setTimeout(() => onDecision?.('MINOR_REVISION'), 500);
-            }}
+            onClick={() => submit().then(() => onDecision?.('MINOR_REVISION')).catch(e => console.error(e))}
             className="w-full bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertCircle className="w-4 h-4" />}
             Request Minor Revision
           </button>
           <button
             disabled={busy}
-            onClick={() => {
-              saveDraft();
-              setTimeout(() => onDecision?.('MAJOR_REVISION'), 500);
-            }}
+            onClick={() => submit().then(() => onDecision?.('MAJOR_REVISION')).catch(e => console.error(e))}
             className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertCircle className="w-4 h-4" />}
             Request Major Revision
           </button>
           <button
             disabled={busy}
-            onClick={() => {
-              saveDraft();
-              setTimeout(() => onDecision?.('REJECT'), 500);
-            }}
+            onClick={() => submit().then(() => onDecision?.('REJECT')).catch(e => console.error(e))}
             className="w-full text-red-600 hover:bg-red-50 text-xs font-bold py-3 rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <XIcon className="w-4 h-4" />}
             Reject Manuscript
