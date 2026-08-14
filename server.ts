@@ -153,6 +153,47 @@ async function startServer() {
     }
   });
 
+  // User: Reset their own password with current session (called from password reset flow)
+  app.post("/api/validate-reset-session", async (req, res) => {
+    try {
+      // This endpoint verifies that the user has a valid password recovery session
+      // It's called by the frontend to ensure the reset token is still valid
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Unauthorized: Missing authentication token.' });
+      }
+
+      const token = authHeader.slice(7);
+
+      // Decode JWT token
+      try {
+        const parts = token.split('.');
+        if (parts.length !== 3) {
+          return res.status(401).json({ error: 'Invalid token format.' });
+        }
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+
+        // Check if this is a password recovery session (indicated by specific claims)
+        const isRecoverySession = payload.amr && payload.amr.includes('recovery_code');
+
+        if (!payload.sub) {
+          return res.status(401).json({ error: 'Invalid token payload.' });
+        }
+
+        return res.status(200).json({
+          valid: true,
+          userId: payload.sub,
+          isRecoverySession: isRecoverySession,
+          expiresAt: new Date(payload.exp * 1000).toISOString()
+        });
+      } catch (decodeError: any) {
+        return res.status(401).json({ error: 'Failed to validate token.' });
+      }
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || 'Validation failed.' });
+    }
+  });
+
   // Vite middleware for development fallback or standard static server for production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

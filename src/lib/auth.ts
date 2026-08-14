@@ -173,8 +173,39 @@ export async function createReviewerAccount(email: string, password: string, ful
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {
-  const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+    redirectTo: `${window.location.origin}/?mode=reset-password`
+  });
   if (error) throw new Error(error.message);
+}
+
+export async function resetPasswordWithToken(newPassword: string, confirmPassword: string): Promise<void> {
+  if (!newPassword || !confirmPassword) {
+    throw new Error('Password and confirm password are required.');
+  }
+
+  if (newPassword !== confirmPassword) {
+    throw new Error('Passwords do not match.');
+  }
+
+  if (newPassword.length < 8) {
+    throw new Error('Password must be at least 8 characters.');
+  }
+
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw new Error(error.message || 'Failed to update password.');
+}
+
+export async function verifyResetToken(): Promise<boolean> {
+  try {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error || !session) return false;
+
+    const user = session.user;
+    return user.email_confirmed_at !== null || user.user_metadata?.email_verified === true;
+  } catch {
+    return false;
+  }
 }
 
 /**

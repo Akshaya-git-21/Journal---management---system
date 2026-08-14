@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Role } from '../types';
 import { registerAccount, loginAccount, requestPasswordReset } from '../lib/auth';
 import TuliticsLogo from './TuliticsLogo';
+import ForgotPasswordScreen from './ForgotPasswordScreen';
 import {
   Key,
   Mail,
@@ -21,7 +22,7 @@ import {
 
 interface AuthPortalsProps {
   activeRole: Role;
-  initialMode: 'LOGIN' | 'REGISTER';
+  initialMode: 'LOGIN' | 'REGISTER' | 'FORGOT_PASSWORD';
   onBackToLanding: () => void;
   onSuccessAuth: (user: { name: string; email: string; role: Role }) => void;
 }
@@ -30,7 +31,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
   // localRole only picks which REGISTER field-set/label to show. It has no
   // bearing on login -- login always resolves the real role from the account.
   const [localRole, setLocalRole] = useState<Role>(activeRole);
-  const [mode, setMode] = useState<'LOGIN' | 'REGISTER'>(initialMode);
+  const [mode, setMode] = useState<'LOGIN' | 'REGISTER' | 'FORGOT_PASSWORD'>(initialMode);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -262,6 +263,15 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
       setLoading(false);
     }
   };
+
+  // Show Forgot Password screen if in that mode
+  if (mode === 'FORGOT_PASSWORD') {
+    return (
+      <ForgotPasswordScreen
+        onBackToLogin={() => setMode('LOGIN')}
+      />
+    );
+  }
 
   return (
     <div id="auth-portal-screen" className="min-h-screen md:h-screen w-full bg-white flex flex-col md:flex-row relative overflow-y-auto md:overflow-hidden animate-fade-in">
@@ -904,20 +914,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
               <div className="flex items-center justify-between text-sm pt-1">
                 <button
                   type="button"
-                  onClick={async () => {
-                    setErrorMsg('');
-                    setSuccessMsg('');
-                    if (!email) {
-                      setErrorMsg('Enter your email address first.');
-                      return;
-                    }
-                    try {
-                      await requestPasswordReset(email);
-                      setSuccessMsg(`Password reset email sent to ${email}.`);
-                    } catch (err: any) {
-                      setErrorMsg(err.message || 'Could not send reset email.');
-                    }
-                  }}
+                  onClick={() => setMode('FORGOT_PASSWORD')}
                   className="text-[#008751] hover:text-[#007043] font-bold transition-colors hover:underline cursor-pointer"
                 >
                   Forgot Password?

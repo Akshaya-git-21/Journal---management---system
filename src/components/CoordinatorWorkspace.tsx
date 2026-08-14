@@ -8,6 +8,7 @@ import {
   listActiveProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished,
   subscribeToManuscripts, PublishDecision, getRevisions
 } from '../lib/workflow';
+import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
 import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity } from 'lucide-react';
@@ -384,7 +385,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
               <DashboardOverviewScreen items={items} stageCounts={stageCounts} pendingApprovals={pendingApprovals.length} />
             ) : isManuscriptQueueSection ? (
               selected ? (
-                <ManuscriptDetail manuscript={selected} onBack={() => setSelectedId(null)} onChanged={load} />
+                <CoordinatorManuscriptDetail manuscript={selected} onBack={() => setSelectedId(null)} onChanged={load} />
               ) : (
                 <ManuscriptQueueScreen
                   items={items}

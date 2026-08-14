@@ -128,6 +128,36 @@ export const submitEditorAssessment = (assignmentId: string, input: EditorAssess
 export const assignReviewers = (manuscriptId: string, reviewerIds: [string, string]) =>
   rpcOrThrow(supabase.rpc('assign_reviewers', { p_manuscript_id: manuscriptId, p_reviewer_ids: reviewerIds }));
 
+// ------------------------------------------
+// New reviewer suggestion workflow RPCs (Phase 8)
+// ------------------------------------------
+
+export interface EditorReviewerActionRow {
+  id: string;
+  manuscript_id: string;
+  suggestion_id: string;
+  action: 'ACCEPTED' | 'DECLINED' | 'REPLACED';
+  replacement_reviewer_id: string | null;
+  decline_reason: string | null;
+  coordinator_id: string;
+  created_at: string;
+}
+
+export const coordinatorAcceptSuggestion = (suggestionId: string) =>
+  rpcOrThrow<EditorReviewerActionRow>(supabase.rpc('coordinator_accept_suggestion', { p_suggestion_id: suggestionId }));
+
+export const coordinatorDeclineSuggestion = (suggestionId: string, reason: string = '') =>
+  rpcOrThrow<EditorReviewerActionRow>(supabase.rpc('coordinator_decline_suggestion', { p_suggestion_id: suggestionId, p_reason: reason }));
+
+export const coordinatorReplaceSuggestion = (suggestionId: string, replacementReviewerId: string) =>
+  rpcOrThrow<EditorReviewerActionRow>(supabase.rpc('coordinator_replace_suggestion', { p_suggestion_id: suggestionId, p_replacement_reviewer_id: replacementReviewerId }));
+
+export const coordinatorAssignReviewerDirectly = (manuscriptId: string, reviewerId: string) =>
+  rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('coordinator_assign_reviewer_directly', { p_manuscript_id: manuscriptId, p_reviewer_id: reviewerId }));
+
+export const finalizeReviewerBoard = (manuscriptId: string) =>
+  rpcOrThrow(supabase.rpc('finalize_reviewer_board', { p_manuscript_id: manuscriptId }));
+
 export const respondToReviewInvite = (assignmentId: string, accept: boolean) =>
   rpcOrThrow(supabase.rpc('respond_to_review_invite', { p_assignment_id: assignmentId, p_accept: accept }));
 
@@ -185,6 +215,12 @@ export async function getEditorAssignments(manuscriptId: string): Promise<Editor
 
 export async function getReviewerAssignments(manuscriptId: string): Promise<ReviewerAssignmentRow[]> {
   const { data, error } = await supabase.from('reviewer_assignments').select('*').eq('manuscript_id', manuscriptId).order('invited_at', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getEditorReviewerActions(manuscriptId: string): Promise<EditorReviewerActionRow[]> {
+  const { data, error } = await supabase.from('editor_reviewer_actions').select('*').eq('manuscript_id', manuscriptId).order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
 }

@@ -14,6 +14,7 @@ import ReviewerWorkspace from './components/ReviewerWorkspace';
 import PublisherWorkspace from './components/PublisherWorkspace';
 import CoordinatorWorkspace from './components/CoordinatorWorkspace';
 import AuthPortals from './components/AuthPortals';
+import ResetPasswordScreen from './components/ResetPasswordScreen';
 import { CheckCircle2, LogOut, User, AlertTriangle } from 'lucide-react';
 import { checkSupabaseConnection } from './lib/supabase';
 import { restoreSession, onAuthChange, logoutAccount } from './lib/auth';
@@ -30,7 +31,8 @@ export default function App() {
   // AuthPortals tab/label is shown -- it has no bearing on the role actually
   // granted, which always comes from the authenticated account's profile)
   const [authRole, setAuthRole] = useState<Role>('AUTHOR');
-  const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER'>('REGISTER');
+  const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER' | 'FORGOT_PASSWORD'>('REGISTER');
+  const [showResetPasswordScreen, setShowResetPasswordScreen] = useState(false);
 
   // loggedInUser seeded from localStorage only as an optimistic UI cache to
   // avoid a flash of the auth screen -- the effect below always re-validates
@@ -94,9 +96,18 @@ export default function App() {
   }, [currentScreen, loggedInUser, sessionChecked]);
 
   // Check for external link routing to Login/Signup directly (e.g. from tulitics.vercel.app)
+  // Also detect reset-password mode for password recovery flow
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const pathname = window.location.pathname.toLowerCase();
+    const mode = params.get('mode');
+
+    // Check if we're in reset password flow
+    if (mode === 'reset-password') {
+      setShowResetPasswordScreen(true);
+      setCurrentScreen('AUTH');
+      return;
+    }
 
     const isSubmitPath = pathname.includes('submit') || pathname.includes('publish');
     const isAuthPath = pathname.includes('auth') || pathname.includes('login') || pathname.includes('signup') || pathname.includes('register');
@@ -296,7 +307,23 @@ export default function App() {
         </div>
       )}
 
-      {currentScreen === 'AUTH' && (
+      {currentScreen === 'AUTH' && showResetPasswordScreen && (
+        <ResetPasswordScreen
+          onBackToLogin={() => {
+            setShowResetPasswordScreen(false);
+            setAuthMode('LOGIN');
+          }}
+          onSuccessReset={() => {
+            setShowResetPasswordScreen(false);
+            setAuthMode('LOGIN');
+            setCurrentScreen('AUTH');
+            setNotification('Password reset successfully! Please log in with your new password.');
+            setTimeout(() => setNotification(''), 4000);
+          }}
+        />
+      )}
+
+      {currentScreen === 'AUTH' && !showResetPasswordScreen && (
         <AuthPortals
           activeRole={authRole}
           initialMode={authMode}
