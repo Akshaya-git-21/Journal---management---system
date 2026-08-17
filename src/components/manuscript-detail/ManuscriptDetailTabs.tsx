@@ -82,6 +82,7 @@ export default function ManuscriptDetailTabs({
             reviewerAssignments={data.reviewerAssignments}
             suggestedReviewers={data.suggestedReviewers}
             profiles={data.profiles}
+            onWorkflowChange={() => { onDataChange(); onWorkflowChange(); }}
           />
         )}
         {activeTab === 'manuscript' && (

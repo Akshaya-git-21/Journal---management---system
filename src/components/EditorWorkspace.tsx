@@ -35,7 +35,7 @@ import {
 } from '../lib/editorWorkspace';
 import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send } from 'lucide-react';
 import RevisionReview from './RevisionReview';
-import EditorManuscriptDetail from './EditorManuscriptDetail';
+import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
 
 interface EditorWorkspaceProps {
   manuscripts?: any[];
@@ -174,14 +174,14 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   }
 
   if (selected && selected.assignment.status === 'ACCEPTED') {
-    return <EditorManuscriptDetail
-      manuscript={selected.manuscript}
+    return <AssignmentDetail
+      details={selected}
       onBack={() => {
         setSelectedManuscriptId(null);
         setShowAcceptModal(false);
       }}
       onChanged={load}
-      currentUserId={currentUser?.email || undefined}
+      currentUser={currentUser}
     />;
   }
 
@@ -429,4 +429,1198 @@ function AssignmentList({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onO
       </table>
     </div>
   );
-} 
+}
+function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details: EditorManuscriptDetails; onBack: () => void; onChanged: () => void; currentUser?: { name: string; email: string; role: Role } | null }) {
+  const { manuscript, assignment, reviewers: initialReviewerAssignments } = details;
+  const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>(initialReviewerAssignments || []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments'>('title');
+  const [activePublication, setActivePublication] = useState<'title' | 'contributors' | 'metadata' | 'references' | 'galleries' | 'jats' | 'permissions' | 'issue'>('title');
+  const [currentPage] = useState(1);
+
+  // Phase 2: Reviewer Management (display only — assignment happens via Coordinator Review Board)
+
+  // Phase 3: Collaboration
+  const [discussions, setDiscussions] = useState<DiscussionRow[]>(details.discussions || []);
+  const [newComment, setNewComment] = useState('');
+  const [newInternalNote, setNewInternalNote] = useState('');
+  const [showInternalNotes, setShowInternalNotes] = useState(false);
+
+  // Phase 4: Real-Time Updates & Polish
+  const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+  // Editor Evaluation Workflow
+  const [assignmentAccepted] = useState(assignment.status === 'ACCEPTED');
+  const evaluationSubmitted = assignment.assessment_status === 'SUBMITTED';
+
+  // Phase 4: Set up real-time subscriptions for manuscript updates
+  useEffect(() => {
+    if (!manuscript.id) return;
+
+    const unsubscribe = subscribeToAllManuscriptUpdates(
+      manuscript.id,
+      {
+        onManuscriptChange: () => {
+          onChanged();
+        },
+        onReviewerChange: (updated) => {
+          setReviewerAssignments(updated);
+          showNotification('info', 'Reviewer assignments updated');
+        },
+        onDiscussionChange: (updated) => {
+          setDiscussions(updated);
+        },
+        onStatusChange: () => {
+          onChanged();
+        }
+      }
+    );
+
+    setIsSubscribed(true);
+
+    return () => {
+      unsubscribe();
+      setIsSubscribed(false);
+    };
+  }, [manuscript.id, onChanged]);
+
+  // Phase 4: Notification helper
+  const showNotification = (type: 'success' | 'error' | 'info', message: string) => {
+    setNotification({ type, message });
+    setTimeout(() => setNotification(null), 4000);
+  };
+
+  // Phase 4: Enhanced error handler with categorization
+  const handleError = async (error: any, context: string) => {
+    const errorInfo = categorizeError(error);
+    console.error(`[${context}]`, errorInfo);
+
+    if (errorInfo.recoverable && retryCount < 2) {
+      setRetryCount(retryCount + 1);
+      showNotification('info', `${errorInfo.message} Retrying...`);
+    } else {
+      setError(errorInfo.message);
+      showNotification('error', errorInfo.message);
+    }
+  };
+
+  // Phase 3: Collaboration Handlers
+  const handlePostComment = async () => {
+    if (!newComment.trim()) {
+      showNotification('error', 'Please enter a comment');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const { data } = await supabase.auth.getUser();
+      if (!data.user?.id) throw new Error('Not authenticated');
+
+      await retryOperation(
+        () => postDiscussion(manuscript.id, data.user.id, newComment, 'GENERAL'),
+        3,
+        1000
+      );
+
+      setNewComment('');
+      showNotification('success', 'Comment posted successfully');
+      onChanged();
+    } catch (e: any) {
+      await handleError(e, 'Post Comment');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePostInternalNote = async () => {
+    if (!newInternalNote.trim()) {
+      showNotification('error', 'Please enter an internal note');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const { data } = await supabase.auth.getUser();
+      if (!data.user?.id) throw new Error('Not authenticated');
+
+      await retryOperation(
+        () => postInternalNote(manuscript.id, data.user.id, newInternalNote),
+        3,
+        1000
+      );
+
+      setNewInternalNote('');
+      setShowInternalNotes(false);
+      showNotification('success', 'Internal note posted successfully');
+      onChanged();
+    } catch (e: any) {
+      await handleError(e, 'Post Internal Note');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Compute workflow stages from manuscript status
+  const computeWorkflowStages = () => {
+    const status = manuscript.status;
+    const stages = [
+      { label: 'Submission', stage: 'SUBMITTED' },
+      { label: 'Review', stage: 'UNDER_REVIEW' },
+      { label: 'Copyediting', stage: 'AWAITING_DECISION' },
+      { label: 'Production', stage: 'PUBLISHED' }
+    ];
+
+    const statusOrder: Record<string, number> = {
+      'DRAFT': 0,
+      'SUBMITTED': 1,
+      'EDITOR_REVIEW': 1.5,
+      'UNDER_REVIEW': 2,
+      'REVISION_REQUESTED': 2.5,
+      'AWAITING_DECISION': 3,
+      'ACCEPTED': 3.5,
+      'PUBLISHED': 4,
+      'REJECTED': -1
+    };
+
+    const currentOrder = statusOrder[status] || 0;
+    return stages.map(stage => ({
+      ...stage,
+      done: statusOrder[stage.stage] <= currentOrder && currentOrder >= 0
+    }));
+  };
+
+  // Extract figures/media from uploaded files
+  const extractFigures = (): ManuscriptFileRow[] => {
+    if (!details.files) return [];
+    return details.files.filter(f =>
+      f.file_type && (
+        f.file_type.toLowerCase().includes('figure') ||
+        f.file_type.toLowerCase().includes('table') ||
+        f.file_type.toLowerCase().includes('image') ||
+        f.file_type.toLowerCase().includes('supplementary')
+      )
+    );
+  };
+
+  const tabs = [
+    { id: 'title', label: 'Title & Abstract' },
+    { id: 'contributors', label: 'Contributors' },
+    { id: 'files', label: 'Files for Review' },
+    { id: 'evaluation', label: 'Editor Evaluation' },
+    { id: 'reviews', label: 'Reviews' },
+    { id: 'suggestions', label: 'Suggestions' },
+    { id: 'history', label: 'Review History' },
+    { id: 'revisions', label: 'Revisions' },
+    { id: 'comments', label: 'Collaboration' }
+  ];
+
+  return (
+    <div className="w-full h-full flex bg-white overflow-hidden">
+      {/* Phase 4: Notification Toast */}
+      {notification && (
+        <div className={`fixed top-4 right-4 px-4 py-3 rounded-lg shadow-lg text-white text-sm font-semibold z-50 animate-pulse ${
+          notification.type === 'success' ? 'bg-emerald-600' :
+          notification.type === 'error' ? 'bg-red-600' :
+          'bg-blue-600'
+        }`}>
+          {notification.message}
+        </div>
+      )}
+
+      {/* Phase 4: Subscription Status Indicator */}
+      {isSubscribed && (
+        <div className="fixed top-4 left-4 flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-200 z-40">
+          <span className="w-2 h-2 bg-emerald-600 rounded-full animate-pulse"></span>
+          Live Updates Active
+        </div>
+      )}
+
+      {/* LEFT SIDEBAR */}
+      <aside className="w-64 bg-white border-r border-slate-200 overflow-y-auto p-6 flex flex-col">
+        {/* WORKFLOW */}
+        <div className="mb-8">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">WORKFLOW</p>
+          <div className="space-y-2">
+            {computeWorkflowStages().map((item) => (
+              <div key={item.label} className="flex items-center gap-2">
+                {item.done ? (
+                  <Check className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                ) : (
+                  <div className="w-5 h-5 border-2 border-slate-300 rounded flex-shrink-0" />
+                )}
+                <span className={`text-sm ${item.done ? 'text-slate-900 font-semibold' : 'text-slate-600'}`}>
+                  {item.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* PUBLICATION */}
+        <div className="mb-8">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">PUBLICATION</p>
+          <div className="space-y-2">
+            {[
+              { id: 'title', label: 'Title & Abstract', icon: '📄' },
+              { id: 'contributors', label: 'Contributors', icon: '👥' },
+              { id: 'metadata', label: 'Metadata', icon: '⚙️' },
+              { id: 'references', label: 'References', icon: '📚' },
+              { id: 'galleries', label: 'Galleries', icon: '🖼️' },
+              { id: 'jats', label: 'JATS XML', icon: '📋' },
+              { id: 'permissions', label: 'Permissions & Disclosure', icon: '🔐' },
+              { id: 'issue', label: 'Issue', icon: '📰' }
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActivePublication(item.id as any)}
+                className={`w-full text-left flex items-center gap-2 text-sm p-2 rounded transition ${
+                  activePublication === item.id
+                    ? 'bg-emerald-50 text-emerald-700 font-semibold'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                <span>{item.icon}</span>
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* STATUS TRACKING */}
+        <div className="mb-8">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">STATUS TRACKING</p>
+          <div className="space-y-2">
+            {details.statusHistory && details.statusHistory.length > 0 ? (
+              details.statusHistory.map((status, idx) => (
+                <div key={idx} className="flex items-start gap-2">
+                  <Check className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm text-slate-900 font-semibold">{status.to_status}</p>
+                    {status.created_at && <p className="text-xs text-slate-500">{formatDate(status.created_at)}</p>}
+                    {status.note && <p className="text-xs text-slate-600 mt-1">{status.note}</p>}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-slate-500">No status history available.</p>
+            )}
+          </div>
+        </div>
+
+        {/* COORDINATOR NOTIFICATIONS */}
+        <div className="mb-6 bg-white border border-slate-200 rounded-lg p-4">
+          <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">COORDINATOR ACTIONS</p>
+          <div className="space-y-2">
+            <button
+              onClick={() => {
+                notifyCoordinator(manuscript.id, currentUser?.email || 'unknown', 'READY_FOR_REVIEW', 'Reviewers assigned and ready for review');
+                setError('Notification sent to coordinator');
+                setTimeout(() => setError(''), 3000);
+              }}
+              className="w-full text-left text-xs px-3 py-2 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100 font-bold transition"
+            >
+              ✓ Ready for Review
+            </button>
+            <button
+              onClick={() => {
+                notifyCoordinator(manuscript.id, currentUser?.email || 'unknown', 'REVIEWS_COMPLETE', 'All reviews received and compiled');
+                setError('Notification sent to coordinator');
+                setTimeout(() => setError(''), 3000);
+              }}
+              className="w-full text-left text-xs px-3 py-2 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 font-bold transition"
+            >
+              ✓ Reviews Complete
+            </button>
+            <button
+              onClick={() => {
+                notifyCoordinator(manuscript.id, currentUser?.email || 'unknown', 'DECISION_READY', 'Final editorial decision submitted');
+                setError('Notification sent to coordinator');
+                setTimeout(() => setError(''), 3000);
+              }}
+              className="w-full text-left text-xs px-3 py-2 bg-purple-50 text-purple-700 rounded hover:bg-purple-100 font-bold transition"
+            >
+              ✓ Decision Ready
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mt-3 text-center">Alerts coordination team</p>
+        </div>
+
+        {/* NEED HELP */}
+        <div className="mt-auto p-4 bg-slate-50 rounded-lg border border-slate-200">
+          <p className="font-bold text-sm text-slate-900 mb-1">Need Help?</p>
+          <p className="text-xs text-slate-600 mb-3">Contact Support</p>
+          <button className="text-xs text-[#008751] font-bold hover:underline">Learn more →</button>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT */}
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Header with Breadcrumb */}
+        <div className="bg-white border-b border-slate-200 px-8 py-4 shrink-0">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={onBack}
+                className="text-slate-600 hover:text-slate-900 flex items-center gap-1 text-xs font-bold"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </button>
+              <div className="flex items-center gap-2 text-xs text-slate-600">
+                <span>Dashboard</span>
+                <span>&gt;</span>
+                <span>Editorial Desk</span>
+                <span>&gt;</span>
+                <span>Manuscripts</span>
+                <span>&gt;</span>
+                <span className="font-bold text-slate-900">{manuscript.id}</span>
+              </div>
+            </div>
+            {/* Editor Profile - Moved to Header */}
+            <div className="flex items-center gap-3 bg-slate-50 rounded-lg px-4 py-2 border border-slate-200">
+              <div className="w-8 h-8 bg-emerald-500 rounded-full text-white flex items-center justify-center font-bold text-xs">
+                {currentUser?.name?.charAt(0).toUpperCase() || 'E'}
+              </div>
+              <div>
+                <p className="font-semibold text-xs text-slate-900">{currentUser?.name || 'Editor'}</p>
+                <p className="text-[10px] text-slate-600">{currentUser?.role || 'Editor'}</p>
+              </div>
+            </div>
+          </div>
+          <h1 className="text-lg font-black text-slate-900 mb-1">{manuscript.title || 'Manuscript Title'}</h1>
+          <div className="flex items-center gap-3">
+            {assignmentAccepted ? (
+              <>
+                <span className="bg-emerald-100 text-emerald-700 text-xs px-3 py-1 rounded-full font-bold">
+                  ✓ Assignment Accepted
+                </span>
+                {evaluationSubmitted ? (
+                  <span className="bg-blue-100 text-blue-700 text-xs px-3 py-1 rounded-full font-bold">
+                    ✓ Evaluation Submitted
+                  </span>
+                ) : (
+                  <span className="bg-amber-100 text-amber-700 text-xs px-3 py-1 rounded-full font-bold">
+                    ⏳ Evaluation In Progress
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="bg-slate-100 text-slate-700 text-xs px-3 py-1 rounded-full font-bold">{assignment.status || 'Pending'}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="bg-white border-b border-slate-200 px-8 flex-shrink-0">
+          <div className="flex gap-8">
+            {tabs.map((tab) => {
+              const isDisabled = tab.id === 'evaluation' && !assignmentAccepted;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => !isDisabled && setActiveTab(tab.id as any)}
+                  disabled={isDisabled}
+                  className={`px-1 py-4 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
+                    isDisabled
+                      ? 'text-slate-400 border-transparent cursor-not-allowed'
+                      : activeTab === tab.id
+                      ? 'text-[#008751] border-[#008751]'
+                      : 'text-slate-600 border-transparent hover:text-slate-900'
+                  }`}
+                  title={isDisabled ? 'Accept assignment first to unlock evaluation' : ''}
+                >
+                  {tab.label}
+                  {isDisabled && <span className="ml-1 text-xs">🔒</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          {/* CENTER CONTENT */}
+          <div className="flex-1 overflow-y-auto p-8">
+            {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4 mb-6">{error}</div>}
+
+            {activePublication !== 'title' && (
+              <>
+                {activePublication === 'contributors' && (
+                  <div className="max-w-4xl">
+                    <div className="bg-white border border-slate-200 rounded-lg p-8">
+                      <h2 className="text-xl font-bold text-slate-900 mb-6">Contributors ({details.contributors?.length || 0})</h2>
+                      <div className="space-y-4">
+                        {details.contributors && details.contributors.length > 0 ? (
+                          details.contributors.map((contributor, idx) => (
+                            <div key={idx} className="border border-slate-200 rounded-lg p-4">
+                              <p className="font-semibold text-slate-900">{contributor.name || 'Unknown Author'}</p>
+                              <p className="text-sm text-slate-600">{contributor.contributor_role || 'Author'}</p>
+                              {contributor.affiliation && <p className="text-xs text-slate-500 mt-1">{contributor.affiliation}</p>}
+                              {contributor.email && <p className="text-xs text-slate-500">Email: {contributor.email}</p>}
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-slate-600">No contributor data available.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activePublication === 'metadata' && (
+                  <div className="max-w-4xl">
+                    <div className="bg-white border border-slate-200 rounded-lg p-8">
+                      <h2 className="text-xl font-bold text-slate-900 mb-6">Metadata</h2>
+                      <div className="grid grid-cols-2 gap-6">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-600 mb-2">Manuscript ID</p>
+                          <p className="text-slate-900">{manuscript.id}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-600 mb-2">Submission Date</p>
+                          <p className="text-slate-900">{formatDate(manuscript.submitted_at)}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-600 mb-2">Status</p>
+                          <p className="text-slate-900">{manuscript.status || 'SUBMITTED'}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-600 mb-2">Language</p>
+                          <p className="text-slate-900">{manuscript.language || 'English'}</p>
+                        </div>
+                        {manuscript.doi && (
+                          <div className="col-span-2">
+                            <p className="text-sm font-semibold text-slate-600 mb-2">DOI</p>
+                            <p className="text-slate-900">{manuscript.doi}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activePublication === 'references' && (
+                  <div className="max-w-4xl">
+                    <div className="bg-white border border-slate-200 rounded-lg p-8">
+                      <h2 className="text-xl font-bold text-slate-900 mb-6">References</h2>
+                      <div className="space-y-3">
+                        {manuscript.references ? (
+                          <>
+                            {manuscript.references.split('\n').filter(ref => ref.trim()).map((ref, idx) => (
+                              <p key={idx} className="text-slate-700 leading-relaxed">{ref}</p>
+                            ))}
+                            <p className="text-slate-500 text-sm mt-6">
+                              Total References: {manuscript.references.split('\n').filter(ref => ref.trim()).length}
+                            </p>
+                          </>
+                        ) : (
+                          <div className="bg-slate-50 rounded-lg p-6 text-center">
+                            <p className="text-slate-600">No references submitted.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activePublication === 'galleries' && (
+                  <div className="max-w-4xl">
+                    <div className="bg-white border border-slate-200 rounded-lg p-8">
+                      <h2 className="text-xl font-bold text-slate-900 mb-6">Galleries & Figures</h2>
+                      {(() => {
+                        const figures = extractFigures();
+                        return figures.length > 0 ? (
+                          <div className="grid grid-cols-2 gap-4">
+                            {figures.map((figure) => (
+                              <div key={figure.id} className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
+                                <div className="aspect-video bg-slate-100 flex items-center justify-center">
+                                  {figure.file_name.match(/\.(jpg|jpeg|png|gif|svg)$/i) ? (
+                                    <img
+                                      src={figure.public_url || ''}
+                                      alt={figure.file_name}
+                                      className="max-h-full max-w-full object-contain"
+                                    />
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-2">
+                                      <span className="text-2xl">📄</span>
+                                      <span className="text-xs text-slate-600">{figure.file_type}</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="p-3 bg-white border-t border-slate-200">
+                                  <p className="text-sm font-semibold text-slate-900 truncate">{figure.file_name}</p>
+                                  <p className="text-xs text-slate-500">{figure.file_size} • {formatDate(figure.uploaded_at)}</p>
+                                  {figure.public_url && (
+                                    <div className="flex gap-2 mt-2">
+                                      <a href={figure.public_url} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
+                                        View →
+                                      </a>
+                                      <a href={figure.public_url} download className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
+                                        Download →
+                                      </a>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="bg-slate-50 rounded-lg p-12 text-center">
+                            <div className="text-3xl mb-3">🖼️</div>
+                            <p className="text-slate-600">No figures or supplementary materials uploaded.</p>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {activePublication === 'jats' && (
+                  <div className="max-w-4xl">
+                    <div className="bg-white border border-slate-200 rounded-lg p-8">
+                      <h2 className="text-xl font-bold text-slate-900 mb-6">JATS XML</h2>
+                      {(() => {
+                        const jatsFile = details.files?.find(f => f.file_type?.toLowerCase() === 'jats' || f.file_name?.toLowerCase().includes('.xml'));
+                        return jatsFile ? (
+                          <div className="space-y-4">
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                              <p className="text-sm text-emerald-700 font-semibold">✓ JATS XML file available</p>
+                            </div>
+                            <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                              <p className="text-xs text-slate-600 mb-3">File: {jatsFile.file_name}</p>
+                              <p className="text-xs text-slate-600 mb-4">Size: {jatsFile.file_size} • Uploaded: {formatDate(jatsFile.uploaded_at)}</p>
+                              {jatsFile.public_url && (
+                                <div className="flex gap-2">
+                                  <a href={jatsFile.public_url} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
+                                    View XML →
+                                  </a>
+                                  <a href={jatsFile.public_url} download className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
+                                    Download →
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-slate-50 rounded-lg p-12 text-center">
+                            <div className="text-3xl mb-3">📋</div>
+                            <p className="text-slate-600 mb-2">No JATS XML file available for this manuscript.</p>
+                            <p className="text-xs text-slate-500">JATS XML may be generated during the publication workflow.</p>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {activePublication === 'permissions' && (
+                  <div className="max-w-4xl">
+                    <div className="bg-white border border-slate-200 rounded-lg p-8">
+                      <h2 className="text-xl font-bold text-slate-900 mb-6">Permissions & Disclosure</h2>
+                      <div className="bg-slate-50 rounded-lg p-8 text-center">
+                        <div className="text-3xl mb-3">🔐</div>
+                        <p className="text-slate-600 mb-2">Permission and disclosure information from author submission.</p>
+                        <p className="text-xs text-slate-500 mb-6">Review the submitted manuscript and associated files above for disclosure statements.</p>
+                        <div className="bg-white border border-slate-200 rounded-lg p-4 text-left max-w-2xl mx-auto">
+                          <p className="text-xs font-semibold text-slate-600 mb-3">Items to verify:</p>
+                          <ul className="text-xs text-slate-600 space-y-2">
+                            <li className="flex items-start gap-2">
+                              <span className="text-slate-400">□</span>
+                              <span>Conflict of Interest disclosure form completed</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                              <span className="text-slate-400">□</span>
+                              <span>Copyright transfer agreement signed</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                              <span className="text-slate-400">□</span>
+                              <span>Data availability statement included</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                              <span className="text-slate-400">□</span>
+                              <span>Author funding/support declaration</span>
+                            </li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activePublication === 'issue' && (
+                  <div className="max-w-4xl">
+                    <div className="bg-white border border-slate-200 rounded-lg p-8">
+                      <h2 className="text-xl font-bold text-slate-900 mb-6">Issue Assignment</h2>
+                      {manuscript.volume || manuscript.issue ? (
+                        <div className="space-y-4">
+                          {manuscript.volume && (
+                            <div>
+                              <p className="text-sm font-semibold text-slate-600 mb-2">Volume</p>
+                              <p className="text-slate-900">{manuscript.volume}</p>
+                            </div>
+                          )}
+                          {manuscript.issue && (
+                            <div>
+                              <p className="text-sm font-semibold text-slate-600 mb-2">Issue</p>
+                              <p className="text-slate-900">{manuscript.issue}</p>
+                            </div>
+                          )}
+                          {manuscript.published_at && (
+                            <div>
+                              <p className="text-sm font-semibold text-slate-600 mb-2">Published Date</p>
+                              <p className="text-slate-900">{formatDate(manuscript.published_at)}</p>
+                            </div>
+                          )}
+                          {manuscript.doi && (
+                            <div>
+                              <p className="text-sm font-semibold text-slate-600 mb-2">DOI</p>
+                              <p className="text-slate-900 font-mono text-xs">{manuscript.doi}</p>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="bg-slate-50 rounded-lg p-12 text-center">
+                          <div className="text-3xl mb-3">📰</div>
+                          <p className="text-slate-600 mb-1">No issue assigned yet.</p>
+                          <p className="text-xs text-slate-500">Issue assignment will occur during the publication workflow.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {activePublication === 'title' && activeTab === 'title' && (
+              <div>
+                {/* PDF Viewer */}
+                <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden mb-6">
+                  {/* Toolbar */}
+                  <div className="bg-slate-100 border-b border-slate-200 px-6 py-3 flex items-center justify-between text-xs text-slate-600">
+                    <div className="flex items-center gap-3">
+                      <button className="p-1 hover:bg-slate-200 rounded">≡</button>
+                      <button className="p-1 hover:bg-slate-200 rounded">🔍</button>
+                      <button className="p-1 hover:bg-slate-200 rounded">↑</button>
+                      <button className="p-1 hover:bg-slate-200 rounded">↓</button>
+                    </div>
+                    <span className="font-semibold">{currentPage} of 3</span>
+                    <div className="flex items-center gap-2">
+                      <button className="p-1 hover:bg-slate-200 rounded">−</button>
+                      <span className="px-2">100%</span>
+                      <button className="p-1 hover:bg-slate-200 rounded">+</button>
+                    </div>
+                    <button className="p-1 hover:bg-slate-200 rounded">⛶</button>
+                    <button className="p-1 hover:bg-slate-200 rounded">⋮</button>
+                  </div>
+
+                  {/* Document */}
+                  <div className="bg-slate-50 p-12 min-h-[600px]">
+                    <div className="bg-white p-12 max-w-3xl mx-auto">
+                      <h2 className="text-2xl font-bold text-center mb-6">{manuscript.title}</h2>
+                      <div className="text-center mb-4">
+                        <p className="text-sm text-slate-700">
+                          {details.contributors && details.contributors.length > 0
+                            ? details.contributors.map((c, i) => `${c.name}${details.contributors && i < details.contributors.length - 1 ? ', ' : ''}`).join('')
+                            : manuscript.author_name}
+                        </p>
+                      </div>
+                      {details.contributors && details.contributors.length > 0 && (
+                        <div className="text-center mb-8 text-xs text-slate-600 border-b border-slate-200 pb-6">
+                          {details.contributors.map((c, i) => (
+                            <div key={i}>
+                              {c.affiliation && <p>{c.affiliation}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="mb-6">
+                        <p className="text-xs"><span className="font-semibold">Submitted:</span> <span className="text-slate-600">{formatDate(manuscript.submitted_at)}</span></p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-emerald-700 mb-3 uppercase">Abstract</h3>
+                        <p className="text-sm text-slate-700 leading-relaxed">
+                          {manuscript.abstract || '(No abstract provided)'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer */}
+                  <div className="bg-slate-100 border-t border-slate-200 px-8 py-3 text-xs text-slate-600 flex justify-between">
+                    <span>Page 1 of 3</span>
+                    <span>Language: {manuscript.language || 'English'}</span>
+                    <span>Close Viewer</span>
+                  </div>
+                </div>
+
+                {/* Files Section */}
+                <div className="bg-white border border-slate-200 rounded-lg p-6">
+                  <h3 className="font-bold text-slate-900 mb-4">FILES FOR REVIEW ({details.files?.length || 0})</h3>
+                  <div className="space-y-3">
+                    {details.files && details.files.length > 0 ? (
+                      details.files.map((file) => (
+                        <div key={file.id} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 cursor-pointer transition">
+                          <div className="flex items-center gap-3 flex-1">
+                            <span className="text-lg">📄</span>
+                            <div className="flex-1">
+                              <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                              <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            {file.public_url && (
+                              <>
+                                <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-1">👁️</a>
+                                <a href={file.public_url} download className="text-slate-600 hover:text-slate-900 p-1">📥</a>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-slate-600 text-sm">No files uploaded.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'contributors' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">Manuscript Contributors ({details.contributors?.length || 0})</h3>
+                {details.contributors && details.contributors.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.contributors.map((contributor, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4">
+                        <p className="font-semibold text-slate-900">{contributor.name}</p>
+                        <p className="text-sm text-slate-600">{contributor.contributor_role}</p>
+                        {contributor.affiliation && <p className="text-xs text-slate-500 mt-1">{contributor.affiliation}</p>}
+                        {contributor.email && <p className="text-xs text-slate-500">Email: {contributor.email}</p>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No contributors data available.</div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'files' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">FILES FOR REVIEW ({details.files?.length || 0})</h3>
+                {details.files && details.files.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.files.map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 transition">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📄</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          {file.public_url && (
+                            <>
+                              <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
+                              <a href={file.public_url} download className="text-slate-600 hover:text-slate-900 p-2">📥</a>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No files available.</div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'evaluation' && (
+              <EditorEvaluationFormTab
+                assignmentId={assignment.id}
+                manuscriptId={manuscript.id}
+                assignment={assignment}
+                suggestedReviewers={details.suggestedReviewers}
+                onSubmitSuccess={onChanged}
+              />
+            )}
+
+            {activeTab === 'reviews' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">PEER REVIEWS ({reviewerAssignments?.length || 0})</h3>
+                {reviewerAssignments && reviewerAssignments.length > 0 ? (
+                  <div className="space-y-4">
+                    {reviewerAssignments.map((ra) => (
+                      <div key={ra.id} className="border border-slate-200 rounded-lg p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {details.profiles.get(ra.reviewer_id)?.name || 'Unknown Reviewer'}
+                            </p>
+                            <p className="text-xs text-slate-600">{details.profiles.get(ra.reviewer_id)?.email}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className={`inline-flex text-xs font-bold px-2 py-1 rounded ${
+                              ra.status === 'SUBMITTED'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : ra.status === 'ACCEPTED'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {ra.status || 'Pending'}
+                            </span>
+                            {ra.submitted_at && (
+                              <p className="text-xs text-slate-500 mt-1">{formatDate(ra.submitted_at)}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {ra.status === 'SUBMITTED' && (
+                          <div className="bg-slate-50 rounded p-3 text-sm text-slate-700 space-y-2 mt-3">
+                            <p><span className="font-semibold">Recommendation:</span> {ra.recommendation || 'N/A'}</p>
+                            {ra.comments_to_editor && (
+                              <p><span className="font-semibold">Comments:</span> {ra.comments_to_editor}</p>
+                            )}
+                          </div>
+                        )}
+
+                        {ra.status === 'ACCEPTED' && (
+                          <p className="text-xs text-slate-500 italic mt-3">Awaiting review submission...</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet. Reviewer assignment is handled by the Coordinator.</div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'suggestions' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">REVIEWER SUGGESTIONS ({details.suggestedReviewers?.length || 0})</h3>
+                {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.suggestedReviewers.map((reviewer) => {
+                      const isAssigned = reviewerAssignments?.some(r => details.profiles.get(r.reviewer_id)?.email === reviewer.email);
+                      return (
+                        <div key={reviewer.id} className={`border rounded-lg p-4 ${isAssigned ? 'bg-emerald-50 border-emerald-200' : 'border-slate-200'}`}>
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex-1">
+                              <p className="font-semibold text-slate-900">{reviewer.name}</p>
+                              <p className="text-xs text-slate-600">{reviewer.email}</p>
+                              {reviewer.note && (
+                                <p className="text-xs text-slate-500 mt-1">Note: {reviewer.note}</p>
+                              )}
+                              <p className="text-[10px] text-slate-400 mt-1">Suggested by {reviewer.suggested_by === 'EDITOR' ? 'you' : 'author'}</p>
+                            </div>
+                            {isAssigned && (
+                              <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded">✓ Assigned</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No suggested reviewers yet. Add suggestions from the Editor Evaluation tab when submitting your assessment.</div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'history' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">REVIEW HISTORY ({details.statusHistory?.length || 0})</h3>
+                {details.statusHistory && details.statusHistory.length > 0 ? (
+                  <div className="space-y-4">
+                    {details.statusHistory.map((item, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <p className="font-semibold text-slate-900">{item.to_status}</p>
+                          <p className="text-xs text-slate-500">{formatDateTime(item.created_at)}</p>
+                        </div>
+                        {item.note && <p className="text-sm text-slate-600">{item.note}</p>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No history available.</div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'revisions' && (
+              <RevisionReview manuscriptId={manuscript.id} onStatusUpdate={onChanged} />
+            )}
+
+            {activeTab === 'comments' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-sm font-black text-slate-900">DISCUSSION & COLLABORATION ({discussions?.length || 0})</h3>
+                  <button
+                    onClick={() => setShowInternalNotes(!showInternalNotes)}
+                    className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                  >
+                    <FileText className="w-3 h-3" /> {showInternalNotes ? 'Hide' : 'Show'} Internal Notes
+                  </button>
+                </div>
+
+                {/* Discussion Posts */}
+                <div className="mb-6">
+                  <h4 className="text-xs font-bold text-slate-700 mb-4">TEAM DISCUSSIONS</h4>
+                  {discussions && discussions.length > 0 ? (
+                    <div className="space-y-4 mb-6">
+                      {discussions.filter(d => !(d as any).is_internal).map((discussion, idx) => (
+                        <div key={idx} className="border border-slate-200 rounded p-4 hover:bg-slate-50">
+                          <div className="flex items-start justify-between mb-2">
+                            <div>
+                              <p className="font-semibold text-slate-900">
+                                {details.profiles.get(discussion.sender_id)?.name || 'Unknown User'}
+                              </p>
+                              <p className="text-xs text-slate-500">{details.profiles.get(discussion.sender_id)?.role || 'Member'}</p>
+                            </div>
+                            <p className="text-xs text-slate-500">{formatDateTime(discussion.created_at)}</p>
+                          </div>
+                          <p className="text-sm text-slate-700 mt-2">{discussion.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500 mb-6">No discussions yet. Start a discussion below.</p>
+                  )}
+
+                  {/* Post Comment Form */}
+                  <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                    <textarea
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      placeholder="Add a team discussion comment..."
+                      className="w-full text-xs border border-slate-300 rounded px-3 py-2 mb-3 focus:outline-none focus:border-emerald-500"
+                      rows={3}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handlePostComment}
+                        disabled={busy || !newComment.trim()}
+                        className="flex-1 bg-emerald-600 text-white text-xs font-bold py-2 rounded hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        {busy ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : <Send className="w-3 h-3 inline mr-1" />}
+                        Post Comment
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Internal Notes Section */}
+                {showInternalNotes && (
+                  <div className="pt-6 border-t border-slate-200">
+                    <h4 className="text-xs font-bold text-slate-700 mb-4 flex items-center gap-2">
+                      <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                      EDITOR INTERNAL NOTES (Private)
+                    </h4>
+                    {discussions && discussions.filter(d => (d as any).is_internal).length > 0 ? (
+                      <div className="space-y-3 mb-6 bg-amber-50 border border-amber-200 rounded p-4">
+                        {discussions.filter(d => (d as any).is_internal).map((discussion, idx) => (
+                          <div key={idx} className="border-b border-amber-200 pb-3 last:border-0">
+                            <div className="flex items-start justify-between mb-1">
+                              <p className="font-semibold text-amber-900 text-xs">
+                                {details.profiles.get(discussion.sender_id)?.name || 'Unknown'}
+                              </p>
+                              <p className="text-xs text-amber-700">{formatDateTime(discussion.created_at)}</p>
+                            </div>
+                            <p className="text-xs text-amber-800">{discussion.message}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 mb-6">No internal notes yet.</p>
+                    )}
+
+                    {/* Post Internal Note Form */}
+                    <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+                      <textarea
+                        value={newInternalNote}
+                        onChange={(e) => setNewInternalNote(e.target.value)}
+                        placeholder="Add a private internal note (visible only to editors)..."
+                        className="w-full text-xs border border-amber-300 rounded px-3 py-2 mb-3 bg-white focus:outline-none focus:border-amber-500"
+                        rows={3}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handlePostInternalNote}
+                          disabled={busy || !newInternalNote.trim()}
+                          className="flex-1 bg-amber-600 text-white text-xs font-bold py-2 rounded hover:bg-amber-700 disabled:opacity-50"
+                        >
+                          {busy ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : <Save className="w-3 h-3 inline mr-1" />}
+                          Post Internal Note
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT SIDEBAR */}
+          <aside className="w-80 bg-slate-50 border-l border-slate-200 overflow-y-auto p-6 flex flex-col">
+            {/* DECISION */}
+            <div className="mb-6">
+              <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">DECISION</p>
+              {assignment.status === 'DECLINED' ? (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-red-700 text-center">✕ Assignment Declined</p>
+                </div>
+              ) : evaluationSubmitted ? (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-emerald-700 text-center">✓ Decision Submitted</p>
+                  <p className="text-xs text-emerald-600 text-center mt-1">Awaiting coordinator action</p>
+                </div>
+              ) : (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-blue-700 text-center">📝 Complete Evaluation</p>
+                  <p className="text-xs text-blue-600 text-center mt-1">Decision buttons at bottom of form</p>
+                </div>
+              )}
+            </div>
+
+            {/* REVIEW ROUND */}
+            <div className="mb-6 bg-white border border-slate-200 rounded-lg p-4">
+              <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4">REVIEW ROUND</p>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-slate-600">Status</p>
+                  <p className="text-sm font-semibold text-blue-600">{manuscript.status || 'In Progress'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-600">Reviewers Assigned</p>
+                  <p className="text-sm font-bold text-slate-900">{reviewerAssignments?.length || 0}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-600">Reviews Completed</p>
+                  <p className="text-sm font-bold text-slate-900">
+                    {reviewerAssignments?.filter(r => r.status === 'SUBMITTED').length || 0} / {reviewerAssignments?.length || 0}
+                  </p>
+                </div>
+                {reviewerAssignments && reviewerAssignments.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-200">
+                    <p className="text-xs text-slate-600 mb-2">Assigned Reviewers:</p>
+                    {reviewerAssignments.slice(0, 3).map((ra) => (
+                      <div key={ra.id} className="text-xs mb-1 p-1 rounded">
+                        <span className="text-slate-700">
+                          • {details.profiles.get(ra.reviewer_id)?.name || 'Unknown'} ({ra.status || 'Pending'})
+                        </span>
+                      </div>
+                    ))}
+                    {reviewerAssignments.length > 3 && (
+                      <p className="text-xs text-slate-500 mt-1">+{reviewerAssignments.length - 3} more</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* SUGGESTED PEER REFEREES */}
+            <div className="bg-white border border-slate-200 rounded-lg p-4">
+              <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">SUGGESTED PEER REFEREES ({details.suggestedReviewers?.length || 0})</p>
+              <p className="text-xs text-slate-600 mb-4">
+                {evaluationSubmitted
+                  ? 'Reviewer suggestions submitted with your evaluation.'
+                  : 'Suggest 2+ potential reviewers from the Editor Evaluation tab.'}
+              </p>
+              <div className="space-y-3">
+                {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
+                  details.suggestedReviewers.map((reviewer) => (
+                    <div key={reviewer.id} className="p-3 bg-slate-50 rounded border border-slate-200">
+                      <p className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                        <span>👤</span> {reviewer.name}
+                      </p>
+                      <p className="text-xs text-slate-600">{reviewer.email}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-400 text-center py-4">No reviewers suggested yet</p>
+                )}
+              </div>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function AcceptDeclineModal({
+  details,
+  onAccept,
+  onDecline,
+  isLoading
+}: {
+  details: EditorManuscriptDetails;
+  onAccept: () => Promise<void>;
+  onDecline: () => Promise<void>;
+  isLoading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-[#1a4038] to-[#0f2e2a] text-white p-6 rounded-t-2xl">
+          <h2 className="text-2xl font-black">Editorial Assignment</h2>
+          <p className="text-emerald-100 text-sm mt-1">You have been invited to evaluate a manuscript</p>
+        </div>
+
+        {/* Content */}
+        <div className="p-8">
+          <div className="mb-6">
+            <p className="text-slate-600 text-sm mb-4">
+              You have been assigned to provide an editorial assessment for:
+            </p>
+
+            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4">
+              <p className="font-bold text-slate-900 text-sm mb-2">{details.manuscript.title}</p>
+              <p className="text-xs text-slate-500 mb-2">
+                <strong>Author:</strong> {details.manuscript.author_name}
+              </p>
+              <p className="text-xs text-slate-600 line-clamp-2">
+                {details.manuscript.abstract}
+              </p>
+            </div>
+
+            <p className="text-sm text-slate-700 mb-4">
+              If you accept, you will evaluate this manuscript using our 7-criteria framework and recommend whether to proceed to peer review or request revisions.
+            </p>
+          </div>
+
+          {/* Buttons */}
+          <div className="space-y-3">
+            <button
+              onClick={onAccept}
+              disabled={isLoading}
+              className="w-full bg-emerald-600 text-white py-3 rounded-lg font-semibold hover:bg-emerald-700 disabled:opacity-50 transition flex items-center justify-center gap-2"
+            >
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-5 h-5" />}
+              {isLoading ? 'Processing...' : '✓ Accept Assignment'}
+            </button>
+
+            <button
+              onClick={onDecline}
+              disabled={isLoading}
+              className="w-full border-2 border-red-600 text-red-600 py-3 rounded-lg font-semibold hover:bg-red-50 disabled:opacity-50 transition flex items-center justify-center gap-2"
+            >
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <XIcon className="w-5 h-5" />}
+              {isLoading ? 'Processing...' : '✕ Decline Assignment'}
+            </button>
+          </div>
+
+          <p className="text-xs text-slate-500 text-center mt-4">
+            If you decline, the Coordinator will be notified and can assign another editor.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}

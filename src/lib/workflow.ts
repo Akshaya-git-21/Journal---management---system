@@ -143,8 +143,18 @@ export interface EditorReviewerActionRow {
   created_at: string;
 }
 
+export type CoordinatorAcceptResult =
+  | { status: 'ASSIGNED'; action: EditorReviewerActionRow }
+  | { status: 'NEEDS_ACCOUNT'; suggestion_id: string; name: string; email: string; note: string | null };
+
 export const coordinatorAcceptSuggestion = (suggestionId: string) =>
-  rpcOrThrow<EditorReviewerActionRow>(supabase.rpc('coordinator_accept_suggestion', { p_suggestion_id: suggestionId }));
+  rpcOrThrow<CoordinatorAcceptResult>(supabase.rpc('coordinator_accept_suggestion', { p_suggestion_id: suggestionId }));
+
+export const coordinatorFinalizeReviewerSuggestion = (suggestionId: string, reviewerId: string) =>
+  rpcOrThrow<EditorReviewerActionRow>(supabase.rpc('coordinator_finalize_reviewer_suggestion', { p_suggestion_id: suggestionId, p_reviewer_id: reviewerId }));
+
+export const coordinatorReactivateReviewer = (profileId: string) =>
+  rpcOrThrow<ProfileRow>(supabase.rpc('coordinator_reactivate_reviewer', { p_profile_id: profileId }));
 
 export const coordinatorDeclineSuggestion = (suggestionId: string, reason: string = '') =>
   rpcOrThrow<EditorReviewerActionRow>(supabase.rpc('coordinator_decline_suggestion', { p_suggestion_id: suggestionId, p_reason: reason }));

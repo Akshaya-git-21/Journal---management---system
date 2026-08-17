@@ -1,5 +1,6 @@
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow } from '../../../lib/workflow';
-import { CheckCircle2, Circle, AlertCircle, FileText } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, listActiveProfilesByRole, assignEditor } from '../../../lib/workflow';
+import { CheckCircle2, Circle, AlertCircle, FileText, Loader2 } from 'lucide-react';
 
 interface Props {
   manuscript: ManuscriptRow;
@@ -7,6 +8,7 @@ interface Props {
   reviewerAssignments: ReviewerAssignmentRow[];
   suggestedReviewers: SuggestedReviewerRow[];
   profiles: Record<string, ProfileRow>;
+  onWorkflowChange?: () => void;
 }
 
 export function OverviewTab({
@@ -14,7 +16,8 @@ export function OverviewTab({
   editorAssignments,
   reviewerAssignments,
   suggestedReviewers,
-  profiles
+  profiles,
+  onWorkflowChange
 }: Props) {
   const activeEditor = editorAssignments.find(a => a.status === 'ACCEPTED') || editorAssignments[0];
   const evaluationSubmitted = activeEditor?.assessment_status === 'SUBMITTED';
@@ -22,6 +25,31 @@ export function OverviewTab({
   const reviewsInvited = reviewerAssignments.filter(r => r.status === 'INVITED').length;
   const reviewsAccepted = reviewerAssignments.filter(r => r.status === 'ACCEPTED').length;
   const reviewsTotal = reviewerAssignments.length;
+
+  // Assign Editor (SUBMITTED -> EDITOR_REVIEW)
+  const [availableEditors, setAvailableEditors] = useState<ProfileRow[]>([]);
+  const [selectedEditorId, setSelectedEditorId] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState('');
+
+  useEffect(() => {
+    if (manuscript.status !== 'SUBMITTED') return;
+    listActiveProfilesByRole('EDITOR').then(setAvailableEditors).catch((e) => setAssignError(e.message));
+  }, [manuscript.status]);
+
+  const handleAssignEditor = async () => {
+    if (!selectedEditorId) return;
+    setAssigning(true);
+    setAssignError('');
+    try {
+      await assignEditor(manuscript.id, selectedEditorId);
+      onWorkflowChange?.();
+    } catch (e: any) {
+      setAssignError(e.message || 'Failed to assign editor');
+    } finally {
+      setAssigning(false);
+    }
+  };
 
   const daysAgo = Math.floor(
     (Date.now() - (manuscript.submitted_at ? new Date(manuscript.submitted_at).getTime() : 0)) / (1000 * 60 * 60 * 24)
@@ -180,11 +208,45 @@ export function OverviewTab({
         <p className="text-sm text-blue-800 mb-4">
           {getNextAction(manuscript.status, activeEditor, reviewerAssignments, evaluationSubmitted)}
         </p>
-        <div className="flex gap-2">
-          <button className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition">
-            {getNextActionButton(manuscript.status, activeEditor, reviewerAssignments, evaluationSubmitted)}
-          </button>
-        </div>
+
+        {manuscript.status === 'SUBMITTED' ? (
+          <div>
+            {assignError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-3 mb-3">{assignError}</div>
+            )}
+            {availableEditors.length === 0 ? (
+              <p className="text-xs text-blue-700">No active editor accounts available to assign.</p>
+            ) : (
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedEditorId}
+                  onChange={(e) => setSelectedEditorId(e.target.value)}
+                  disabled={assigning}
+                  className="flex-1 border border-blue-300 rounded-lg px-3 py-2 text-xs bg-white"
+                >
+                  <option value="">-- Select Editor --</option>
+                  {availableEditors.map((ed) => (
+                    <option key={ed.id} value={ed.id}>{ed.name} ({ed.email})</option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleAssignEditor}
+                  disabled={!selectedEditorId || assigning}
+                  className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2"
+                >
+                  {assigning && <Loader2 className="w-3 h-3 animate-spin" />}
+                  {assigning ? 'Assigning...' : 'Assign Editor'}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <button className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition">
+              {getNextActionButton(manuscript.status, activeEditor, reviewerAssignments, evaluationSubmitted)}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* SLA / Age Card */}

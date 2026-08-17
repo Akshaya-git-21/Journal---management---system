@@ -2,10 +2,17 @@ import { useState, useEffect } from 'react';
 import { ManuscriptRow, SuggestedReviewerRow, ReviewerAssignmentRow, ProfileRow } from '../../../lib/workflow';
 import {
   coordinatorAcceptSuggestion, coordinatorDeclineSuggestion, coordinatorReplaceSuggestion,
-  coordinatorAssignReviewerDirectly, finalizeReviewerBoard, getEditorReviewerActions
+  coordinatorAssignReviewerDirectly, finalizeReviewerBoard, getEditorReviewerActions,
+  coordinatorFinalizeReviewerSuggestion, approveUserRole, coordinatorReactivateReviewer
 } from '../../../lib/workflow';
-import { Plus, AlertCircle, Loader2, CheckCircle, Star, XCircle, RefreshCw } from 'lucide-react';
+import { createReviewerAccount } from '../../../lib/auth';
+import { Plus, AlertCircle, Loader2, CheckCircle, Star, XCircle, RefreshCw, UserPlus } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
+
+const generateTempPassword = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
+  return Array.from({ length: 12 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
+};
 
 interface Props {
   manuscript: ManuscriptRow;
@@ -39,6 +46,11 @@ export function ReviewBoardTab({
   const [showReplaceModal, setShowReplaceModal] = useState<string | null>(null);
   const [replacementReviewerId, setReplacementReviewerId] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
+
+  // Accept-a-new-reviewer flow: suggestion accepted but no matching account exists yet
+  const [needsAccount, setNeedsAccount] = useState<{ suggestionId: string; name: string; email: string; note: string | null } | null>(null);
+  const [creatingAccount, setCreatingAccount] = useState(false);
+  const [createdCredentials, setCreatedCredentials] = useState<{ email: string; password: string } | null>(null);
 
   const assignedReviewerIds = new Set(reviewerAssignments.map(r => r.reviewer_id));
   const assignedCount = reviewerAssignments.length;
@@ -89,7 +101,16 @@ export function ReviewBoardTab({
     setProcessing(suggestionId);
 
     try {
-      await coordinatorAcceptSuggestion(suggestionId);
+      const result = await coordinatorAcceptSuggestion(suggestionId);
+      if (result.status === 'NEEDS_ACCOUNT') {
+        setNeedsAccount({
+          suggestionId: result.suggestion_id,
+          name: result.name,
+          email: result.email,
+          note: result.note
+        });
+        return;
+      }
       setActions(prev => [...prev, { suggestion_id: suggestionId, action: 'ACCEPTED' }]);
       setSuccess('Reviewer suggestion accepted and assigned');
       setTimeout(() => setSuccess(''), 3000);
@@ -97,6 +118,82 @@ export function ReviewBoardTab({
     } catch (e: any) {
       setError(e.message || 'Failed to accept suggestion');
     } finally {
+      setProcessing(null);
+    }
+  };
+
+  // Create the reviewer account for a suggestion that had no matching profile,
+  // then finalize the acceptance against the (new or pre-existing) reviewer.
+  const handleCreateReviewerAccount = async () => {
+    if (!needsAccount) return;
+    setCreatingAccount(true);
+    setError('');
+
+    try {
+      let profileId: string | null = null;
+      let password: string | null = null;
+      let freshlyCreated = false;
+
+      try {
+        password = generateTempPassword();
+        await createReviewerAccount(needsAccount.email, password, needsAccount.name, needsAccount.note || '');
+        freshlyCreated = true;
+
+        // The profile row is created asynchronously by the signup trigger -- poll for it.
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const { data } = await supabase.from('profiles').select('id').eq('email', needsAccount.email).maybeSingle();
+          if (data) {
+            profileId = data.id;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+
+        if (!profileId) {
+          throw new Error('Reviewer account was created but the profile has not appeared yet. Please try again in a moment.');
+        }
+      } catch (createError: any) {
+        const alreadyRegistered = /already.*(registered|exists|in use)/i.test(createError.message || '');
+        if (!alreadyRegistered) throw createError;
+
+        // The auth account already exists (e.g. an earlier attempt that never
+        // got approved, or was previously declined) -- resolve the existing
+        // profile and proceed directly to assignment/invitation instead of
+        // failing. No new password is set for a pre-existing account.
+        freshlyCreated = false;
+        password = null;
+        const { data: existing } = await supabase.from('profiles').select('id').eq('email', needsAccount.email).maybeSingle();
+        if (!existing) {
+          throw new Error('An account with this email already exists in authentication, but no matching profile was found. Please contact support.');
+        }
+        profileId = existing.id;
+      }
+
+      // Activate the resolved profile as a reviewer. A freshly created account
+      // is always PENDING_APPROVAL, so the normal approval path applies; a
+      // pre-existing account may be in any other status (e.g. REJECTED from
+      // an earlier decision), so it needs the broader reactivation path that
+      // works regardless of current status.
+      if (freshlyCreated) {
+        await approveUserRole(profileId, true);
+      } else {
+        await coordinatorReactivateReviewer(profileId);
+      }
+      await coordinatorFinalizeReviewerSuggestion(needsAccount.suggestionId, profileId);
+
+      setActions(prev => [...prev, { suggestion_id: needsAccount.suggestionId, action: 'ACCEPTED' }]);
+      setNeedsAccount(null);
+      if (password) {
+        setCreatedCredentials({ email: needsAccount.email, password });
+      } else {
+        setSuccess('Existing account resolved -- reviewer assigned to this manuscript and invitation sent.');
+        setTimeout(() => setSuccess(''), 4000);
+      }
+      onDataChange();
+    } catch (e: any) {
+      setError(e.message || 'Failed to create the reviewer account');
+    } finally {
+      setCreatingAccount(false);
       setProcessing(null);
     }
   };
@@ -462,6 +559,77 @@ export function ReviewBoardTab({
           <CheckCircle className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
           <p className="font-bold text-emerald-700">Reviewer Board Finalized</p>
           <p className="text-sm text-emerald-600 mt-1">This manuscript has moved to Peer Review status</p>
+        </div>
+      )}
+
+      {/* Reviewer Account Required modal */}
+      {needsAccount && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <UserPlus className="w-5 h-5 text-blue-600" />
+              <h3 className="text-lg font-black text-slate-900">Reviewer Account Required</h3>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4">
+              <p className="font-semibold text-slate-900">{needsAccount.name}</p>
+              <p className="text-sm text-slate-600">{needsAccount.email}</p>
+              {needsAccount.note && <p className="text-xs text-slate-500 mt-1">Expertise: {needsAccount.note}</p>}
+            </div>
+
+            <p className="text-sm text-slate-700 mb-6">
+              This reviewer has been accepted by the Coordinator but does not have an account yet.
+              Create the reviewer account to continue.
+            </p>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-3 mb-4">{error}</div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleCreateReviewerAccount}
+                disabled={creatingAccount}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2.5 rounded-lg disabled:opacity-50 flex items-center justify-center gap-2 transition"
+              >
+                {creatingAccount && <Loader2 className="w-4 h-4 animate-spin" />}
+                {creatingAccount ? 'Creating...' : 'Create Reviewer Account'}
+              </button>
+              <button
+                onClick={() => { setNeedsAccount(null); setError(''); }}
+                disabled={creatingAccount}
+                className="px-4 py-2.5 border border-slate-300 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50 disabled:opacity-50 transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credentials confirmation modal */}
+      {createdCredentials && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <CheckCircle className="w-5 h-5 text-emerald-600" />
+              <h3 className="text-lg font-black text-slate-900">Reviewer Account Created</h3>
+            </div>
+            <p className="text-sm text-slate-700 mb-4">
+              The account was created and this reviewer has been assigned to the manuscript.
+              Share these temporary sign-in credentials with them:
+            </p>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6 space-y-2 font-mono text-sm">
+              <p><span className="text-slate-500">Email:</span> {createdCredentials.email}</p>
+              <p><span className="text-slate-500">Password:</span> {createdCredentials.password}</p>
+            </div>
+            <button
+              onClick={() => setCreatedCredentials(null)}
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold py-2.5 rounded-lg transition"
+            >
+              Done
+            </button>
+          </div>
         </div>
       )}
     </div>
