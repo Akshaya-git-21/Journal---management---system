@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import FilePreviewModal from './FilePreviewModal';
+import SubmissionSidebar from './SubmissionSidebar';
 import {
   uploadManuscriptFile,
   syncManuscriptFilesToSupabase,
@@ -697,122 +698,15 @@ export default function OjsSubmissionDetail({
   return (
     <div id="ojs-submission-detail-container" className="w-full bg-[#e8f3ed] min-h-screen text-slate-950 flex flex-col md:flex-row items-stretch border-t border-slate-200">
       
-      {/* ======= COLUMN 1: LEFT WORKFLOW & PUBLICATION SIDEBAR ======= */}
-      <aside id="ojs-left-sidebar-navigation" className="w-full md:w-64 bg-white border-r border-[#d1e7dd] flex flex-col shrink-0 p-5 space-y-7 text-left font-sans">
-        
-        {/* Section A: Workflow headings and items */}
-        <div className="space-y-2.5">
-          <span className="block text-[10px] font-semibold uppercase tracking-widest text-[#004d2e] font-mono">
-            Workflow
-          </span>
-          <nav className="flex flex-col space-y-0.5">
-            {[
-              { id: 'SUBMISSION', label: 'Submission', icon: FileText, badge: null },
-              { id: 'REVIEW', label: 'Review', icon: MessageSquare, badge: 2 },
-              { id: 'COPYEDITING', label: 'Copyediting', icon: SquarePen, badge: 1 },
-              { id: 'PRODUCTION', label: 'Production', icon: Printer, badge: 0 }
-            ].map((item) => {
-              const isActive = activeTab === item.id;
-              const IconComp = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  id={`workflow-tab-${item.id}`}
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setViewState('DASHBOARD');
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[13px] font-semibold transition-all duration-150 ${
-                    isActive
-                      ? 'bg-emerald-100/75 text-[#005a36] border-l-[3px] border-[#008751] shadow-2xs'
-                      : 'text-slate-900 hover:bg-emerald-50/50 hover:text-emerald-950'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <IconComp className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-600'}`} />
-                    <span>{item.label}</span>
-                  </div>
-                  {item.badge !== null && (
-                    <span className={`text-[10px] font-semibold font-mono px-1.5 py-0.5 rounded-full ${
-                      isActive ? 'bg-[#008751] text-white' : 'bg-slate-200 text-slate-700'
-                    }`}>
-                      {item.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        {/* Section B: Publication headings and items with checkmarks */}
-        <div className="space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="block text-[10px] font-semibold uppercase tracking-widest text-[#004d2e] font-mono">
-              Publication
-            </span>
-            <ChevronUp className="w-3 h-3 text-[#004d2e] font-bold" />
-          </div>
-          <nav className="flex flex-col space-y-0.5">
-            {[
-              { id: 'TITLE_ABSTRACT', label: 'Title & Abstract', icon: FileText },
-              { id: 'CONTRIBUTORS', label: 'Contributors', icon: Globe },
-              { id: 'METADATA', label: 'Metadata', icon: Layers },
-              { id: 'REFERENCES', label: 'References', icon: Sliders },
-              { id: 'GALLEYS', label: 'Galleys', icon: Briefcase }
-            ].map((item) => {
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  id={`publication-tab-${item.id}`}
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setViewState('DASHBOARD');
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[13px] font-semibold transition-all duration-150 ${
-                    isActive
-                      ? 'bg-emerald-100/75 text-[#005a36] border-l-[3px] border-[#008751] shadow-2xs'
-                      : 'text-slate-900 hover:bg-emerald-50/50 hover:text-emerald-950'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <item.icon className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-600'}`} />
-                    <span>{item.label}</span>
-                  </div>
-
-                  {/* Circular check mark badge */}
-                  <div className="w-3.5 h-3.5 rounded-full bg-[#008751] text-white flex items-center justify-center shadow-2xs">
-                    <Check className="w-2 h-2 stroke-[3]" />
-                  </div>
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        {/* Section C: Need Help? guideline box card at the bottom */}
-        <div className="mt-auto pt-3">
-          <div id="ojs-help-box-card" className="border border-slate-200 rounded-lg p-3 bg-white space-y-2 text-left">
-            <div className="flex items-center gap-2">
-              <HelpCircle className="w-4 h-4 text-[#008751]" />
-              <strong className="text-xs font-bold text-slate-800">Need Help?</strong>
-            </div>
-            <p className="text-[11px] text-slate-600 leading-snug">
-              View author guidelines or contact support.
-            </p>
-            <button
-              id="guidelines-button"
-              onClick={() => alert("Simulating scholarly writer and peer review workflow directories.")}
-              className="w-full flex items-center justify-center gap-2 py-1.5 bg-[#f8fcf9] hover:bg-[#edf7f1] border border-slate-200 text-slate-700 text-[11px] font-bold rounded-lg transition duration-150 cursor-pointer"
-            >
-              <span>Guidelines</span>
-              <ExternalLink className="w-3 h-3 text-slate-400" />
-            </button>
-          </div>
-        </div>
-
-      </aside>
+      {/* DATA-DRIVEN SIDEBAR - Real submission data */}
+      <SubmissionSidebar
+        manuscript={manuscriptDetails}
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          setViewState('DASHBOARD');
+        }}
+      />
 
       {/* ======= MAIN VIEWPORTS: HERO HEADER CONTAINER + DOUBLE COLUMN STACKS ======= */}
       <div id="ojs-main-panel-content" className="flex-grow flex flex-col p-4 space-y-4 overflow-y-auto w-full">

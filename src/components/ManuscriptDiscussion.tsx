@@ -1,26 +1,61 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Manuscript, DiscussionMessage, Role } from '../types';
-import { MessagesSquare, Send, Paperclip, Trash2, User, FileText, CheckCircle2 } from 'lucide-react';
-import { syncManuscriptDiscussionsToSupabase } from '../lib/supabase';
+import { MessagesSquare, Send, Paperclip, Trash2, User, FileText, CheckCircle2, ArrowLeft, Loader2 } from 'lucide-react';
+import { syncManuscriptDiscussionsToSupabase, supabase } from '../lib/supabase';
+import { getDiscussions, postDiscussionMessage, getManuscript, DiscussionRow } from '../lib/workflow';
 
 interface ManuscriptDiscussionProps {
-  manuscript: Manuscript;
-  onUpdateManuscript: (updated: Manuscript) => void;
-  currentUser?: { name: string; email: string } | null;
-  currentRole: Role;
+  manuscript?: Manuscript | null;
+  manuscriptId?: string;
+  onBack?: () => void;
+  onUpdateManuscript?: (updated: Manuscript) => void;
+  currentUser?: { name: string; email: string; role?: Role; id?: string } | null;
+  currentRole?: Role;
   title?: string;
 }
 
 export default function ManuscriptDiscussion({
   manuscript,
+  manuscriptId: propManuscriptId,
+  onBack,
   onUpdateManuscript,
   currentUser,
-  currentRole,
+  currentRole: propCurrentRole,
   title = "Review Discussions"
 }: ManuscriptDiscussionProps) {
+  const currentRole = propCurrentRole || currentUser?.role || 'AUTHOR';
+  const effectiveManuscriptId = manuscript?.id || propManuscriptId || '';
+
   const [inputText, setInputText] = useState('');
   const [attachedFile, setAttachedFile] = useState<{ name: string; size: string } | null>(null);
   const [triggerMention, setTriggerMention] = useState(false);
+  const [localDiscussions, setLocalDiscussions] = useState<DiscussionMessage[]>(manuscript?.discussions || []);
+  const [loading, setLoading] = useState(!manuscript && !!effectiveManuscriptId);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (manuscript?.discussions) {
+      setLocalDiscussions(manuscript.discussions);
+    } else if (effectiveManuscriptId) {
+      setLoading(true);
+      getDiscussions(effectiveManuscriptId)
+        .then((rows: DiscussionRow[]) => {
+          const mapped: DiscussionMessage[] = rows.map((r) => ({
+            id: r.id,
+            senderName: r.sender_id === currentUser?.id ? (currentUser?.name || 'You') : 'Editorial Desk',
+            senderEmail: '',
+            senderRole: 'AUTHOR',
+            text: r.message,
+            timestamp: r.created_at,
+            fileName: r.file_name,
+            fileSize: r.file_size
+          }));
+          setLocalDiscussions(mapped);
+        })
+        .catch((e) => console.error('Error fetching discussions:', e))
+        .finally(() => setLoading(false));
+    }
+  }, [manuscript, effectiveManuscriptId, currentUser?.id, currentUser?.name]);
 
   const senderName = currentUser?.name || (
     currentRole === 'AUTHOR' ? 'Dr. Ada Lovelace' :
@@ -37,6 +72,7 @@ export default function ManuscriptDiscussion({
     e.preventDefault();
     if (!inputText.trim() && !attachedFile) return;
 
+    setSending(true);
     const newMessage: DiscussionMessage = {
       id: 'msg-' + Date.now(),
       senderName,
@@ -48,21 +84,31 @@ export default function ManuscriptDiscussion({
       fileSize: attachedFile?.size || null
     };
 
-    const updatedDiscussions = [...(manuscript.discussions || []), newMessage];
-    const updated: Manuscript = {
-      ...manuscript,
-      discussions: updatedDiscussions
-    };
+    const updatedDiscussions = [...localDiscussions, newMessage];
+    setLocalDiscussions(updatedDiscussions);
 
-    onUpdateManuscript(updated);
+    if (manuscript && onUpdateManuscript) {
+      const updated: Manuscript = {
+        ...manuscript,
+        discussions: updatedDiscussions
+      };
+      onUpdateManuscript(updated);
+    }
+
     try {
-      await syncManuscriptDiscussionsToSupabase(manuscript.id, updatedDiscussions);
+      if (currentUser?.id && effectiveManuscriptId) {
+        await postDiscussionMessage(effectiveManuscriptId, currentUser.id, inputText);
+      } else if (effectiveManuscriptId) {
+        await syncManuscriptDiscussionsToSupabase(effectiveManuscriptId, updatedDiscussions);
+      }
     } catch (err) {
       console.warn("Could not sync discussion message directly to Supabase:", err);
+    } finally {
+      setSending(false);
+      setInputText('');
+      setAttachedFile(null);
+      setTriggerMention(false);
     }
-    setInputText('');
-    setAttachedFile(null);
-    setTriggerMention(false);
   };
 
   const simulateAttachFile = () => {
@@ -97,16 +143,27 @@ export default function ManuscriptDiscussion({
   };
 
   return (
-    <div id="manuscript-discussion-board" className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm text-left">
+    <div id="manuscript-discussion-board" className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm text-left max-w-4xl mx-auto">
       {/* Discussion Header */}
       <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition text-white flex items-center justify-center cursor-pointer"
+              title="Back"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          )}
           <span className="p-2 bg-emerald-500/10 border border-emerald-500/20 text-[#008751] rounded-lg">
             <MessagesSquare className="w-5 h-5" />
           </span>
           <div>
             <h3 className="font-sans font-bold text-sm">{title}</h3>
-            <p className="text-[10px] text-gray-400 font-mono">Isolated double-blind message logs & file transmissions</p>
+            <p className="text-[10px] text-gray-400 font-mono">
+              {effectiveManuscriptId ? `Manuscript ID: ${effectiveManuscriptId} • ` : ''}Isolated message logs &amp; file transmissions
+            </p>
           </div>
         </div>
         <div className="text-[10px] bg-[#004d2e] text-[#aef4d5] px-2.5 py-1 rounded-md border border-[#006e42] font-mono uppercase">
@@ -114,15 +171,19 @@ export default function ManuscriptDiscussion({
         </div>
       </div>
 
-      <div className="flex flex-col h-[380px]">
+      <div className="flex flex-col h-[420px]">
         {/* Message List */}
-        <div className="flex-grow p-5 space-y-4 overflow-y-auto bg-slate-50/20 max-h-[290px]">
-          {manuscript.discussions && manuscript.discussions.length > 0 ? (
-            manuscript.discussions.map((msg) => {
-              // ANONYMITY SAFEGUARD check
-              const displaySenderName = (manuscript.isDoubleBlind && msg.senderRole === 'REVIEWER' && currentRole === 'AUTHOR') 
-                ? 'Anonymous Referee' 
-                : ((manuscript.isDoubleBlind && msg.senderRole === 'AUTHOR' && currentRole === 'REVIEWER') ? 'Anonymous Author' : msg.senderName);
+        <div className="flex-grow p-5 space-y-4 overflow-y-auto bg-slate-50/20 max-h-[330px]">
+          {loading ? (
+            <div className="flex items-center justify-center py-12 text-slate-400">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading discussions...
+            </div>
+          ) : localDiscussions.length > 0 ? (
+            localDiscussions.map((msg) => {
+              const isDoubleBlind = manuscript ? ((manuscript as any).is_double_blind ?? manuscript.isDoubleBlind ?? true) : true;
+              const displaySenderName = (isDoubleBlind && msg.senderRole === 'REVIEWER' && currentRole === 'AUTHOR')
+                ? 'Anonymous Referee'
+                : ((isDoubleBlind && msg.senderRole === 'AUTHOR' && currentRole === 'REVIEWER') ? 'Anonymous Author' : msg.senderName);
 
               return (
                 <div key={msg.id} className="space-y-1">
@@ -132,8 +193,8 @@ export default function ManuscriptDiscussion({
                       {msg.senderRole}
                     </span>
                     <span className="text-[10px] text-gray-400 font-mono">
-                      {isNaN(Date.parse(msg.timestamp)) 
-                        ? msg.timestamp 
+                      {isNaN(Date.parse(msg.timestamp))
+                        ? msg.timestamp
                         : new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
@@ -226,7 +287,8 @@ export default function ManuscriptDiscussion({
 
           <button
             type="submit"
-            className="bg-emerald-600 hover:bg-emerald-700 text-white p-2.5 px-4 rounded-xl font-bold flex items-center gap-1 text-xs transition-colors cursor-pointer"
+            disabled={sending}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white p-2.5 px-4 rounded-xl font-bold flex items-center gap-1 text-xs transition-colors cursor-pointer disabled:opacity-50"
           >
             <Send className="w-3.5 h-3.5" />
           </button>

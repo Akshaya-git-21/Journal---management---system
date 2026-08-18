@@ -323,15 +323,31 @@ export default function FilePreviewModal({
 
 
               {/* WORD DOCUMENT LAYOUT - Displays .docx files */}
-              {isDocx && (
+              {isDocx && publicUrl && (
+                <div className="w-full flex flex-col gap-2">
+                  <iframe
+                    src={`${publicUrl}`}
+                    className="w-full rounded-lg shadow-xl border border-slate-200"
+                    style={{ minHeight: '900px' }}
+                    title="Word Document Preview"
+                    onError={() => console.error('Word document failed to load from:', publicUrl)}
+                  />
+                  <div className="text-xs text-slate-500 font-mono text-center">
+                    Live document from Supabase storage
+                  </div>
+                </div>
+              )}
+
+              {/* Demo/Mock Word Document - Shows when no live URL available */}
+              {isDocx && !publicUrl && (
                 <div className="bg-white text-slate-800 p-12 sm:p-16 rounded-lg shadow-xl border border-slate-350 text-left min-h-[850px] leading-relaxed font-sans">
                   {/* Word-style blue banner at top */}
                   <div className="bg-blue-800 text-white p-3 -mx-12 sm:-mx-16 -mt-12 sm:-mt-16 mb-8 flex items-center justify-between text-xs font-mono rounded-t-lg">
                     <span className="font-extrabold flex items-center gap-1.5">
                       <FileText className="w-4 h-4 text-white" />
-                      MICROSOFT WORD - COMPATIBILITY LAYOUT
+                      MICROSOFT WORD - DEMO MODE (No live URL)
                     </span>
-                    <span>EDITING IS LOCKED</span>
+                    <span>READ-ONLY PREVIEW</span>
                   </div>
 
                   {currentPage === 1 && (
@@ -427,7 +443,7 @@ export default function FilePreviewModal({
               )}
 
 
-              {/* ----------------- SPREADSHEET (EXCEL) VIEWER ----------------- */}
+              {/* EXCEL VIEWER */}
               {isXlsx && (
                 <div className="bg-slate-900 border border-slate-700 rounded-lg shadow-xl text-left overflow-hidden">
                   

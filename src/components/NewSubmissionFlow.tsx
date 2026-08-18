@@ -857,9 +857,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
           <div className="relative z-10 flex items-center gap-4">
             <button
               type="button"
-              onClick={onCancel}
+              onClick={() => currentStep > 1 ? handleBack() : onCancel()}
               className="text-white hover:bg-white/20 active:bg-white/30 p-2 rounded-lg transition flex items-center justify-center"
-              title="Back to all submissions"
+              title={currentStep > 1 ? "Go to previous step" : "Back to all submissions"}
             >
               <ChevronLeft className="w-6 h-6" />
             </button>
@@ -2916,8 +2916,6 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                   </div>
 
                 </div>
-              </div>
-
               </div>
 
               {/* Error message display */}

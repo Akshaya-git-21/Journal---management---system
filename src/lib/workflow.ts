@@ -56,6 +56,13 @@ export interface ReviewerAssignmentRow {
   writing_quality: number | null;
   criteria_reasons: Record<string, string> | null;
   submitted_at: string | null;
+  assigned_at?: string | null;
+  due_at?: string | null;
+  review_status?: string | null;
+  scores?: Record<string, number> | null;
+  strengths?: string | null;
+  weaknesses?: string | null;
+  mandatory_revisions?: string | null;
 }
 
 export interface StatusHistoryRow {
@@ -314,6 +321,12 @@ export interface ManuscriptRow {
   created_at: string;
   updated_at: string;
   files?: ManuscriptFileRow[];
+  section?: string | null;
+  manuscript_type?: string | null;
+  keywords?: string | null;
+  word_count?: string | number | null;
+  num_figures?: string | number | null;
+  num_tables?: string | number | null;
 }
 
 export interface ContributorRow {

@@ -300,7 +300,7 @@ export function ReviewBoardTab({
         <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6">
           <h3 className="text-sm font-black text-blue-900 mb-4">Reviewers in Selection ({selectCount})</h3>
           <div className="space-y-2">
-            {Array.from(pendingReviewers.values()).map(reviewer => (
+            {(Array.from(pendingReviewers.values()) as ReviewerSelectable[]).map((reviewer) => (
               <div key={reviewer.id} className="flex items-start justify-between p-3 bg-white rounded border border-blue-200">
                 <div className="flex-1">
                   <p className="font-semibold text-slate-900">{reviewer.name}</p>

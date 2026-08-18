@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Role, ManuscriptStatus, ReviewerRecommendation } from '../types';
 import {
   ManuscriptRow, ReviewerAssignmentRow,

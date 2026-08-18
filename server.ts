@@ -23,7 +23,7 @@ async function startServer() {
     try {
       // Check if user exists in Supabase Auth
       const { data: users, error: usersError } = await supabaseAdmin.auth.admin.listUsers();
-      const authUser = users?.users.find(u => u.email === email);
+      const authUser = users?.users.find((u: any) => u.email === email);
 
       if (!authUser) {
         return res.status(200).json({

@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight, FileText, Loader2 } from 'lucide-react';
 
 interface Props {
   manuscriptId: string;
-  profiles?: Record<string, ProfileRow>;
+  profiles?: Record<string, { name: string; [key: string]: any } | ProfileRow>;
 }
 
 const STATUS_LABEL: Record<string, string> = {
