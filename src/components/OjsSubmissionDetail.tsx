@@ -1293,7 +1293,14 @@ export default function OjsSubmissionDetail({
                                 return (
                                   <div
                                     key={discussion.id}
-                                    onClick={() => setActiveThreadId(discussion.id)}
+                                    onClick={() => {
+                                      // If it's a coordinator chat message, open coordinator chat
+                                      if (discussion.message.includes('[Coordinator Chat]')) {
+                                        setActiveThreadId('coordinator-chat');
+                                      } else {
+                                        setActiveThreadId(discussion.id);
+                                      }
+                                    }}
                                     className={`border rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left ${
                                       isOfficial
                                         ? 'bg-[#f0faf4] border-2 border-[#b8ebd0] hover:bg-[#e2f7eb]'
@@ -1764,8 +1771,32 @@ export default function OjsSubmissionDetail({
                     ) : (
                       /* ========== GENERIC CHAT CHANNELS FOR CUSTOM USER CREATED THREADS ========== */
                       (() => {
+                        // Check if this is a coordinator chat message
+                        if (activeThreadId && activeThreadId.includes('coordinator')) {
+                          setActiveThreadId('coordinator-chat');
+                          return null;
+                        }
+
                         const thread = discussionThreads.find(t => t.id === activeThreadId);
-                        if (!thread) return null;
+                        if (!thread) {
+                          // If thread not found, show the coordinator chat instead
+                          return (
+                            <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl overflow-hidden shadow-xs text-left p-4 flex flex-col justify-between h-[500px] relative">
+                              <div className="flex items-center justify-center h-full">
+                                <div className="text-center text-slate-500">
+                                  <MessageSquare className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+                                  <p className="text-sm">Click on a message to view or reply</p>
+                                  <button
+                                    onClick={() => setActiveThreadId(null)}
+                                    className="mt-4 text-[#008751] hover:text-[#007043] font-bold text-sm transition cursor-pointer"
+                                  >
+                                    ← Back to Discussions
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
                         return (
                           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
                             
