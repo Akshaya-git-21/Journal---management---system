@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import FilePreviewModal from './FilePreviewModal';
 import SubmissionSidebar from './SubmissionSidebar';
+import RevisionHistoryPanel from './RevisionHistoryPanel';
 import {
   uploadManuscriptFile,
   syncManuscriptFilesToSupabase,
@@ -2757,6 +2758,18 @@ export default function OjsSubmissionDetail({
                     Download Asset
                   </button>
                 </div>
+              </div>
+            ) : activeTab === 'REVISION_HISTORY' ? (
+              <div className="bg-white border border-slate-200 rounded-xl p-6 text-xs text-left space-y-4 animate-in fade-in duration-100">
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide border-b pb-2.5 font-mono">Revision History</h2>
+                {paper?.id ? (
+                  <RevisionHistoryPanel
+                    manuscriptId={paper.id}
+                    profiles={Object.fromEntries(manuscriptDetails?.profiles || new Map())}
+                  />
+                ) : (
+                  <p className="text-slate-500">No manuscript selected</p>
+                )}
               </div>
             ) : null}
 

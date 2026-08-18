@@ -243,6 +243,21 @@ export default function SubmissionSidebar({
         ]}
       />
 
+      {/* REVISION HISTORY SECTION */}
+      {manuscript.revisions && manuscript.revisions.length > 0 && (
+        <SidebarSection
+          title="REVISION HISTORY"
+          items={[
+            {
+              id: 'revision_history',
+              label: 'Revision History',
+              badge: manuscript.revisions.length,
+              icon: Clock
+            }
+          ]}
+        />
+      )}
+
       {/* HELP SECTION */}
       <div className="mt-auto pt-4 border-t border-slate-200">
         <div className="border border-slate-200 rounded-lg p-3 bg-slate-50 space-y-2">
