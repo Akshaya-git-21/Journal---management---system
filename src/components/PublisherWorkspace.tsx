@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import TuliticsLogo from './TuliticsLogo';
 import { Manuscript } from '../types';
+import { listManuscripts, subscribeToManuscripts, markPublished, ManuscriptRow } from '../lib/workflow';
 import {
   FileText,
   CheckSquare,
@@ -31,15 +32,31 @@ interface PublisherWorkspaceProps {
 }
 
 export default function PublisherWorkspace({
-  manuscripts,
+  manuscripts: propManuscripts,
   onUpdateManuscript,
   currentUser
 }: PublisherWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<string>('SCHEDULED_PUBLICATIONS');
   const [successBanner, setSuccessBanner] = useState('');
+  const [manuscripts, setManuscripts] = useState<ManuscriptRow[]>([]);
 
-  // Pull accepted manuscripts (status === 'ACCEPTED')
-  const acceptedPapers = manuscripts.filter((m) => m.status === 'ACCEPTED');
+  const load = async () => {
+    try {
+      const rows = await listManuscripts();
+      setManuscripts(rows);
+    } catch (e: any) {
+      console.error('Failed to load manuscripts:', e);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const unsubscribe = subscribeToManuscripts(load);
+    return unsubscribe;
+  }, []);
+
+  // Pull manuscripts sent to publisher (production_stage is set)
+  const acceptedPapers = manuscripts.filter((m) => m.production_stage);
 
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(
     acceptedPapers.length > 0 ? acceptedPapers[0].id : null
@@ -82,7 +99,7 @@ export default function PublisherWorkspace({
     }
   };
 
-  const handlePublishNow = () => {
+  const handlePublishNow = async () => {
     if (!activePaper) return;
 
     if (!galleyFileUploaded) {
@@ -94,28 +111,29 @@ export default function PublisherWorkspace({
       return;
     }
 
-    const updated: Manuscript = {
-      ...activePaper,
-      status: 'PUBLISHED',
-      doi: doiValue,
-      volume: selectedVolume,
-      issue: selectedIssue,
-      publishedAt: new Date().toISOString()
-    };
+    try {
+      // Extract volume and issue numbers from the labels
+      const volumeNum = selectedVolume.split(' ')[1];
+      const issueNum = selectedIssue.split(' ')[1];
 
-    onUpdateManuscript(updated);
-    setSuccessBanner(`Manuscript successfully compiled. DOI registry linked: ${doiValue}`);
-    setSelectedPaperId(null);
+      await markPublished(activePaper.id, doiValue, volumeNum, issueNum);
+      await load();
 
-    // Clear state values
-    setDoiValue('');
-    setGalleyFileUploaded(false);
-    setChecklist({
-      metadataVerified: false,
-      galleyFormatted: false,
-      referencesLinked: false,
-      coAuthorsNotified: false
-    });
+      setSuccessBanner(`Manuscript successfully published. DOI registry linked: ${doiValue}`);
+      setSelectedPaperId(null);
+
+      // Clear state values
+      setDoiValue('');
+      setGalleyFileUploaded(false);
+      setChecklist({
+        metadataVerified: false,
+        galleyFormatted: false,
+        referencesLinked: false,
+        coAuthorsNotified: false
+      });
+    } catch (e: any) {
+      setSuccessBanner(`Error publishing manuscript: ${e.message}`);
+    }
   };
 
   return (

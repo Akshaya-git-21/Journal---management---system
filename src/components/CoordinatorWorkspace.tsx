@@ -5,7 +5,7 @@ import { createEditorAccount, createReviewerAccount } from '../lib/auth';
 import {
   ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, SuggestedReviewerRow, ProfileRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getStatusHistory, getSuggestedReviewers,
-  listActiveProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished,
+  listActiveProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished, sendToPublisher,
   subscribeToManuscripts, PublishDecision, getRevisions, getReviewerAssignmentCounts
 } from '../lib/workflow';
 import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
@@ -1612,7 +1612,34 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
         />
       )}
 
-      {manuscript.status === 'ACCEPTED' && (
+      {manuscript.status === 'ACCEPTED' && !manuscript.production_stage && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6">
+          <h3 className="text-sm font-black text-slate-900 mb-2">Move to Publisher</h3>
+          <p className="text-xs text-slate-600 mb-4">
+            Send this accepted manuscript to the Publisher for production and galley preparation.
+          </p>
+          <button
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true); setError('');
+              try {
+                await sendToPublisher(manuscript.id);
+                await load();
+                onChanged();
+              } catch (e: any) {
+                setError(e.message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+            className="w-full bg-[#008751] hover:bg-[#007043] disabled:bg-slate-300 text-white font-bold py-2.5 rounded-lg transition"
+          >
+            {busy ? 'Moving...' : 'Move to Publisher'}
+          </button>
+        </div>
+      )}
+
+      {manuscript.status === 'ACCEPTED' && manuscript.production_stage && (
         <PublishProductionPanel
           busy={busy}
           onPublish={async (doi, volume, issue) => {
