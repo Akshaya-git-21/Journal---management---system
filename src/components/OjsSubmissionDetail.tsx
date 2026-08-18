@@ -1109,7 +1109,7 @@ export default function OjsSubmissionDetail({
                           </div>
 
                           <button
-                            disabled style={{display: 'none'}}
+                            onClick={() => setActiveThreadId('coordinator-chat')}
                             className="bg-[#eefcf4] border border-[#008751]/30 text-[#004d2e] hover:bg-[#e1f9eb] px-3 py-1.5 rounded-lg text-[12px] font-bold flex items-center gap-1 cursor-pointer transition shadow-2xs"
                           >
                             <Plus className="w-3.5 h-3.5 text-[#008751] stroke-[3]" />
@@ -1263,17 +1263,6 @@ export default function OjsSubmissionDetail({
 
                         {/* View All footer link */}
                         <div className="pt-3 border-t border-emerald-100 flex justify-center mt-auto shrink-0 bg-white">
-                          <button
-                            onClick={() => {
-                              setActiveDiscussionTab('ALL');
-                              setSearchQuery('');
-                              alert("Showing all discussions. Click on any discussion item to enter its dedicated communication channel.");
-                            }}
-                            className="text-[#008751] hover:text-[#007043] font-semibold hover:underline text-[13px] flex items-center gap-1 cursor-pointer bg-emerald-50/50 hover:bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl"
-                          >
-                            <span>View All Discussions</span>
-                            <span className="font-extrabold">→</span>
-                          </button>
                         </div>
 
                       </div>
@@ -1611,6 +1600,66 @@ export default function OjsSubmissionDetail({
                             className="text-slate-500 hover:text-slate-800 transition font-bold"
                           >
                             ← Back to Discussions
+                          </button>
+                        </div>
+
+                      </div>
+                    ) : activeThreadId === 'coordinator-chat' ? (
+                      /* ========== COORDINATOR DIRECT CHAT ========== */
+                      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
+
+                        {/* Header Bar */}
+                        <div className="bg-purple-700 text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-sm z-10">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setActiveThreadId(null)}
+                              className="mr-1 hover:bg-purple-600/60 p-1.5 rounded-full transition cursor-pointer flex items-center justify-center"
+                              title="Back to Discussions list"
+                            >
+                              <ChevronLeft className="w-5 h-5 text-white stroke-[3.5]" />
+                            </button>
+
+                            <div className="w-9 h-9 rounded-full bg-purple-600 text-white font-extrabold text-xs flex items-center justify-center border border-purple-500/20 shadow-inner">
+                              CO
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-xs text-slate-100 tracking-tight flex items-center gap-1">
+                                Coordinator Chat
+                              </h4>
+                              <p className="text-[10px] text-purple-200 font-medium">
+                                Direct communication with manuscript coordinator
+                              </p>
+                            </div>
+                          </div>
+
+                          <span className="text-[10px] bg-purple-900 text-purple-200 font-mono font-bold px-2.5 py-1 rounded-full uppercase border border-purple-700">
+                            NEW CHAT
+                          </span>
+                        </div>
+
+                        {/* Chat Scroll Pane */}
+                        <div className="flex-grow p-4 overflow-y-auto space-y-3 flex flex-col justify-start bg-[#faf6fc] relative min-h-0">
+                          <div className="flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition text-left self-start bg-white text-slate-900 rounded-tl-none border border-slate-200">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-[11px] font-bold block text-purple-700">Coordinator</span>
+                              <span className="text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border bg-slate-100 border-slate-200 text-slate-500">COORDINATOR</span>
+                            </div>
+                            <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">Hello! I'm here to assist with your manuscript submission. How can I help you today?</p>
+                            <div className="flex items-center justify-end gap-1 mt-1 text-slate-400 select-none">
+                              <span className="text-[9px] font-mono font-medium">Just now</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Input bar */}
+                        <div className="bg-[#faf6fc] px-3 py-2.5 border-t border-slate-200 flex items-center gap-2 shrink-0 z-10">
+                          <input
+                            type="text"
+                            placeholder="Type your message to coordinator..."
+                            className="flex-grow bg-white border border-slate-200 rounded-lg px-3.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-purple-600 text-slate-800 font-bold shadow-3xs"
+                          />
+                          <button className="bg-purple-700 hover:bg-purple-800 text-white p-2 rounded-lg transition cursor-pointer">
+                            <Send className="w-4 h-4" />
                           </button>
                         </div>
 
