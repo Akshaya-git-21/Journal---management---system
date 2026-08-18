@@ -102,7 +102,7 @@ export default function SubmissionSidebar({
   return (
     <aside className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 p-5 space-y-6 text-left font-sans overflow-y-auto">
 
-      {/* OVERVIEW TAB */}
+      {/* OVERVIEW SECTION */}
       <SidebarSection
         title="OVERVIEW"
         items={[
@@ -110,6 +110,11 @@ export default function SubmissionSidebar({
             id: 'overview',
             label: 'Dashboard',
             icon: LayoutDashboard
+          },
+          {
+            id: 'submission_timeline',
+            label: 'Submission Timeline',
+            icon: Clock
           }
         ]}
       />
@@ -153,6 +158,12 @@ export default function SubmissionSidebar({
             label: 'Cover Letter',
             badge: manuscript.files?.some(f => f.file_name?.toLowerCase().includes('cover') || f.file_name?.toLowerCase().includes('letter')) ? '✓' : '○',
             icon: FileText
+          },
+          {
+            id: 'discussions',
+            label: 'Discussions',
+            badge: manuscript.discussions?.length || 0,
+            icon: MessageSquare
           }
         ]}
       />

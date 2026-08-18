@@ -1,15 +1,20 @@
 import React from 'react';
 import { AuthorManuscriptDetails } from '../lib/authorManuscriptDetails';
 import { FileText, Users, Layers, AlertCircle } from 'lucide-react';
+import DiscussionsTab from './DiscussionsTab';
 
 interface ViewSubmissionContentProps {
   activeTab: string;
   manuscriptDetails: AuthorManuscriptDetails | null;
+  currentUserId?: string;
+  onRefreshData?: () => void;
 }
 
 export default function ViewSubmissionContent({
   activeTab,
-  manuscriptDetails
+  manuscriptDetails,
+  currentUserId,
+  onRefreshData
 }: ViewSubmissionContentProps) {
   if (!manuscriptDetails) {
     return (
@@ -307,15 +312,58 @@ export default function ViewSubmissionContent({
     </div>
   );
 
+  const renderSubmissionTimeline = () => (
+    <div className="bg-white border border-slate-200 rounded-xl p-6">
+      <h3 className="text-sm font-bold text-slate-900 mb-6 uppercase tracking-wide">Submission Timeline</h3>
+      <div className="space-y-4">
+        {manuscriptDetails?.statusHistory && manuscriptDetails.statusHistory.length > 0 ? (
+          manuscriptDetails.statusHistory.map((event, idx) => (
+            <div key={event.id} className="flex gap-4">
+              <div className="flex flex-col items-center">
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                  idx === 0 ? 'bg-emerald-600 border-emerald-600' : 'bg-slate-100 border-slate-300'
+                }`}>
+                  {idx === 0 && <div className="w-2 h-2 bg-white rounded-full" />}
+                </div>
+                {idx < (manuscriptDetails.statusHistory?.length ?? 0) - 1 && (
+                  <div className="w-0.5 h-8 bg-slate-200 mt-2" />
+                )}
+              </div>
+              <div className="pb-4 flex-1">
+                <p className="font-semibold text-slate-900">{event.to_status?.replace(/_/g, ' ')}</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {new Date(event.created_at).toLocaleString()}
+                </p>
+                {event.note && <p className="text-xs text-slate-600 mt-2">{event.note}</p>}
+              </div>
+            </div>
+          ))
+        ) : (
+          <p className="text-slate-500 text-sm">No timeline events yet</p>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex-grow flex flex-col p-6 overflow-y-auto">
       {activeTab === 'overview' && renderOverview()}
+      {activeTab === 'submission_timeline' && renderSubmissionTimeline()}
       {activeTab === 'title_abstract' && renderTitleAbstract()}
       {activeTab === 'authors' && renderAuthors()}
       {activeTab === 'manuscript' && renderManuscript()}
       {activeTab === 'references' && renderReferences()}
       {activeTab === 'supplementary' && renderSupplementary()}
       {activeTab === 'cover_letter' && renderCoverLetter()}
+      {activeTab === 'discussions' && manuscriptDetails && (
+        <DiscussionsTab
+          manuscriptId={manuscriptDetails.manuscript.id}
+          discussions={manuscriptDetails.discussions}
+          currentUserId={currentUserId}
+          profiles={Object.fromEntries(manuscriptDetails.profiles)}
+          onMessageSent={onRefreshData}
+        />
+      )}
       {activeTab === 'metadata' && renderMetadata()}
       {activeTab === 'copyediting' && renderCopyediting()}
       {activeTab === 'production' && renderProduction()}

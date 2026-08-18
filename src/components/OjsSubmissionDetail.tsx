@@ -2759,6 +2759,14 @@ export default function OjsSubmissionDetail({
               <ViewSubmissionContent
                 activeTab={activeTab}
                 manuscriptDetails={manuscriptDetails}
+                currentUserId={currentUser?.email}
+                onRefreshData={() => {
+                  if (manuscriptDetails) {
+                    fetchAuthorManuscriptDetails(manuscriptDetails.manuscript.id)
+                      .then(setManuscriptDetails)
+                      .catch(console.error);
+                  }
+                }}
               />
             )}
 
