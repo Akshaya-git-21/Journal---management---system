@@ -34,14 +34,14 @@ export function HistoryTab({ statusHistory, profiles }: Props) {
                 </td>
                 <td className="px-4 py-3">
                   <span className="px-2 py-1 bg-slate-100 text-slate-700 text-xs font-bold rounded">
-                    {event.status.replace(/_/g, ' ')}
+                    {event.to_status.replace(/_/g, ' ')}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-sm text-slate-700">
                   {event.actor_id ? profiles[event.actor_id]?.name || 'Unknown' : 'System'}
                 </td>
                 <td className="px-4 py-3 text-sm text-slate-600">
-                  {event.notes || '—'}
+                  {event.note || '—'}
                 </td>
               </tr>
             ))}

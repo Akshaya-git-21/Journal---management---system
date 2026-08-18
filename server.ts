@@ -55,99 +55,31 @@ async function startServer() {
     }
   });
 
+  // Admin: Create an Editor/Reviewer account (Coordinator only). Thin
+  // adapter over handleCreateUserRequest, shared with the Vercel serverless
+  // function at api/create-user.ts, which is the endpoint actually reachable
+  // in the production (Vercel) deployment. This Express route only serves
+  // local `npm run dev` / `npm start`.
   app.post("/api/create-user", async (req, res) => {
-    const { email, password, fullName, role, metadata } = req.body;
-
-    const allowedRoles = ['EDITOR', 'REVIEWER'];
-    if (!email || !password || !fullName || !role || !allowedRoles.includes(role)) {
-      return res.status(400).json({ error: 'Missing or invalid user account fields.' });
-    }
-
     try {
-      const { data, error } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: {
-          full_name: fullName,
-          requested_role: role,
-          ...metadata
-        }
-      } as any);
-
-      if (error) {
-        return res.status(400).json({ error: error.message });
-      }
-
-      return res.status(200).json({ user: data.user });
+      const { handleCreateUserRequest } = await import("./src/lib/createUserHandler.ts");
+      const result = await handleCreateUserRequest(req.headers.authorization, req.body || {});
+      return res.status(result.status).json(result.body);
     } catch (error: any) {
       return res.status(500).json({ error: error?.message || 'Unable to create user account.' });
     }
   });
 
-  // Admin: Reset user password (Coordinator only)
+  // Admin: Reset user password (Coordinator only). This is a thin adapter --
+  // all the actual logic lives in handlePasswordResetRequest, shared with
+  // the Vercel serverless function at api/reset-user-password.ts, which is
+  // the endpoint actually reachable in the production (Vercel) deployment.
+  // This Express route only serves local `npm run dev` / `npm start`.
   app.post("/api/reset-user-password", async (req, res) => {
-    const { userId, newPassword } = req.body;
-
-    if (!userId || !newPassword) {
-      return res.status(400).json({ error: 'Missing userId or newPassword.' });
-    }
-
-    if (newPassword.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
-    }
-
     try {
-      // Verify the caller is authenticated
-      const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Unauthorized: Missing authentication token.' });
-      }
-
-      const token = authHeader.slice(7);
-
-      // Decode JWT token to get user ID (sub claim)
-      let callerUserId: string;
-      try {
-        const parts = token.split('.');
-        if (parts.length !== 3) {
-          return res.status(401).json({ error: 'Unauthorized: Invalid token format.' });
-        }
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-        callerUserId = payload.sub;
-        if (!callerUserId) {
-          return res.status(401).json({ error: 'Unauthorized: Invalid token payload.' });
-        }
-      } catch (decodeError: any) {
-        return res.status(401).json({ error: 'Unauthorized: Failed to decode token.' });
-      }
-
-      // Verify caller exists and get their role
-      const { data: callerProfile, error: profileError } = await supabaseAdmin
-        .from('profiles')
-        .select('role, status')
-        .eq('id', callerUserId)
-        .single();
-
-      if (profileError || !callerProfile) {
-        return res.status(403).json({ error: 'Forbidden: Unable to verify your authorization.' });
-      }
-
-      if (callerProfile.role !== 'COORDINATOR') {
-        return res.status(403).json({ error: 'Forbidden: Only Coordinators can reset user passwords.' });
-      }
-
-      // Use Supabase admin API to update password
-      const { data, error } = await supabaseAdmin.auth.admin.updateUserById(
-        userId,
-        { password: newPassword }
-      );
-
-      if (error) {
-        return res.status(400).json({ error: error.message });
-      }
-
-      return res.status(200).json({ success: true, message: 'Password updated successfully.' });
+      const { handlePasswordResetRequest } = await import("./src/lib/passwordResetHandler.ts");
+      const result = await handlePasswordResetRequest(req.headers.authorization, req.body?.userId, req.body?.newPassword);
+      return res.status(result.status).json(result.body);
     } catch (error: any) {
       return res.status(500).json({ error: error?.message || 'Unable to reset password.' });
     }

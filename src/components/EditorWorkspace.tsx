@@ -35,6 +35,7 @@ import {
 } from '../lib/editorWorkspace';
 import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send } from 'lucide-react';
 import RevisionReview from './RevisionReview';
+import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
 
 interface EditorWorkspaceProps {
@@ -76,6 +77,28 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   });
   const [showAcceptModal, setShowAcceptModal] = useState(false);
   const [respondingToAssignment, setRespondingToAssignment] = useState(false);
+  const [sectionFilter, setSectionFilter] = useState<string | null>(null);
+
+  // Real predicates over actual assignment/manuscript/reviewer data -- no
+  // fabricated counts. Buckets with no matching schema field (overdue
+  // tracking uses reviewer_assignments.due_date; scheduling/copyediting has
+  // no dedicated status in this schema) fall back to an honest empty state
+  // rather than inventing a stage that isn't tracked.
+  const SECTION_FILTERS: Record<string, { label: string; predicate: (r: EditorManuscriptDetails) => boolean }> = {
+    'active-submissions': { label: 'Active Submissions', predicate: (r) => r.assignment.status === 'ACCEPTED' },
+    'needs-editor': { label: 'Needs Editor', predicate: (r) => r.assignment.assessment_status === 'NOT_STARTED' },
+    'in-submission-stage': { label: 'In Submission Stage', predicate: (r) => r.assignment.status === 'INVITED' },
+    'awaiting-reviews': { label: 'Awaiting Reviews', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' && r.reviewers.some((rv) => rv.status !== 'SUBMITTED') },
+    'reviews-submitted': { label: 'Reviews Submitted', predicate: (r) => r.reviewers.length > 0 && r.reviewers.every((rv) => rv.status === 'SUBMITTED') },
+    'reviews-overdue': { label: 'Reviews Overdue', predicate: (r) => r.reviewers.some((rv) => rv.status !== 'SUBMITTED' && !!rv.due_date && new Date(rv.due_date) < new Date()) },
+    'revisions-submitted': { label: 'Revisions Submitted', predicate: (r) => r.revisions.length > 0 },
+    'in-review-stage': { label: 'In Review Stage', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' },
+    'copyediting-stage': { label: 'Copyediting Stage', predicate: (r) => r.manuscript.status === 'ACCEPTED' },
+    'in-production-stage': { label: 'In Production Stage', predicate: (r) => r.manuscript.status === 'ACCEPTED' },
+    'scheduled-articles': { label: 'Scheduled Articles', predicate: () => false },
+    'published-articles': { label: 'Published', predicate: (r) => r.manuscript.status === 'PUBLISHED' },
+    'declined-rejected': { label: 'Declined / Rejected', predicate: (r) => r.manuscript.status === 'REJECTED' },
+  };
 
   const load = async () => {
     try {
@@ -94,6 +117,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   };
 
   const filteredRows = rows.filter((row) => {
+    if (sectionFilter && !SECTION_FILTERS[sectionFilter]?.predicate(row)) return false;
     const query = searchTerm.toLowerCase();
     return (
       row.manuscript.title.toLowerCase().includes(query) ||
@@ -218,16 +242,22 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             </button>
             {expandedSections.submissions && (
               <div className="bg-[#0f3f37]/50 divide-y divide-[#0f3f37]">
-                {[
-                  { label: 'Active Submissions', count: assignmentCounts.accepted },
-                  { label: 'Needs Editor', count: assignmentCounts.pending },
-                  { label: 'In Submission Stage', count: assignmentCounts.total - assignmentCounts.accepted - assignmentCounts.pending }
-                ].map((item) => (
-                  <button key={item.label} className="w-full text-left px-4 py-2.5 text-xs text-emerald-100/80 hover:bg-emerald-500/10 transition flex items-center justify-between">
-                    <span>{item.label}</span>
-                    <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{item.count}</span>
-                  </button>
-                ))}
+                {(['active-submissions', 'needs-editor', 'in-submission-stage'] as const).map((id) => {
+                  const isActive = sectionFilter === id;
+                  const count = rows.filter(SECTION_FILTERS[id].predicate).length;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
+                      className={`w-full text-left px-4 py-2.5 text-xs transition flex items-center justify-between cursor-pointer ${
+                        isActive ? 'bg-emerald-500/20 text-white font-semibold' : 'text-emerald-100/80 hover:bg-emerald-500/10'
+                      }`}
+                    >
+                      <span>{SECTION_FILTERS[id].label}</span>
+                      <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{count}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -245,18 +275,22 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             </button>
             {expandedSections.reviewStages && (
               <div className="bg-[#0f3f37]/50 divide-y divide-[#0f3f37]">
-                {[
-                  { label: 'Awaiting Reviews', count: 0 },
-                  { label: 'Reviews Submitted', count: 0 },
-                  { label: 'Reviews Overdue', count: 0 },
-                  { label: 'Revisions Submitted', count: 0 },
-                  { label: 'In Review Stage', count: 0 }
-                ].map((item) => (
-                  <button key={item.label} className="w-full text-left px-4 py-2.5 text-xs text-emerald-100/80 hover:bg-emerald-500/10 transition flex items-center justify-between">
-                    <span>{item.label}</span>
-                    <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{item.count}</span>
-                  </button>
-                ))}
+                {(['awaiting-reviews', 'reviews-submitted', 'reviews-overdue', 'revisions-submitted', 'in-review-stage'] as const).map((id) => {
+                  const isActive = sectionFilter === id;
+                  const count = rows.filter(SECTION_FILTERS[id].predicate).length;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
+                      className={`w-full text-left px-4 py-2.5 text-xs transition flex items-center justify-between cursor-pointer ${
+                        isActive ? 'bg-emerald-500/20 text-white font-semibold' : 'text-emerald-100/80 hover:bg-emerald-500/10'
+                      }`}
+                    >
+                      <span>{SECTION_FILTERS[id].label}</span>
+                      <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{count}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -274,18 +308,22 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             </button>
             {expandedSections.copyedit && (
               <div className="bg-[#0f3f37]/50 divide-y divide-[#0f3f37]">
-                {[
-                  { label: 'Copyediting Stage', count: 0 },
-                  { label: 'In Production Stage', count: 0 },
-                  { label: 'Scheduled Articles', count: 0 },
-                  { label: 'Published', count: 0 },
-                  { label: 'Declined / Rejected', count: 0 }
-                ].map((item) => (
-                  <button key={item.label} className="w-full text-left px-4 py-2.5 text-xs text-emerald-100/80 hover:bg-emerald-500/10 transition flex items-center justify-between">
-                    <span>{item.label}</span>
-                    <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{item.count}</span>
-                  </button>
-                ))}
+                {(['copyediting-stage', 'in-production-stage', 'scheduled-articles', 'published-articles', 'declined-rejected'] as const).map((id) => {
+                  const isActive = sectionFilter === id;
+                  const count = rows.filter(SECTION_FILTERS[id].predicate).length;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
+                      className={`w-full text-left px-4 py-2.5 text-xs transition flex items-center justify-between cursor-pointer ${
+                        isActive ? 'bg-emerald-500/20 text-white font-semibold' : 'text-emerald-100/80 hover:bg-emerald-500/10'
+                      }`}
+                    >
+                      <span>{SECTION_FILTERS[id].label}</span>
+                      <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{count}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -435,7 +473,9 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>(initialReviewerAssignments || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments'>('title');
+  const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'decision' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments'>('title');
+  const [decisionBusy, setDecisionBusy] = useState(false);
+  const [decisionError, setDecisionError] = useState('');
   const [activePublication, setActivePublication] = useState<'title' | 'contributors' | 'metadata' | 'references' | 'galleries' | 'jats' | 'permissions' | 'issue'>('title');
   const [currentPage] = useState(1);
 
@@ -504,6 +544,24 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     } else {
       setError(errorInfo.message);
       showNotification('error', errorInfo.message);
+    }
+  };
+
+  // Decision: Accept / Minor Revision / Major Revision / Reject. Separate
+  // from the coordinator's final publish_decision -- this is the editor's
+  // own recommendation, gated server-side on the evaluation already being
+  // submitted (submit_editor_recommendation RPC re-checks assessment_status).
+  const handleSubmitRecommendation = async (recommendation: ReviewerRecommendation) => {
+    setDecisionBusy(true);
+    setDecisionError('');
+    try {
+      await submitRecommendation(manuscript.id, recommendation);
+      showNotification('success', `Recommendation submitted: ${recommendation.replace(/_/g, ' ')}`);
+      onChanged();
+    } catch (e: any) {
+      setDecisionError(e.message || 'Failed to submit recommendation');
+    } finally {
+      setDecisionBusy(false);
     }
   };
 
@@ -610,6 +668,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     { id: 'contributors', label: 'Contributors' },
     { id: 'files', label: 'Files for Review' },
     { id: 'evaluation', label: 'Editor Evaluation' },
+    { id: 'decision', label: 'Decision' },
     { id: 'reviews', label: 'Reviews' },
     { id: 'suggestions', label: 'Suggestions' },
     { id: 'history', label: 'Review History' },
@@ -1248,6 +1307,55 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               />
             )}
 
+            {activeTab === 'decision' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+                <h3 className="text-sm font-black text-slate-900">Editor Recommendation</h3>
+
+                {!evaluationSubmitted ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
+                    You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
+                  </div>
+                ) : assignment.recommendation ? (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
+                    <p className="text-sm font-bold text-emerald-900">
+                      Recommendation submitted: {assignment.recommendation.replace(/_/g, ' ')}
+                    </p>
+                    {assignment.recommendation_submitted_at && (
+                      <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
+                    )}
+                    <p className="text-xs text-slate-500 mt-3">Your recommendation is with the Coordinator for review.</p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-slate-600">
+                      Select one decision based on your evaluation and (if applicable) the reviewers' recommendations.
+                    </p>
+                    {decisionError && (
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {[
+                        { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                        { value: 'MINOR_REVISION' as ReviewerRecommendation, label: 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
+                        { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
+                        { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          disabled={decisionBusy}
+                          onClick={() => handleSubmitRecommendation(opt.value)}
+                          className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {activeTab === 'reviews' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
                 <h3 className="text-sm font-black text-slate-900 mb-4">PEER REVIEWS ({reviewerAssignments?.length || 0})</h3>
@@ -1353,7 +1461,13 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
             )}
 
             {activeTab === 'revisions' && (
-              <RevisionReview manuscriptId={manuscript.id} onStatusUpdate={onChanged} />
+              <div className="space-y-6">
+                <RevisionReview manuscriptId={manuscript.id} onStatusUpdate={onChanged} />
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 mb-3">Revision History</h3>
+                  <RevisionHistoryPanel manuscriptId={manuscript.id} profiles={Object.fromEntries(details.profiles)} />
+                </div>
+              </div>
             )}
 
             {activeTab === 'comments' && (

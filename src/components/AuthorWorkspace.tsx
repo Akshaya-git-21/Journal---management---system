@@ -5,12 +5,14 @@ import {
   listManuscripts,
   getManuscript,
   subscribeToManuscripts,
-  getManuscriptFiles
+  getManuscriptFiles,
+  submitManuscript
 } from '../lib/workflow';
 import { supabase, upsertManuscriptToDb, ensureAuthorProfile } from '../lib/supabase';
 import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
+import AuthorRevisionRequest from './AuthorRevisionRequest';
 import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, AlertCircle, ChevronDown, Settings, Trash2 } from 'lucide-react';
 
 interface AuthorWorkspaceProps {
@@ -50,11 +52,12 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
-  const [view, setView] = useState<'list' | 'new' | 'detail' | 'discussion'>('list');
+  const [view, setView] = useState<'list' | 'new' | 'detail' | 'discussion' | 'revision'>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState({ submissions: true });
+  const [statusFilter, setStatusFilter] = useState<'active' | 'review' | 'revisions' | 'accepted' | 'rejected' | 'published'>('active');
 
   // Load manuscripts for current user
   const load = async () => {
@@ -101,8 +104,18 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
     }
   };
 
-  // Filter manuscripts by search
+  // Filter manuscripts by sidebar category, then by search
+  const STATUS_FILTER_PREDICATES: Record<typeof statusFilter, (m: ManuscriptRow) => boolean> = {
+    active: (m) => !['REJECTED', 'PUBLISHED'].includes(m.status),
+    review: (m) => m.status === 'UNDER_REVIEW',
+    revisions: (m) => m.status === 'REVISION_REQUESTED',
+    accepted: (m) => m.status === 'ACCEPTED',
+    rejected: (m) => m.status === 'REJECTED',
+    published: (m) => m.status === 'PUBLISHED',
+  };
+
   const filteredItems = items.filter((m) => {
+    if (!STATUS_FILTER_PREDICATES[statusFilter](m)) return false;
     const query = searchTerm.toLowerCase();
     return (
       m.title.toLowerCase().includes(query) ||
@@ -235,9 +248,17 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
       console.log('[SUBMIT] Manuscript object created:', { id: newManuscript.id, title: newManuscript.title, authorId: newManuscript.authorId, submittedAt: newManuscript.submittedAt });
 
-      // First, insert manuscript record into database
-      console.log('[SUBMIT] Inserting manuscript record...');
-      const { data: insertResult, error: insertError } = await supabase
+      // Create the manuscript as a DRAFT first, then transition it through
+      // the real submit_manuscript() RPC below -- this is the same
+      // server-enforced state machine every other workflow step goes
+      // through (writes manuscript_status_history, notifies Coordinators),
+      // instead of a direct insert with status='SUBMITTED' that silently
+      // skipped both. A manuscript ID is generated exactly once by
+      // NewSubmissionFlow's triggerSubmitFinal(), which is itself guarded
+      // against double-invocation (hasSubmitted/isSubmitting), so this insert
+      // + RPC pair runs at most once per real submission.
+      console.log('[SUBMIT] Inserting manuscript record as DRAFT...');
+      const { error: insertError } = await supabase
         .from('manuscripts')
         .insert([{
           id: newManuscript.id,
@@ -246,11 +267,10 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           references: newManuscript.references,
           is_double_blind: newManuscript.isDoubleBlind,
           cover_letter: newManuscript.coverLetter,
-          status: 'SUBMITTED',
+          status: 'DRAFT',
           author_id: user.id,
           author_name: newManuscript.authorName,
           author_email: newManuscript.authorEmail,
-          submitted_at: new Date().toISOString(),
           language: newManuscript.language
         }]);
 
@@ -258,7 +278,43 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         throw new Error(`Failed to insert manuscript: ${insertError.message}`);
       }
 
-      console.log('[SUBMIT] Manuscript record inserted successfully');
+      console.log('[SUBMIT] Manuscript record inserted successfully as DRAFT');
+
+      // Persist contributors (co-authors) -- previously captured in the
+      // wizard but never written to manuscript_contributors.
+      if (paperDetails.contributors && paperDetails.contributors.length > 0) {
+        const { error: contributorsError } = await supabase.from('manuscript_contributors').insert(
+          paperDetails.contributors.map((c: any, i: number) => ({
+            manuscript_id: manuscriptId,
+            name: [c.firstName, c.lastName].filter(Boolean).join(' ').trim() || c.name || '',
+            email: c.email || '',
+            affiliation: c.affiliation || '',
+            contributor_role: c.role || (c.isPrincipalContact ? 'Primary Author' : 'Co-Author'),
+            position: i
+          }))
+        );
+        if (contributorsError) {
+          throw new Error(`Failed to save contributors: ${contributorsError.message}`);
+        }
+      }
+
+      // Persist author-suggested reviewers -- same table the Editor's later
+      // suggestions land in, discriminated by suggested_by='AUTHOR'.
+      if (paperDetails.reviewerSuggestions && paperDetails.reviewerSuggestions.length > 0) {
+        const { error: reviewersError } = await supabase.from('manuscript_suggested_reviewers').insert(
+          paperDetails.reviewerSuggestions.map((r: any) => ({
+            manuscript_id: manuscriptId,
+            suggested_by: 'AUTHOR' as const,
+            suggested_by_user: user.id,
+            name: r.name || '',
+            email: r.email || '',
+            note: r.reason || r.note || ''
+          }))
+        );
+        if (reviewersError) {
+          throw new Error(`Failed to save suggested reviewers: ${reviewersError.message}`);
+        }
+      }
 
       // Now sync uploaded files to manuscript_files table via server-side RPC
       if (paperDetails.uploadedFiles && paperDetails.uploadedFiles.length > 0) {
@@ -306,6 +362,15 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         console.warn('[SUBMIT] No files to sync. uploadedFiles:', paperDetails.uploadedFiles);
       }
 
+      // Transition DRAFT -> SUBMITTED through the real workflow RPC. This is
+      // the single point where the manuscript actually becomes visible to
+      // Coordinators (submit_manuscript() writes manuscript_status_history
+      // and notifies every ACTIVE Coordinator) -- everything above this line
+      // only populated a DRAFT row the author already owns exclusively.
+      console.log('[SUBMIT] Calling submit_manuscript RPC to finalize submission...');
+      await submitManuscript(manuscriptId);
+      console.log('[SUBMIT] Manuscript submitted (DRAFT -> SUBMITTED)');
+
       // Refresh the list to show the new manuscript
       console.log('[SUBMIT] Calling load() to refresh manuscript list...');
       await load();
@@ -339,6 +404,25 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
     );
   }
 
+  if (view === 'revision' && selectedId) {
+    return (
+      <div className="w-full min-h-screen bg-slate-100 p-6 md:p-8">
+        <div className="max-w-3xl mx-auto space-y-5">
+          <button
+            onClick={() => { setView('list'); setSelectedId(null); load(); }}
+            className="text-xs font-bold text-slate-500 hover:text-slate-700"
+          >
+            &larr; Back to My Manuscripts
+          </button>
+          <AuthorRevisionRequest
+            manuscriptId={selectedId}
+            onRevisionSubmitted={() => { load(); }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full min-h-screen bg-slate-100 flex flex-col md:flex-row font-sans">
       {/* Dark Green Sidebar */}
@@ -366,24 +450,29 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           {/* Menu */}
           <div className="space-y-2">
             <p className="text-xs uppercase tracking-widest font-bold text-slate-400 px-2 mb-3">MY SUBMISSIONS</p>
-            {[
+            {([
               { id: 'active', label: 'Active', count: items.filter(m => !['REJECTED', 'PUBLISHED'].includes(m.status)).length, icon: '📤' },
               { id: 'review', label: 'Under Review', count: statusCounts.underReview, icon: '👀' },
               { id: 'revisions', label: 'Revisions', count: statusCounts.revisionRequested, icon: '✏️' },
               { id: 'accepted', label: 'Accepted', count: statusCounts.accepted, icon: '✅' },
               { id: 'rejected', label: 'Rejected', count: statusCounts.rejected, icon: '❌' },
               { id: 'published', label: 'Published', count: statusCounts.published, icon: '📰' },
-            ].map((item) => (
+            ] as const).map((item) => (
               <button
                 key={item.id}
-                className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all font-semibold text-xs text-slate-700 hover:bg-slate-100"
+                onClick={() => { setStatusFilter(item.id); setView('list'); }}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all font-semibold text-xs cursor-pointer ${
+                  statusFilter === item.id
+                    ? 'bg-[#e6f7ef] text-[#008751] border border-emerald-200'
+                    : 'text-slate-700 hover:bg-slate-100 border border-transparent'
+                }`}
               >
                 <div className="flex items-center gap-2">
                   <span>{item.icon}</span>
                   <span>{item.label}</span>
                 </div>
                 {item.count > 0 && (
-                  <span className="bg-slate-100 rounded-full px-2 py-0.5 text-[10px] font-bold text-slate-600">{item.count}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusFilter === item.id ? 'bg-[#008751] text-white' : 'bg-slate-100 text-slate-600'}`}>{item.count}</span>
                 )}
               </button>
             ))}
@@ -463,7 +552,9 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                     <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs uppercase tracking-wide font-semibold text-emerald-700 mb-2">
                       <span>/submissions/queue</span>
                     </div>
-                    <h2 className="text-lg font-semibold text-slate-900">Active submissions</h2>
+                    <h2 className="text-lg font-semibold text-slate-900">
+                      {{ active: 'Active submissions', review: 'Under review', revisions: 'Revisions requested', accepted: 'Accepted submissions', rejected: 'Rejected submissions', published: 'Published submissions' }[statusFilter]}
+                    </h2>
                     <p className="text-sm text-slate-600">Manage your submissions and track their progress through the editorial workflow.</p>
                   </div>
                   <button className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition">
@@ -559,6 +650,14 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                               >
                                 View
                               </button>
+                              {m.status === 'REVISION_REQUESTED' && (
+                                <button
+                                  onClick={() => { setSelectedId(m.id); setView('revision'); }}
+                                  className="rounded border border-orange-300 bg-orange-50 px-3 py-1.5 text-xs font-bold text-orange-700 hover:bg-orange-100 transition"
+                                >
+                                  Submit Revision
+                                </button>
+                              )}
                               <button
                                 onClick={() => { setSelectedId(m.id); setView('discussion'); }}
                                 className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"

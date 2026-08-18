@@ -6,13 +6,13 @@ interface Props {
 }
 
 const CRITERIA = [
-  { key: 'scientific_merit', label: 'Scientific Merit' },
-  { key: 'novelty_innovation', label: 'Novelty & Innovation' },
-  { key: 'methodology_quality', label: 'Methodology Quality' },
-  { key: 'literature_adequacy', label: 'Literature Adequacy' },
-  { key: 'ethical_compliance', label: 'Ethical Compliance' },
-  { key: 'data_reliability', label: 'Data Reliability' },
-  { key: 'writing_quality', label: 'Writing Quality' },
+  { key: 'scientific_merit', reasonKey: 'scientificMerit', label: 'Scientific Merit' },
+  { key: 'novelty_innovation', reasonKey: 'noveltyInnovation', label: 'Novelty & Innovation' },
+  { key: 'methodology_quality', reasonKey: 'methodologyQuality', label: 'Methodology Quality' },
+  { key: 'literature_adequacy', reasonKey: 'literatureAdequacy', label: 'Literature Adequacy' },
+  { key: 'ethical_compliance', reasonKey: 'ethicalCompliance', label: 'Ethical Compliance' },
+  { key: 'data_reliability', reasonKey: 'dataReliability', label: 'Data Reliability' },
+  { key: 'writing_quality', reasonKey: 'writingQuality', label: 'Writing Quality' },
 ];
 
 export function EditorEvaluationTab({
@@ -52,6 +52,9 @@ export function EditorEvaluationTab({
                     style={{ width: `${value ? (value / 10) * 100 : 0}%` }}
                   ></div>
                 </div>
+                {(assessment.criteria_reasons as any)?.[c.reasonKey] && (
+                  <p className="text-xs text-slate-500 italic mt-2">"{(assessment.criteria_reasons as any)[c.reasonKey]}"</p>
+                )}
               </div>
             );
           })}

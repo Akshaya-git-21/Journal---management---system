@@ -51,21 +51,18 @@ export function EditorEvaluationFormTab({
   const [mandatoryRevisions, setMandatoryRevisions] = useState('');
   const [commentsToCoordinator, setCommentsToCoordinator] = useState('');
 
-  // Reviewer suggestions
-  const [suggestions, setSuggestions] = useState<ReviewerSuggestion[]>([
-    { name: '', email: '', note: '' },
-    { name: '', email: '', note: '' },
-  ]);
+  // Reviewer suggestions -- entirely optional, starts empty.
+  const [suggestions, setSuggestions] = useState<ReviewerSuggestion[]>([]);
 
   // UI state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Validate suggestions
-  const suggestionsValid = suggestions.filter(s => s.name.trim() || s.email.trim()).length >= 2;
-  const suggestionsHaveDuplicates = new Set(suggestions.map(s => s.email.toLowerCase().trim())).size < suggestions.filter(s => s.email.trim()).length;
-  const canSubmit = suggestionsValid && !suggestionsHaveDuplicates && !loading;
+  // Reviewer suggestions are entirely optional (0, 1, or more) -- only
+  // duplicate emails among whatever was entered are blocked.
+  const suggestionsHaveDuplicates = new Set(suggestions.map(s => s.email.toLowerCase().trim()).filter(Boolean)).size < suggestions.filter(s => s.email.trim()).length;
+  const canSubmit = !suggestionsHaveDuplicates && !loading;
 
   const handleScoreChange = (key: keyof typeof scores, value: number) => {
     setScores(prev => ({ ...prev, [key]: Math.min(10, Math.max(1, value)) }));
@@ -76,9 +73,7 @@ export function EditorEvaluationFormTab({
   };
 
   const handleRemoveSuggestion = (index: number) => {
-    if (suggestions.length > 2) {
-      setSuggestions(suggestions.filter((_, i) => i !== index));
-    }
+    setSuggestions(suggestions.filter((_, i) => i !== index));
   };
 
   const handleUpdateSuggestion = (index: number, field: keyof ReviewerSuggestion, value: string) => {
@@ -93,11 +88,6 @@ export function EditorEvaluationFormTab({
     setSuccess('');
 
     // Validation
-    if (!suggestionsValid) {
-      setError('Please provide at least 2 reviewers (name and/or email)');
-      return;
-    }
-
     if (suggestionsHaveDuplicates) {
       setError('Please remove duplicate reviewer emails');
       return;
@@ -258,8 +248,8 @@ export function EditorEvaluationFormTab({
       {/* Reviewer Suggestions */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
         <div>
-          <h3 className="text-sm font-black text-slate-900 mb-1">Reviewer Suggestions *</h3>
-          <p className="text-xs text-slate-600 mb-4">Suggest at least 2 reviewers. Provide name and/or email for each.</p>
+          <h3 className="text-sm font-black text-slate-900 mb-1">Reviewer Suggestions (Optional)</h3>
+          <p className="text-xs text-slate-600 mb-4">Suggesting reviewers is optional -- you may submit your evaluation with none, one, or several.</p>
         </div>
 
         <div className="space-y-3">
@@ -267,16 +257,14 @@ export function EditorEvaluationFormTab({
             <div key={idx} className="border border-slate-200 rounded-lg p-4 space-y-2">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold text-slate-700">Reviewer {idx + 1}</span>
-                {suggestions.length > 2 && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveSuggestion(idx)}
-                    disabled={loading}
-                    className="text-slate-400 hover:text-red-600 transition"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => handleRemoveSuggestion(idx)}
+                  disabled={loading}
+                  className="text-slate-400 hover:text-red-600 transition"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
               <input
                 type="text"
@@ -317,7 +305,9 @@ export function EditorEvaluationFormTab({
         </button>
 
         <div className="text-xs text-slate-600 space-y-1">
-          <p>✓ {suggestions.filter(s => s.name.trim() || s.email.trim()).length} valid suggestions</p>
+          <p>{suggestions.filter(s => s.name.trim() || s.email.trim()).length > 0
+            ? `✓ ${suggestions.filter(s => s.name.trim() || s.email.trim()).length} suggestion(s) provided`
+            : 'No reviewer suggestions provided -- this is optional, you may submit without any.'}</p>
           {suggestionsHaveDuplicates && <p className="text-red-600">⚠ Duplicate email addresses detected</p>}
         </div>
       </div>

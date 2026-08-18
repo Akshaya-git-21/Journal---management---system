@@ -1,11 +1,13 @@
 import { useState, useEffect, ChangeEvent } from 'react';
-import { getRevisions, getRevisionFiles, uploadRevisionFile, updateRevisionStatus, ManuscriptFileRow, RevisionRow } from '../lib/workflow';
+import { getRevisions, getRevisionFiles, uploadRevisionFile, submitRevision, ManuscriptFileRow, RevisionRow } from '../lib/workflow';
 import { Loader2, Upload, Download, CheckCircle } from 'lucide-react';
 
 interface AuthorRevisionRequestProps {
   manuscriptId: string;
   onRevisionSubmitted?: () => void;
 }
+
+const RESPONSE_NOTE_MAX = 2000;
 
 export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitted }: AuthorRevisionRequestProps) {
   const [revisions, setRevisions] = useState<RevisionRow[]>([]);
@@ -14,6 +16,8 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [responseNote, setResponseNote] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     loadRevisions();
@@ -68,15 +72,27 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   };
 
   const handleSubmitRevision = async () => {
-    if (!selectedRevision || revisionFiles.length === 0) return;
+    // Guard against duplicate submission: only the RPC's own state check
+    // (manuscript.status === 'REVISION_REQUESTED') is authoritative, but
+    // gating on the still-AWAITING_AUTHOR_UPLOAD local status prevents a
+    // double-click from firing the RPC twice for the same revision.
+    if (!selectedRevision || revisionFiles.length === 0 || submitting) return;
+    if (selectedRevision.status !== 'AWAITING_AUTHOR_UPLOAD') return;
+
     setSubmitting(true);
+    setError('');
     try {
-      await updateRevisionStatus(selectedRevision.id, 'REVISION_SUBMITTED');
+      // The real workflow transition: REVISION_REQUESTED -> EDITOR_REVIEW,
+      // flips this revision row to REVISION_SUBMITTED, and resets the
+      // editor's assessment_status so they re-evaluate the new files.
+      await submitRevision(manuscriptId, responseNote.trim());
       setSelectedRevision({ ...selectedRevision, status: 'REVISION_SUBMITTED' });
       setRevisions(revisions.map(r => r.id === selectedRevision.id ? { ...r, status: 'REVISION_SUBMITTED' } : r));
+      setResponseNote('');
       onRevisionSubmitted?.();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to submit revision:', err);
+      setError(err.message || 'Failed to submit revision. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -121,9 +137,11 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-semibold text-slate-900">Revision #{rev.revision_number}</p>
+                  <p className="font-semibold text-slate-900">
+                    {rev.decision_type === 'MAJOR_REVISION' ? 'Major Revision Requested' : rev.decision_type === 'MINOR_REVISION' ? 'Minor Revision Requested' : `Revision #${rev.revision_number}`}
+                  </p>
                   <p className="text-xs text-slate-600">
-                    Requested: {new Date(rev.requested_at).toLocaleDateString()}
+                    Revision #{rev.revision_number} &middot; Requested: {new Date(rev.requested_at).toLocaleDateString()}
                   </p>
                 </div>
                 <span className={`text-xs font-bold px-3 py-1 rounded-full ${
@@ -200,9 +218,25 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
             </div>
           )}
 
-          {/* Submit Button */}
+          {/* Response note + Submit */}
           {selectedRevision.status === 'AWAITING_AUTHOR_UPLOAD' && revisionFiles.length > 0 && (
-            <div className="space-y-4">
+            <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-900 mb-2">Response to Editor (optional)</label>
+                <textarea
+                  value={responseNote}
+                  onChange={(e) => setResponseNote(e.target.value.slice(0, RESPONSE_NOTE_MAX))}
+                  placeholder="Summarize how you addressed the requested revisions..."
+                  rows={4}
+                  disabled={submitting}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{error}</div>
+              )}
+
               <button
                 disabled={submitting}
                 onClick={handleSubmitRevision}

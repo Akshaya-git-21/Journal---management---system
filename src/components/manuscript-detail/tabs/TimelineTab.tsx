@@ -32,7 +32,7 @@ export function TimelineTab({ statusHistory, profiles }: Props) {
 
             {/* Content */}
             <div className="flex-1 pb-4">
-              <p className="font-bold text-slate-900">{event.status.replace(/_/g, ' ')}</p>
+              <p className="font-bold text-slate-900">{event.to_status.replace(/_/g, ' ')}</p>
               <p className="text-xs text-slate-600">
                 {new Date(event.created_at).toLocaleString()}
               </p>
@@ -41,8 +41,8 @@ export function TimelineTab({ statusHistory, profiles }: Props) {
                   by {profiles[event.actor_id].name}
                 </p>
               )}
-              {event.notes && (
-                <p className="text-sm text-slate-700 mt-1">{event.notes}</p>
+              {event.note && (
+                <p className="text-sm text-slate-700 mt-1">{event.note}</p>
               )}
             </div>
           </div>

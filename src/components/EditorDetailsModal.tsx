@@ -6,7 +6,7 @@ import { ProfileRow } from '../lib/workflow';
 interface EditorDetailsModalProps {
   editor: ProfileRow | null;
   onClose: () => void;
-  currentUserToken: string;
+  currentUserToken?: string;
 }
 
 export default function EditorDetailsModal({ editor, onClose, currentUserToken }: EditorDetailsModalProps) {
@@ -70,7 +70,7 @@ export default function EditorDetailsModal({ editor, onClose, currentUserToken }
       <div className="bg-white rounded-2xl shadow-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 bg-gradient-to-r from-[#004d2b] to-[#008751] text-white px-6 py-4 flex items-center justify-between border-b">
-          <h2 className="text-lg font-bold">Editor Details</h2>
+          <h2 className="text-lg font-bold">{editor.role === 'REVIEWER' ? 'Reviewer' : 'Editor'} Details</h2>
           <button onClick={onClose} className="text-white hover:bg-white/20 p-1 rounded transition">
             <X className="w-5 h-5" />
           </button>
@@ -190,6 +190,18 @@ export default function EditorDetailsModal({ editor, onClose, currentUserToken }
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                   disabled={loading}
                 />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const generated = generatePassword();
+                    setNewPassword(generated);
+                    setConfirmPassword(generated);
+                  }}
+                  disabled={loading}
+                  className="w-full text-xs font-semibold text-emerald-700 hover:text-emerald-800 disabled:opacity-50 py-1 transition"
+                >
+                  Generate Random Password
+                </button>
                 <div className="flex gap-2">
                   <button
                     onClick={handleResetPassword}

@@ -76,7 +76,7 @@ export default function WorkflowStatusTracker({
       id: 'decision',
       label: 'Decision',
       status: manuscript.status === 'ACCEPTED' || manuscript.status === 'REJECTED' || manuscript.status === 'REVISION_REQUESTED' ? 'completed' : allReviewsSubmitted ? 'current' : 'pending',
-      timestamp: statusHistory.find(h => h.status === 'AWAITING_DECISION')?.created_at
+      timestamp: statusHistory.find(h => h.to_status === 'AWAITING_DECISION')?.created_at
     });
 
     // 7. Revision
@@ -93,7 +93,7 @@ export default function WorkflowStatusTracker({
       id: 'completed',
       label: 'Completed',
       status: isPublished ? 'completed' : 'pending',
-      timestamp: statusHistory.find(h => h.status === 'PUBLISHED')?.created_at
+      timestamp: statusHistory.find(h => h.to_status === 'PUBLISHED')?.created_at
     });
 
     return stages;

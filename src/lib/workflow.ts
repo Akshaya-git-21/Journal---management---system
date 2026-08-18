@@ -28,6 +28,7 @@ export interface EditorAssignmentRow {
   weaknesses: string | null;
   mandatory_revisions: string | null;
   comments_to_coordinator: string | null;
+  criteria_reasons: Record<string, string> | null;
   assessment_status: 'NOT_STARTED' | 'SUBMITTED';
   assessment_submitted_at: string | null;
   recommendation: ReviewerRecommendation | null;
@@ -53,6 +54,7 @@ export interface ReviewerAssignmentRow {
   ethical_compliance: number | null;
   data_reliability: number | null;
   writing_quality: number | null;
+  criteria_reasons: Record<string, string> | null;
   submitted_at: string | null;
 }
 
@@ -106,6 +108,7 @@ export interface EditorAssessmentInput {
   mandatoryRevisions: string;
   commentsToCoordinator: string;
   suggestedReviewers?: { name: string; email?: string; note?: string }[];
+  criteriaReasons?: Record<string, string>;
 }
 
 export const submitEditorAssessment = (assignmentId: string, input: EditorAssessmentInput) =>
@@ -122,7 +125,8 @@ export const submitEditorAssessment = (assignmentId: string, input: EditorAssess
     p_weaknesses: input.weaknesses,
     p_mandatory_revisions: input.mandatoryRevisions,
     p_comments_to_coordinator: input.commentsToCoordinator,
-    p_suggested_reviewers: input.suggestedReviewers ?? []
+    p_suggested_reviewers: input.suggestedReviewers ?? [],
+    p_criteria_reasons: input.criteriaReasons ?? {}
   }));
 
 export const assignReviewers = (manuscriptId: string, reviewerIds: [string, string]) =>
@@ -182,6 +186,7 @@ export interface ReviewSubmissionInput {
   ethicalCompliance: number;
   dataReliability: number;
   writingQuality: number;
+  criteriaReasons?: Record<string, string>;
 }
 
 export const submitReview = (assignmentId: string, input: ReviewSubmissionInput) =>
@@ -196,7 +201,8 @@ export const submitReview = (assignmentId: string, input: ReviewSubmissionInput)
     p_literature_adequacy: input.literatureAdequacy,
     p_ethical_compliance: input.ethicalCompliance,
     p_data_reliability: input.dataReliability,
-    p_writing_quality: input.writingQuality
+    p_writing_quality: input.writingQuality,
+    p_criteria_reasons: input.criteriaReasons ?? {}
   }));
 
 export const submitEditorRecommendation = (manuscriptId: string, recommendation: ReviewerRecommendation) =>
@@ -210,8 +216,25 @@ export const publishDecision = (manuscriptId: string, decision: PublishDecision,
 export const submitRevision = (manuscriptId: string, responseNote: string = '') =>
   rpcOrThrow(supabase.rpc('submit_revision', { p_manuscript_id: manuscriptId, p_response_note: responseNote }));
 
-export const markPublished = (manuscriptId: string, doi: string, volume: string, issue: string) =>
-  rpcOrThrow(supabase.rpc('mark_published', { p_manuscript_id: manuscriptId, p_doi: doi, p_volume: volume, p_issue: issue }));
+export const markPublished = (manuscriptId: string, doi: string, volume: string, issue: string, publishedPdfUrl?: string) =>
+  rpcOrThrow(supabase.rpc('mark_published', {
+    p_manuscript_id: manuscriptId, p_doi: doi, p_volume: volume, p_issue: issue,
+    p_published_pdf_url: publishedPdfUrl ?? null
+  }));
+
+/** Coordinator-only: hand an ACCEPTED manuscript to Publishers. Publishers
+ * cannot see a manuscript until this has been called (see manuscripts_select
+ * RLS -- production_stage must be non-null). */
+export const sendToPublisher = (manuscriptId: string) =>
+  rpcOrThrow(supabase.rpc('send_to_publisher', { p_manuscript_id: manuscriptId }));
+
+export async function uploadPublishedGalley(manuscriptId: string, file: File): Promise<string> {
+  const path = `${manuscriptId}/published/${Date.now()}_${file.name}`;
+  const { error: uploadError } = await supabase.storage.from('manuscript-files').upload(path, file, { upsert: false });
+  if (uploadError) throw new Error(uploadError.message);
+  const { data } = supabase.storage.from('manuscript-files').getPublicUrl(path);
+  return data.publicUrl;
+}
 
 // ------------------------------------------
 // Reads (RLS-scoped -- each caller only ever sees rows they're allowed to)
@@ -284,6 +307,8 @@ export interface ManuscriptRow {
   doi: string | null;
   volume: string | null;
   issue: string | null;
+  production_stage: 'SENT_TO_PUBLISHER' | 'PUBLISHED' | null;
+  published_pdf_url: string | null;
   submitted_at: string | null;
   published_at: string | null;
   created_at: string;
@@ -329,6 +354,7 @@ export interface ProfileRow {
   role: string | null;
   requested_role?: string | null;
   status: string;
+  created_at?: string | null;
 }
 
 export interface RevisionRow {
@@ -337,6 +363,7 @@ export interface RevisionRow {
   revision_number: number;
   requested_by: string | null;
   decision_letter: string;
+  decision_type: 'MINOR_REVISION' | 'MAJOR_REVISION' | null;
   status: string;
   requested_at: string;
   submitted_at: string | null;
@@ -447,7 +474,7 @@ export async function assignRevisedManuscriptToEditor(manuscriptId: string, edit
 
 /** Active accounts for a given role -- used by Coordinator's editor/reviewer pickers. */
 export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER'): Promise<ProfileRow[]> {
-  const { data, error } = await supabase.from('profiles').select('id, name, email, role, status').eq('role', role).eq('status', 'ACTIVE').order('name', { ascending: true });
+  const { data, error } = await supabase.from('profiles').select('id, name, email, role, status, created_at').eq('role', role).eq('status', 'ACTIVE').order('name', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
 }
@@ -456,6 +483,26 @@ export async function listPendingApprovals(): Promise<ProfileRow[]> {
   const { data, error } = await supabase.from('profiles').select('id, name, email, role, requested_role, status').eq('status', 'PENDING_APPROVAL').order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+/** Real invited/accepted/completed counts per reviewer, aggregated from reviewer_assignments. */
+export async function getReviewerAssignmentCounts(reviewerIds: string[]): Promise<Record<string, { invited: number; accepted: number; completed: number }>> {
+  const result: Record<string, { invited: number; accepted: number; completed: number }> = {};
+  if (reviewerIds.length === 0) return result;
+
+  const { data, error } = await supabase
+    .from('reviewer_assignments')
+    .select('reviewer_id, status')
+    .in('reviewer_id', Array.from(new Set(reviewerIds)));
+  if (error) throw new Error(error.message);
+
+  for (const row of data ?? []) {
+    const bucket = (result[row.reviewer_id] ??= { invited: 0, accepted: 0, completed: 0 });
+    bucket.invited += 1;
+    if (row.status === 'ACCEPTED' || row.status === 'SUBMITTED') bucket.accepted += 1;
+    if (row.status === 'SUBMITTED') bucket.completed += 1;
+  }
+  return result;
 }
 
 export async function approveUserRole(targetId: string, approve: boolean): Promise<ProfileRow> {

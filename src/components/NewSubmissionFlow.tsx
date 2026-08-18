@@ -198,6 +198,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [submittedManuscriptId, setSubmittedManuscriptId] = useState<string | null>(null);
+  const [showFinalConfirm, setShowFinalConfirm] = useState(false);
 
   // Initialize author details when mounted
   useEffect(() => {
@@ -257,6 +258,51 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
     localStorage.setItem('ojs_submission_cached_draft', JSON.stringify(draftData));
   };
 
+  // Check if a step is valid (can move forward from it)
+  const isStepValid = (step: number): boolean => {
+    switch (step) {
+      case 1:
+        return checklist1 && checklist2 && checklist3 && checklist4 && checklist5 && agreePrivacy && agreeInstructions;
+      case 2:
+        return uploadedFiles.some(f => f.componentType === 'Title Page')
+            && uploadedFiles.some(f => f.componentType === 'Blind Manuscript')
+            && uploadedFiles.some(f => f.componentType === 'Author Form');
+      case 3:
+        return title.trim() !== '' && abstract.trim() !== '';
+      case 4:
+        return contributors.length > 0;
+      case 5:
+        return true; // Optional sections
+      case 6:
+        return true; // Optional
+      case 7:
+        return acceptLicense;
+      case 8:
+        return true; // Final confirmation
+      default:
+        return true;
+    }
+  };
+
+  // Navigate to a specific step (backward/forward)
+  const jumpToStep = (targetStep: number) => {
+    // Only allow backward navigation or to already-completed steps
+    if (targetStep >= currentStep) {
+      if (!isStepValid(currentStep)) {
+        setValidationError(`Step ${currentStep} is incomplete. Please address the missing items.`);
+        return;
+      }
+    }
+    // Mark current step as completed when leaving it
+    if (!completedSteps.includes(currentStep)) {
+      setCompletedSteps([...completedSteps, currentStep]);
+    }
+    saveStateDraft(targetStep);
+    setCurrentStep(targetStep);
+    setValidationError(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Step navigation helper with strict visual validation guards
   const handleNext = () => {
     setValidationError(null);
@@ -280,7 +326,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
       const hasTitlePage = uploadedFiles.some(f => f.componentType === 'Title Page');
       const hasBlindManuscript = uploadedFiles.some(f => f.componentType === 'Blind Manuscript');
       const hasAuthorForm = uploadedFiles.some(f => f.componentType === 'Author Form');
-      
+
       if (!hasTitlePage || !hasBlindManuscript || !hasAuthorForm) {
         setValidationError('All three submission files are mandatory before proceeding.');
         return;
@@ -315,9 +361,12 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
       }
     }
 
-    // Capture completion database transition at Step 8
+    // Step 8 ("Submit") never calls the real submission RPC directly -- it
+    // opens the Final Preview confirmation dialog, and only that dialog's
+    // explicit Confirm button calls triggerSubmitFinal().
     if (currentStep === 8) {
-      triggerSubmitFinal();
+      if (hasSubmitted || isSubmitting) return;
+      setShowFinalConfirm(true);
       return;
     }
 
@@ -328,24 +377,8 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
   };
 
   const handleBack = () => {
-    setValidationError(null);
     if (currentStep > 1) {
-      const backStep = currentStep - 1;
-      setCurrentStep(backStep);
-      saveStateDraft(backStep);
-    }
-  };
-
-  // Skip or go to specific step directly if previous steps are completed (interactive stepper)
-  const jumpToStep = (stepNo: number) => {
-    if (stepNo >= 9) return; // Cannot jump directly to completion page without full validation
-    
-    // Check if step is allowed (either is first, or previously completed, or current)
-    const isAllowed = stepNo === 1 || completedSteps.includes(stepNo - 1) || stepNo < currentStep;
-    if (isAllowed) {
-      setValidationError(null);
-      setCurrentStep(stepNo);
-      saveStateDraft(stepNo);
+      jumpToStep(currentStep - 1);
     }
   };
 
@@ -862,7 +895,31 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
         )}
 
         {/* DYNAMIC SCROLL CONTAINER FOR FORM STEP CHUNKS */}
-        <div className="p-6 sm:p-8 flex-grow overflow-y-auto max-h-[660px]">
+        <div className="p-6 sm:p-8 flex-grow overflow-y-auto max-h-[660px] flex flex-col gap-6">
+
+          {/* Step Header with Back Navigation */}
+          {currentStep < 9 && (
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 sticky top-0 bg-white z-20">
+              <div>
+                <p className="text-xs font-mono text-slate-400 uppercase tracking-wide">Step {currentStep} of 8</p>
+                <h2 className="text-xl font-black text-slate-900 mt-0.5">
+                  {STEPS.find(s => s.number === currentStep)?.label}
+                </h2>
+              </div>
+              {currentStep > 1 && (
+                <button
+                  onClick={handleBack}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-lg transition whitespace-nowrap"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Back
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Step Content */}
+          <div>
 
           {/* ----------------- STEP 1 CONTENT: SUBMISSION PREPARATION ----------------- */}
           {currentStep === 1 && (
@@ -2763,9 +2820,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
 
           {/* ----------------- STEP 8 CONTENT: CONFIRMATION ----------------- */}
           {currentStep === 8 && (
-            <div id="step-8-confirmation" className="space-y-6 text-sm text-slate-800 font-sans max-w-4xl mx-auto">
-              
-              <div className="bg-sky-50 border border-sky-100 p-5 rounded-2xl flex items-start gap-4">
+            <div id="step-8-confirmation" className="flex flex-col space-y-6 text-sm text-slate-800 font-sans">
+
+              <div className="bg-sky-50 border border-sky-100 p-5 rounded-2xl flex items-start gap-4 sticky top-0 z-10">
                 <Info className="w-6 h-6 text-sky-600 shrink-0 mt-0.5" />
                 <div className="space-y-1.5">
                   <h4 className="font-bold text-[#002b3d] text-base">Verify your structural inputs before submittal</h4>
@@ -2775,93 +2832,106 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <h4 className="font-extrabold text-sm uppercase tracking-wider text-[#008751] font-sans flex items-center gap-2 border-b border-emerald-100 pb-2">
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-4">
+                <h4 className="font-extrabold text-sm uppercase tracking-wider text-[#008751] font-sans flex items-center gap-2 border-b border-emerald-100 pb-2 sticky top-0 bg-white z-10">
                   <span className="h-2.5 w-2.5 rounded-full bg-[#008751]" />
                   CONSOLIDATED DRAFT CHECKSHEET DETAILS
                 </h4>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  
+                <div className="space-y-4">
                   {/* Category A: Basic configuration */}
-                  <div className="bg-slate-50 border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs">
-                    <span className="text-xs font-mono font-bold uppercase bg-slate-200 px-2.5 py-1 rounded-lg text-slate-700">
-                      Scope Criteria
-                    </span>
-
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-bold uppercase bg-emerald-50 text-[#008751] px-3 py-1.5 rounded-lg">
+                        Step 1: Scope Criteria
+                      </span>
+                      <button type="button" onClick={() => jumpToStep(1)} className="text-[11px] font-bold text-[#008751] hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition">
+                        Edit →
+                      </button>
+                    </div>
                     <div className="pt-2 text-sm space-y-2 text-slate-700 leading-relaxed font-normal">
-                      <div>Language choice: <strong className="text-slate-900">{subLanguage}</strong></div>
-                      <div>Assigned Scope: <strong className="text-slate-900">{subSection}</strong></div>
-                      <div>CC License framework: <strong className="text-slate-900">CC BY 4.0 (Default Open Access)</strong></div>
-                      <div>Open Access paradigm: <strong className="text-[#008751] font-bold">Immediate Open Access</strong></div>
+                      <div>Language: <strong className="text-slate-900">{subLanguage}</strong></div>
+                      <div>Section: <strong className="text-slate-900">{subSection}</strong></div>
+                      <div>License: <strong className="text-slate-900">CC BY 4.0</strong></div>
+                      <div>Access: <strong className="text-[#008751] font-bold">Immediate Open Access</strong></div>
                     </div>
                   </div>
 
                   {/* Category B: Draft assets */}
-                  <div className="bg-slate-50 border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs">
-                    <span className="text-xs font-mono font-bold uppercase bg-slate-200 px-2.5 py-1 rounded-lg text-slate-700">
-                      Manuscript Galley Files
-                    </span>
-
-                    <div className="pt-2 text-sm space-y-2 text-slate-700 leading-relaxed">
-                      {uploadedFiles.map((f, i) => (
-                        <div key={f.id} className="flex items-center gap-2 text-slate-800">
-                          <Check className="w-4 h-4 text-[#008751] stroke-[3]" />
-                          <span className="font-bold truncate max-w-xs">{f.fileName} ({f.componentType})</span>
-                        </div>
-                      ))}
-                      {uploadedFiles.length === 0 && (
-                        <span className="text-red-600 font-bold italic block">No files added!</span>
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-bold uppercase bg-emerald-50 text-[#008751] px-3 py-1.5 rounded-lg">
+                        Step 2: Manuscript Files
+                      </span>
+                      <button type="button" onClick={() => jumpToStep(2)} className="text-[11px] font-bold text-[#008751] hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition">
+                        Edit →
+                      </button>
+                    </div>
+                    <div className="pt-2 text-sm space-y-2 text-slate-700">
+                      {uploadedFiles.length > 0 ? (
+                        uploadedFiles.map((f) => (
+                          <div key={f.id} className="flex items-center gap-2">
+                            <Check className="w-4 h-4 text-[#008751] stroke-[3] shrink-0" />
+                            <span className="font-semibold text-slate-800 truncate">{f.fileName}</span>
+                            <span className="text-xs text-slate-500 shrink-0">({f.componentType})</span>
+                          </div>
+                        ))
+                      ) : (
+                        <span className="text-red-600 font-bold">⚠️ No files uploaded</span>
                       )}
                     </div>
                   </div>
 
                   {/* Category C: Metadata status */}
-                  <div className="bg-slate-50 border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs">
-                    <span className="text-xs font-mono font-bold uppercase bg-slate-200 px-2.5 py-1 rounded-lg text-slate-700">
-                      Scientific Metadata
-                    </span>
-
-                    <div className="pt-2 text-sm space-y-2 text-slate-700 font-normal leading-relaxed">
-                      <div className="truncate">Title: <em className="text-slate-900 font-bold italic">"{title}"</em></div>
-                      <div>Abstract length: <strong className="text-slate-900">{abstract.trim().split(/\s+/).length} words</strong></div>
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-bold uppercase bg-emerald-50 text-[#008751] px-3 py-1.5 rounded-lg">
+                        Step 3: Metadata
+                      </span>
+                      <button type="button" onClick={() => jumpToStep(3)} className="text-[11px] font-bold text-[#008751] hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition">
+                        Edit →
+                      </button>
+                    </div>
+                    <div className="pt-2 text-sm space-y-2">
+                      <div><strong>Title:</strong> <em className="text-slate-700">"{title || '(Not set)'}"</em></div>
+                      <div><strong>Abstract:</strong> <span className="text-slate-700">{abstract.trim() ? `${abstract.trim().split(/\s+/).length} words` : '(Not set)'}</span></div>
                     </div>
                   </div>
 
                   {/* Category D: Authors & suggestions */}
-                  <div className="bg-slate-50 border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs font-normal">
-                    <span className="text-xs font-mono font-bold uppercase bg-slate-200 px-2.5 py-1 rounded-lg text-slate-700">
-                      Team & Peer Suggestions
-                    </span>
-
-                    <div className="pt-2 text-sm space-y-2 text-slate-700">
-                      <div>Total Authors: <strong className="text-emerald-700 font-bold">{contributors.length}</strong></div>
-                      <div>Suggested Reviewers: <strong className="text-[#008751] font-bold">{reviewerSuggestions.length} candidates</strong></div>
-                      <div>Confidential Cover Letter: <strong className="text-slate-900 font-bold">{coverLetter.trim() ? `${coverLetter.length} chars` : 'Absent'}</strong></div>
+                  <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-3 shadow-xs hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-bold uppercase bg-emerald-50 text-[#008751] px-3 py-1.5 rounded-lg">
+                        Step 4: Team & Reviewers
+                      </span>
+                      <button type="button" onClick={() => jumpToStep(4)} className="text-[11px] font-bold text-[#008751] hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition">
+                        Edit →
+                      </button>
+                    </div>
+                    <div className="pt-2 text-sm space-y-2">
+                      <div><strong>Authors:</strong> <span className="text-emerald-700 font-bold">{contributors.length}</span></div>
+                      <div><strong>Suggested Reviewers:</strong> <span className="text-[#008751] font-bold">{reviewerSuggestions.length}</span></div>
+                      <div><strong>Cover Letter:</strong> <span className="text-slate-700">{coverLetter.trim() ? `${coverLetter.length} chars` : 'Not provided'}</span></div>
                     </div>
                   </div>
 
                 </div>
               </div>
 
+              </div>
+
               {/* Error message display */}
               {submitError && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-xl max-w-xl mx-auto space-y-2 text-center mt-4">
-                  <p className="text-xs font-semibold text-red-700">
-                    ⚠️ Submission Error
-                  </p>
-                  <p className="text-sm text-red-600 font-medium">
-                    {submitError}
-                  </p>
+                <div className="p-4 bg-red-50 border border-red-200 rounded-xl space-y-2 text-center">
+                  <p className="text-xs font-semibold text-red-700">⚠️ Submission Error</p>
+                  <p className="text-sm text-red-600 font-medium">{submitError}</p>
                 </div>
               )}
 
               {/* Success message display */}
               {submitSuccess && (
-                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl max-w-xl mx-auto space-y-2 text-center mt-4 animate-in fade-in">
-                  <p className="text-xs font-semibold text-emerald-700">
-                    ✅ Submission Successful
-                  </p>
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2 text-center animate-in fade-in">
+                  <p className="text-xs font-semibold text-emerald-700">✅ Submission Successful</p>
                   <p className="text-sm text-emerald-600 font-medium">
                     Your manuscript has been successfully submitted. Manuscript ID: <strong>{submittedManuscriptId}</strong>
                   </p>
@@ -2869,9 +2939,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
               )}
 
               {/* Explicit acknowledgement of finality */}
-              <div className="p-5 bg-slate-100/50 border border-dashed border-emerald-300 rounded-2xl max-w-xl mx-auto space-y-2 text-center mt-4">
+              <div className="p-5 bg-slate-100/50 border border-dashed border-emerald-300 rounded-2xl space-y-2 text-center">
                 <p className="text-xs text-gray-500 font-normal leading-relaxed">
-                  Clicking the button below verifies that you have verified conformity with our double-blind instructions and that all listed co-authors agree to this action.
+                  Clicking the Submit button verifies that you have verified conformity with our double-blind instructions and that all listed co-authors agree to this action.
                 </p>
               </div>
 
@@ -2987,6 +3057,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
             </div>
           )}
 
+          </div>
         </div>
 
         {/* ======================= COMPONENT ACTION STEER PATHS (FOOTER) ======================= */}
@@ -3066,6 +3137,37 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
         )}
 
       </main>
+
+      {/* Final confirmation gate -- the real submit_manuscript RPC only ever
+          fires from this modal's Confirm button, never from the step-8
+          "Next" click directly. */}
+      {showFinalConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-lg max-w-md w-full p-6 space-y-4 text-center">
+            <ShieldAlert className="w-10 h-10 text-[#008751] mx-auto" />
+            <h3 className="text-base font-black text-slate-900">Confirm Final Submission</h3>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Have you verified all the details? Once submitted, the manuscript will be sent for review. Do you want to submit?
+            </p>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowFinalConfirm(false)}
+                className="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg text-slate-700 font-bold text-xs hover:bg-slate-50 transition cursor-pointer"
+              >
+                Go Back &amp; Review
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowFinalConfirm(false); triggerSubmitFinal(); }}
+                className="flex-1 px-4 py-2.5 bg-[#008751] hover:bg-[#007043] text-white rounded-lg font-bold text-xs shadow-md transition cursor-pointer"
+              >
+                Yes, Submit Manuscript
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

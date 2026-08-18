@@ -4,7 +4,6 @@ import {
   uploadManuscriptFile,
   syncManuscriptFilesToSupabase,
   syncManuscriptDiscussionsToSupabase,
-  subscribeToManuscriptsRealtime,
   supabase
 } from '../lib/supabase';
 import {
@@ -205,182 +204,6 @@ export default function OjsSubmissionDetail({
     }
   };
 
-  // Interface for detailed tracking steps
-  interface WorkflowStageDetail {
-    id: string;
-    label: string;
-    status: 'completed' | 'active' | 'upcoming' | 'skipped';
-    description: string;
-    dateCompleted?: string | null;
-  }
-
-  // Generates complete 12-stage progress mapping automatically based on manuscript state
-  const getDetailedWorkflowState = (paper: any): WorkflowStageDetail[] => {
-    const m = paper.raw || {};
-    const status = m.status || 'SUBMITTED';
-    const hasReviewers = m.reviewers && m.reviewers.length > 0;
-    
-    // Core state flags computed dynamically
-    const isSubmitted = true; 
-    const isEditorAssigned = status !== 'SUBMITTED' && status !== 'DRAFT' || hasReviewers || m.editorsNotes;
-    const isReviewerInvitationSent = hasReviewers;
-    
-    const reviewersAccepted = m.reviewers && m.reviewers.some((r: any) => r.status === 'ACCEPTED' || r.status === 'SUBMITTED');
-    const isUnderReview = status === 'UNDER_REVIEW' && reviewersAccepted;
-    
-    const reviewersCompleted = m.reviewers && m.reviewers.some((r: any) => r.status === 'SUBMITTED');
-    const isReviewsReceived = reviewersCompleted;
-    
-    const isEditorDecisionPending = status === 'AWAITING_DECISION';
-    
-    const isRevisionRequired = (m.editorsNotes || '').includes('REVISE') || 
-                               (m.editorsNotes || '').includes('MINOR_REVISIONS') || 
-                               (m.editorsNotes || '').includes('MAJOR_REVISIONS') ||
-                               paper.stage === 'Revisions Requested' || 
-                               paper.stage === 'Revisions Submitted';
-                               
-    const isRevisedSubmitted = isRevisionRequired && (paper.stage === 'Revisions Submitted' || (m.editorsNotes || '').includes('revision uploaded'));
-    const isFinalReview = isRevisedSubmitted && status === 'UNDER_REVIEW';
-    
-    const isAccepted = status === 'ACCEPTED' || status === 'PUBLISHED';
-    const isProduction = status === 'ACCEPTED';
-    const isPublished = status === 'PUBLISHED';
-    const isRejected = status === 'REJECTED';
-
-    const stages: WorkflowStageDetail[] = [];
-
-    // 1. Submitted
-    stages.push({
-      id: 'submitted',
-      label: 'Submitted',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview || isReviewerInvitationSent || isEditorAssigned ? 'completed' : 'active',
-      description: 'Manuscript successfully registered and files uploaded to the journal database.',
-      dateCompleted: paper.receivedAt
-    });
-
-    // 2. Editor Assigned
-    stages.push({
-      id: 'editor_assigned',
-      label: 'Editor Assigned',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview || isReviewerInvitationSent ? 'completed' : (isEditorAssigned ? 'active' : 'upcoming'),
-      description: 'An editorial board member has been assigned to coordinate peer evaluation.',
-      dateCompleted: isEditorAssigned ? paper.receivedAt : null
-    });
-
-    // 3. Reviewer Invitation Sent
-    stages.push({
-      id: 'reviewer_invited',
-      label: 'Reviewer Invitation Sent',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview ? 'completed' : (isReviewerInvitationSent ? 'active' : 'upcoming'),
-      description: 'Formal double-blind peer referee requests dispatched to corresponding university experts.',
-      dateCompleted: isReviewerInvitationSent ? paper.receivedAt : null
-    });
-
-    // 4. Under Review
-    stages.push({
-      id: 'under_review',
-      label: 'Under Review',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived ? 'completed' : (isUnderReview ? 'active' : 'upcoming'),
-      description: 'Assigned peer reviewers are currently evaluating methodology, scientific merit, and ethical compliance.',
-      dateCompleted: isUnderReview ? paper.receivedAt : null
-    });
-
-    // 5. Reviews Received
-    stages.push({
-      id: 'reviews_received',
-      label: 'Reviews Received',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending ? 'completed' : (isReviewsReceived ? 'active' : 'upcoming'),
-      description: 'Completed evaluation reports received and logged. Minimum consensus thresholds achieved.',
-      dateCompleted: isReviewsReceived ? paper.receivedAt : null
-    });
-
-    // 6. Editor Decision Pending
-    stages.push({
-      id: 'decision_pending',
-      label: 'Editor Decision Pending',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired ? 'completed' : (isEditorDecisionPending ? 'active' : 'upcoming'),
-      description: 'Editorial board is weighing recommendations to finalize the manuscript decision.',
-      dateCompleted: isEditorDecisionPending ? paper.receivedAt : null
-    });
-
-    // 7. Minor / Major Revision
-    let revisionLabel = 'Minor Revision';
-    if ((m.editorsNotes || '').toLowerCase().includes('major') || (paper.title || '').toLowerCase().includes('major')) {
-      revisionLabel = 'Major Revision';
-    }
-    const revisionStatus = isAccepted || isPublished ? 'completed' : (isRevisedSubmitted ? 'completed' : (isRevisionRequired ? 'active' : 'skipped'));
-    stages.push({
-      id: 'revision_required',
-      label: revisionLabel,
-      status: revisionStatus,
-      description: 'Revisions required to address referee and editor feedback before publication clearance.',
-      dateCompleted: isRevisionRequired ? paper.receivedAt : null
-    });
-
-    // 8. Revised Manuscript Submitted
-    const revSubmittedStatus = isAccepted || isPublished ? 'completed' : (isRevisedSubmitted ? 'active' : (isRevisionRequired ? 'upcoming' : 'skipped'));
-    stages.push({
-      id: 'revised_submitted',
-      label: 'Revised Manuscript Submitted',
-      status: revSubmittedStatus,
-      description: 'Revised files and author reconciliation statement received by the editorial desk.',
-      dateCompleted: isRevisedSubmitted ? paper.receivedAt : null
-    });
-
-    // 9. Final Review
-    const finalReviewStatus = isAccepted || isPublished ? 'completed' : (isFinalReview ? 'active' : (isRevisedSubmitted ? 'upcoming' : 'skipped'));
-    stages.push({
-      id: 'final_review',
-      label: 'Final Review',
-      status: finalReviewStatus,
-      description: 'Editor-in-chief executing final validation checks on the revised manuscript.',
-      dateCompleted: isFinalReview ? paper.receivedAt : null
-    });
-
-    // 10. Accepted
-    stages.push({
-      id: 'accepted',
-      label: 'Accepted',
-      status: isPublished ? 'completed' : (isAccepted ? 'active' : 'upcoming'),
-      description: 'Manuscript approved for publication! Transitioning to typesetting and copyediting.',
-      dateCompleted: isAccepted ? paper.receivedAt : null
-    });
-
-    // 11. Production
-    stages.push({
-      id: 'production',
-      label: 'Production',
-      status: isPublished ? 'completed' : (isProduction ? 'active' : 'upcoming'),
-      description: 'Copyediting, XML tagging (JATS standard), and Galley proof creation in progress.',
-      dateCompleted: isProduction ? paper.receivedAt : null
-    });
-
-    // 12. Published
-    stages.push({
-      id: 'published',
-      label: 'Published',
-      status: isPublished ? 'active' : 'upcoming',
-      description: 'Galley release launched. Digital Object Identifier (DOI) registered with Crossref.',
-      dateCompleted: isPublished ? paper.receivedAt : null
-    });
-
-    if (isRejected) {
-      stages.forEach(st => {
-        if (['revision_required', 'revised_submitted', 'final_review', 'accepted', 'production', 'published'].includes(st.id)) {
-          st.status = 'skipped';
-        }
-      });
-      stages.push({
-        id: 'rejected',
-        label: 'Rejected',
-        status: 'active',
-        description: 'The manuscript was declined for publication by the editorial board.',
-        dateCompleted: paper.receivedAt
-      });
-    }
-
-    return stages;
-  };
 
   const getDynamicProgress = () => {
     const rawStatus = paper.raw?.status || 'SUBMITTED';
@@ -640,22 +463,10 @@ export default function OjsSubmissionDetail({
     }
   }, [discussionThreads, paper.id]);
 
-  // Realtime subscription for live database synchronization
-  useEffect(() => {
-    const unsubscribe = subscribeToManuscriptsRealtime((updatedMs) => {
-      if (updatedMs.id === paper?.id || updatedMs.id === `OJS-${paper?.id}` || updatedMs.id.replace('OJS-', '') === paper?.id) {
-        if (updatedMs.uploadedFiles && Array.isArray(updatedMs.uploadedFiles) && updatedMs.uploadedFiles.length > 0) {
-          setUploadedFiles(updatedMs.uploadedFiles);
-        }
-        if (updatedMs.discussions && Array.isArray(updatedMs.discussions) && updatedMs.discussions.length > 0) {
-          setDiscussionThreads(updatedMs.discussions);
-        }
-      }
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, [paper?.id]);
+  // Note: file/discussion realtime sync is already handled by the
+  // manuscript-id-filtered subscribeToManuscriptDetails() effect above
+  // (dedicated files/discussions channels) -- a second unfiltered
+  // manuscripts-table subscription here would be a duplicate.
 
   // View state: 'DASHBOARD' | 'ADD_DISCUSSION' | 'VIEW_THREAD'
   const [viewState, setViewState] = useState<'DASHBOARD' | 'ADD_DISCUSSION' | 'VIEW_THREAD'>('DASHBOARD');
@@ -675,9 +486,13 @@ export default function OjsSubmissionDetail({
   const [threadReplyText, setThreadReplyText] = useState("");
   const [threadReplyAttached, setThreadReplyAttached] = useState<any[]>([]);
 
-  // Derived user roles & labels
-  const authorDisplayLabel = currentUser ? `${currentUser.name}, Author` : "Dr. Ada Lovelace, Author";
-  const editorDisplayLabel = "Kellye Milhorn, Layout Editor, Proofreader";
+  // Derived user roles & labels -- sourced from real assignment/profile data,
+  // never a placeholder person's name.
+  const assignedEditorProfile = manuscriptDetails?.editorAssignments?.[0]
+    ? userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id)
+    : null;
+  const authorDisplayLabel = currentUser ? `${currentUser.name}, Author` : 'Author';
+  const editorDisplayLabel = assignedEditorProfile ? `${assignedEditorProfile.name}, Editor` : 'No editor assigned yet';
 
   // Handle template selection
   const handleTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -703,15 +518,15 @@ export default function OjsSubmissionDetail({
     const newThread = {
       id: "thread-" + Date.now(),
       subject: subject.trim(),
-      initiator: currentUser?.name || "Dr. Ada Lovelace",
+      initiator: currentUser?.name || 'Author',
       participants: [
-        ...(participants.author ? [currentUser?.name || "Dr. Ada Lovelace"] : []),
-        ...(participants.editor ? ["Kellye Milhorn (Editor)"] : [])
+        ...(participants.author ? [currentUser?.name || 'Author'] : []),
+        ...(participants.editor && assignedEditorProfile ? [`${assignedEditorProfile.name} (Editor)`] : [])
       ],
       messages: [
         {
           id: "msg-" + Date.now(),
-          sender: currentUser?.name || "Dr. Ada Lovelace",
+          sender: currentUser?.name || 'Author',
           senderRole: "Author",
           text: message,
           timestamp: new Date().toISOString(),
@@ -743,7 +558,7 @@ export default function OjsSubmissionDetail({
           ...t.messages,
           {
             id: "msg-" + Date.now(),
-            sender: currentUser?.name || "Dr. Ada Lovelace",
+            sender: currentUser?.name || 'Author',
             senderRole: "Author",
             text: threadReplyText,
             timestamp: new Date().toISOString(),
@@ -809,31 +624,72 @@ export default function OjsSubmissionDetail({
     }
   };
 
-  // Simulation upload file helper
-  const handleSimulateUpload = (forReply = false, forMainList = false) => {
-    const mockFiles = [
-      { name: "supplementary_charts_v2.pdf", size: "1.4 MB", type: "Supplementary File" },
-      { name: "response_to_reviewers.docx", size: "625 KB", type: "Manuscript" },
-      { name: "experimental_dataset.xlsx", size: "3.1 MB", type: "Supplementary File" },
-      { name: "high_res_methodology_flow.png", size: "900 KB", type: "Figures" }
-    ];
-    const picked = mockFiles[Math.floor(Math.random() * mockFiles.length)];
-    const filename = `${Date.now().toString().slice(-4)}_${picked.name}`;
+  // Builds the Submission Timeline strictly from real workflow records
+  // (manuscript_status_history / editor_assignments / reviewer_assignments).
+  // A step only shows a completion date when the underlying record actually
+  // has one -- never today's date, never a fabricated placeholder.
+  const getRealSubmissionTimeline = (details: AuthorManuscriptDetails | null): { label: string; sub: string; status: 'completed' | 'active' | 'pending' }[] => {
+    if (!details) return [];
+    const { manuscript, editorAssignments, reviewerAssignments, statusHistory } = details;
+    const editorAssignment = editorAssignments[0] || null;
+    const reviewersInvited = reviewerAssignments.length > 0;
+    const reviewersAccepted = reviewerAssignments.filter((r) => r.status === 'ACCEPTED' || r.status === 'SUBMITTED');
+    const reviewsSubmitted = reviewerAssignments.filter((r) => r.status === 'SUBMITTED');
+    const allReviewsIn = reviewersInvited && reviewsSubmitted.length === reviewerAssignments.length;
+    const decisionEntry = statusHistory.find((h) => ['ACCEPTED', 'REJECTED'].includes(h.to_status));
+    const isPublished = manuscript.status === 'PUBLISHED';
 
-    if (forReply) {
-      setThreadReplyAttached([...threadReplyAttached, { name: filename, size: picked.size }]);
-    } else if (forMainList) {
-      const newFile = {
-        name: filename,
-        type: picked.type,
-        size: picked.size,
-        date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-      };
-      setUploadedFiles(prev => [...prev, newFile]);
-      alert(`Successfully uploaded "${filename}" into active files database.`);
-    } else {
-      setAttachedFiles([...attachedFiles, { name: filename, size: picked.size }]);
-    }
+    const fmt = (iso: string | null) => (iso ? formatDateTime(iso) : '');
+
+    return [
+      {
+        label: 'Manuscript Submitted',
+        sub: manuscript.submitted_at ? fmt(manuscript.submitted_at) : 'Not Started',
+        status: manuscript.submitted_at ? 'completed' : 'pending',
+      },
+      {
+        label: 'Editor Assigned',
+        sub: editorAssignment ? fmt(editorAssignment.assigned_at) : 'Not Started',
+        status: editorAssignment ? 'completed' : 'pending',
+      },
+      {
+        label: 'Editor Accepted',
+        sub: editorAssignment?.status === 'ACCEPTED' ? fmt(editorAssignment.responded_at) : editorAssignment ? 'Awaiting editor response' : 'Not Started',
+        status: editorAssignment?.status === 'ACCEPTED' ? 'completed' : editorAssignment ? 'active' : 'pending',
+      },
+      {
+        label: 'Editor Evaluation',
+        sub: editorAssignment?.assessment_status === 'SUBMITTED' ? fmt(editorAssignment.assessment_submitted_at) : editorAssignment?.status === 'ACCEPTED' ? 'In Progress' : 'Not Started',
+        status: editorAssignment?.assessment_status === 'SUBMITTED' ? 'completed' : editorAssignment?.status === 'ACCEPTED' ? 'active' : 'pending',
+      },
+      {
+        label: 'Reviewers Assigned',
+        sub: reviewersInvited
+          ? fmt(reviewerAssignments.map((r) => r.invited_at).sort()[0])
+          : 'Not Started',
+        status: reviewersInvited ? 'completed' : 'pending',
+      },
+      {
+        label: 'Reviewers Accepted',
+        sub: reviewersInvited ? `${reviewersAccepted.length} of ${reviewerAssignments.length} accepted` : 'Not Started',
+        status: reviewersInvited && reviewersAccepted.length === reviewerAssignments.length ? 'completed' : reviewersInvited ? 'active' : 'pending',
+      },
+      {
+        label: 'Reviews Completed',
+        sub: reviewersInvited ? (allReviewsIn ? fmt(reviewsSubmitted.map((r) => r.submitted_at).sort().slice(-1)[0]) : `${reviewsSubmitted.length} of ${reviewerAssignments.length} submitted`) : 'Not Started',
+        status: allReviewsIn ? 'completed' : reviewersInvited ? 'active' : 'pending',
+      },
+      {
+        label: 'Decision',
+        sub: decisionEntry ? `${decisionEntry.to_status.replace(/_/g, ' ')} – ${fmt(decisionEntry.created_at)}` : 'Pending',
+        status: decisionEntry ? 'completed' : 'pending',
+      },
+      {
+        label: 'Published',
+        sub: isPublished && manuscript.published_at ? fmt(manuscript.published_at) : 'Not Started',
+        status: isPublished ? 'completed' : 'pending',
+      },
+    ];
   };
 
   const isSubmissionDashboard = activeTab === 'SUBMISSION' && viewState === 'DASHBOARD';
@@ -996,9 +852,9 @@ export default function OjsSubmissionDetail({
                 {/* Profile Avatar Block */}
                 <div className="flex items-center gap-2 cursor-pointer hover:opacity-90 select-none pl-2 border-l border-emerald-200">
                   <div className="w-9 h-9 rounded-full bg-[#008751] text-white font-bold text-xs flex items-center justify-center font-mono shadow-xs border border-white">
-                    AG
+                    {(currentUser?.name || 'U').split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase()}
                   </div>
-                  <span className="text-[14px] font-semibold text-black font-sans hidden sm:inline">Akshaya G</span>
+                  <span className="text-[14px] font-semibold text-black font-sans hidden sm:inline">{currentUser?.name || 'Author'}</span>
                   <ChevronDown className="w-4 h-4 text-slate-900 stroke-[2.5]" />
                 </div>
               </div>
@@ -1020,22 +876,24 @@ export default function OjsSubmissionDetail({
                       Manuscript ID: #{paper.id || "N/A"}
                     </span>
                     <h2 className="text-white text-[18px] font-semibold font-sans tracking-tight leading-snug drop-shadow-xs">
-                      {paper.title || "Artificial Intelligence in Healthcare"}
+                      {manuscriptDetails?.manuscript.title || paper.title || 'Untitled manuscript'}
                     </h2>
 
                     {/* Metadata line - compact horizontal layout */}
                     <div className="flex flex-wrap items-center gap-3 pt-2 text-[11px] text-emerald-100 font-medium">
                       <div className="flex items-center gap-1.5 bg-black/15 px-2.5 py-1 rounded-lg border border-white/5">
                         <Calendar className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-                        <span>{paper.receivedAt || "08 June 2026"}</span>
+                        <span>{manuscriptDetails?.manuscript.submitted_at ? formatDateTime(manuscriptDetails.manuscript.submitted_at) : 'Not submitted'}</span>
                       </div>
-                      <div className="flex items-center gap-1.5 bg-black/15 px-2.5 py-1 rounded-lg border border-white/5">
-                        <BookOpen className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-                        <span>Journal of AI in Medicine</span>
-                      </div>
+                      {manuscriptDetails?.manuscript.language && (
+                        <div className="flex items-center gap-1.5 bg-black/15 px-2.5 py-1 rounded-lg border border-white/5">
+                          <BookOpen className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                          <span>{manuscriptDetails.manuscript.language}</span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-1.5 bg-black/15 px-2.5 py-1 rounded-lg border border-white/5">
                         <User className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-                        <span>{paper.author || "Akshaya G"}</span>
+                        <span>{manuscriptDetails?.manuscript.author_name || paper.author || 'Unknown author'}</span>
                       </div>
                     </div>
                   </div>
@@ -1046,7 +904,7 @@ export default function OjsSubmissionDetail({
                       <span className="text-slate-800 text-[10px] font-semibold uppercase tracking-wider block">Status</span>
                       <span className="bg-[#e6f7ef] text-[#008751] border border-emerald-500/30 px-3 py-1 rounded-full text-[12px] font-bold inline-flex items-center gap-1 shadow-3xs">
                         <span className="w-2 h-2 rounded-full bg-[#008751]" />
-                        Submitted
+                        {(manuscriptDetails?.manuscript.status || paper.raw?.status || 'SUBMITTED').replace(/_/g, ' ')}
                       </span>
                     </div>
 
@@ -1251,14 +1109,6 @@ export default function OjsSubmissionDetail({
                             <Plus className="w-3.5 h-3.5 text-white stroke-[3]" />
                             <span className="hidden sm:inline">{isUploading ? "Uploading..." : "Upload"}</span>
                             <span className="sm:hidden">Upload</span>
-                          </button>
-
-                          <button
-                            onClick={() => handleSimulateUpload(false, true)}
-                            title="Add demo file"
-                            className="border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[#005a36] text-[11px] font-bold px-2 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-2xs"
-                          >
-                            <span>+ Demo</span>
                           </button>
                         </div>
                       </div>
@@ -1595,36 +1445,11 @@ export default function OjsSubmissionDetail({
                             OFFICIAL PEER COMMUNICATION STREAM
                           </div>
 
-                          {/* Base messages */}
-                          <div className="flex flex-col max-w-[90%] rounded-2xl p-4 shadow-sm relative leading-relaxed z-10 transition self-start bg-white text-black rounded-tl-none border-2 border-emerald-100/50 text-left">
-                            <div className="flex items-center gap-2 mb-1.5">
-                              <span className="text-[12px] font-bold block text-sky-800">Dr. John Smith</span>
-                              <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded font-sans tracking-wider border-2 bg-emerald-50 border-emerald-200 text-[#004d2e]">EDITOR</span>
-                            </div>
-                            <p className="text-[14px] font-medium text-black leading-relaxed font-sans">
-                              Dear Author, Please confirm that the manuscript complies with the journal guidelines.
-                            </p>
-                            <div className="flex items-center justify-end gap-1 mt-2 text-slate-800 select-none border-t pt-1.5 border-emerald-50">
-                              <span className="text-[10px] font-medium font-mono">10:30 AM</span>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col max-w-[90%] rounded-2xl p-4 shadow-sm relative leading-relaxed z-10 transition self-end bg-[#e8fbf1] text-black rounded-tr-none border-2 border-[#b8ebd0] text-left">
-                            <div className="flex items-center gap-2 mb-1.5">
-                              <span className="text-[12px] font-bold block text-[#004d2e]">Akshaya G</span>
-                              <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded font-sans tracking-wider border-2 bg-[#d1f2e1] border-[#a2ecd5] text-emerald-800">AUTHOR</span>
-                            </div>
-                            <p className="text-[14px] font-medium text-black leading-relaxed font-sans">
-                              Thank you for your message. Yes, the manuscript follows all the guidelines.
-                            </p>
-                            <div className="flex items-center justify-end gap-1 mt-2 text-slate-800 select-none border-t pt-1.5 border-emerald-100">
-                              <span className="text-[10px] font-medium font-mono">11:02 AM</span>
-                              <span className="text-[#008751] text-[12px] leading-none font-bold tracking-tighter" title="Read status">✓✓</span>
-                            </div>
-                          </div>
-
-                          {/* Additional dynamic user messages */}
-                          {whatsappMessages.slice(2).map((msg) => (
+                          {/* Real messages loaded from Supabase (manuscript_discussions) */}
+                          {whatsappMessages.length === 0 && (
+                            <p className="text-center text-xs text-slate-400 py-6">No messages yet.</p>
+                          )}
+                          {whatsappMessages.map((msg) => (
                             <div
                               key={msg.id}
                               className={`flex flex-col max-w-[90%] rounded-2xl p-4 shadow-sm relative leading-relaxed z-10 transition text-left ${
@@ -1669,7 +1494,7 @@ export default function OjsSubmissionDetail({
                           </button>
 
                           <button
-                            onClick={() => handleSimulateUpload(false, true)}
+                            onClick={() => fileInputRef.current?.click()}
                             className="text-slate-900 hover:text-emerald-700 transition cursor-pointer p-1.5 rounded-lg hover:bg-emerald-100"
                             title="Attach manuscript file"
                           >
@@ -1836,7 +1661,7 @@ export default function OjsSubmissionDetail({
                                 Formatting & Style Desk
                               </h4>
                               <p className="text-[10px] text-sky-200 font-medium">
-                                Kellye Milhorn (Editor) • Away
+                                {assignedEditorProfile ? `${assignedEditorProfile.name} (Editor)` : 'No editor assigned yet'}
                               </p>
                             </div>
                           </div>
@@ -1954,7 +1779,7 @@ export default function OjsSubmissionDetail({
                                 <div
                                   key={msg.id}
                                   className={`flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition text-left ${
-                                    msg.sender === (currentUser?.name || "Akshaya G")
+                                    msg.sender === (currentUser?.name || 'Author')
                                       ? 'self-end bg-[#d9fdd3] text-slate-900 rounded-tr-none border border-[#c6ecbf]'
                                       : 'self-start bg-white text-slate-900 rounded-tl-none border border-slate-200'
                                   }`}
@@ -1964,7 +1789,7 @@ export default function OjsSubmissionDetail({
                                       {msg.sender}
                                     </span>
                                     <span className="text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border bg-slate-100 border-slate-200 text-slate-500">
-                                      {msg.sender === (currentUser?.name || "Akshaya G") ? "AUTHOR" : "PARTICIPANT"}
+                                      {msg.sender === (currentUser?.name || 'Author') ? "AUTHOR" : "PARTICIPANT"}
                                     </span>
                                   </div>
                                   <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">{msg.text}</p>
@@ -1996,7 +1821,7 @@ export default function OjsSubmissionDetail({
                                             ...t.messages,
                                             {
                                               id: "msg-" + Date.now(),
-                                              sender: currentUser?.name || "Akshaya G",
+                                              sender: currentUser?.name || 'Author',
                                               senderRole: "Author",
                                               text: val.trim(),
                                               timestamp: new Date().toISOString()
@@ -2043,14 +1868,11 @@ export default function OjsSubmissionDetail({
                   <h3 className="text-black text-[18px] font-semibold tracking-tight mb-5 border-b pb-3 border-emerald-100">Submission Timeline</h3>
                   
                   <div className="relative pl-5 ml-2.5 space-y-6 text-xs border-l-2 border-emerald-100">
-                    {[
-                      { label: "Manuscript Submitted", sub: "08 June 2026, 10:20 AM", status: "completed" },
-                      { label: "Editor Assigned", sub: "08 June 2026, 11:15 AM", status: "active" },
-                      { label: "Reviewer Invited", sub: "Pending", status: "pending" },
-                      { label: "Under Review", sub: "Pending", status: "pending" },
-                      { label: "Decision", sub: "Pending", status: "pending" },
-                      { label: "Production", sub: "Pending", status: "pending" }
-                    ].map((item, idx) => {
+                    {loadingDetails ? (
+                      <p className="text-slate-400 text-xs">Loading timeline...</p>
+                    ) : getRealSubmissionTimeline(manuscriptDetails).length === 0 ? (
+                      <p className="text-slate-400 text-xs">No timeline data available.</p>
+                    ) : getRealSubmissionTimeline(manuscriptDetails).map((item, idx) => {
                       let markerStyle = "bg-white border-slate-300 text-slate-400";
                       let textStyle = "text-slate-950 font-bold text-[14px]";
                       let subStyle = "text-slate-700 font-bold text-[12px] font-mono";
@@ -2301,7 +2123,7 @@ export default function OjsSubmissionDetail({
 
                         <button
                           id="upload-file-button"
-                          onClick={() => handleSimulateUpload(false)}
+                          onClick={() => fileInputRef.current?.click()}
                           className="flex items-center gap-2 border border-[#008751] text-[#008751] hover:bg-emerald-50 px-4 py-2 text-xs font-extrabold rounded-lg transition duration-150 cursor-pointer shadow-xs select-none"
                         >
                           <Download className="w-3.5 h-3.5 text-[#008751] rotate-180" />
@@ -2321,103 +2143,77 @@ export default function OjsSubmissionDetail({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-xs">
-                          <tr className="hover:bg-slate-50/50 transition duration-100">
-                            
-                            {/* file index */}
-                            <td className="px-5 py-5 text-center font-mono font-bold text-slate-400">
-                              1511
-                            </td>
+                          {uploadedFiles.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-5 py-10 text-center text-slate-400 font-medium">
+                                No files uploaded
+                              </td>
+                            </tr>
+                          ) : uploadedFiles.map((file, idx) => (
+                            <tr key={file.id || idx} className="hover:bg-slate-50/50 transition duration-100">
 
-                            {/* file link details */}
-                            <td className="px-5 py-5">
-                              <div className="flex items-center gap-3">
-                                <FileText className="w-5 h-5 text-rose-500 shrink-0" />
-                                <div className="text-left">
+                              {/* file index */}
+                              <td className="px-5 py-5 text-center font-mono font-bold text-slate-400">
+                                {idx + 1}
+                              </td>
+
+                              {/* file link details */}
+                              <td className="px-5 py-5">
+                                <div className="flex items-center gap-3">
+                                  <FileText className="w-5 h-5 text-rose-500 shrink-0" />
+                                  <div className="text-left">
+                                    <button
+                                      id="download-asset-handle-btn"
+                                      onClick={() => {
+                                        setPreviewFileName(file.name);
+                                        setPreviewFileType(file.type || 'Manuscript');
+                                        setPreviewFileSize(file.size || '');
+                                        setPreviewPublicUrl(file.publicUrl || file.url || '');
+                                        setPreviewModalOpen(true);
+                                      }}
+                                      className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-sm text-left transition"
+                                    >
+                                      {file.name}
+                                    </button>
+                                    <span className="block text-[10px] text-slate-400 font-medium mt-0.5">{file.size ? `Size: ${file.size}` : ''}</span>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* upload date */}
+                              <td className="px-5 py-5 text-center font-mono text-slate-450 font-semibold text-slate-500">
+                                {file.date || (file.uploadedAt ? formatDate(file.uploadedAt) : '--')}
+                              </td>
+
+                              {/* File type badge */}
+                              <td className="px-5 py-5 text-center">
+                                <span className="inline-block bg-[#eefcf4] text-[#008751] border border-emerald-100 px-3 py-1 font-bold text-[10.5px] rounded-full uppercase tracking-wider font-mono">
+                                  {file.type || 'File'}
+                                </span>
+                              </td>
+
+                              {/* Options ellipsis */}
+                              <td className="px-5 py-5 text-center relative">
+                                <div className="inline-flex items-center gap-2">
                                   <button
-                                    id="download-asset-handle-btn"
+                                    id="view-file-quick"
                                     onClick={() => {
-                                      setPreviewFileName(editingFileName);
-                                      setPreviewFileType('Manuscript');
-                                      setPreviewFileSize('1.24 MB');
+                                      setPreviewFileName(file.name);
+                                      setPreviewFileType(file.type || 'Manuscript');
+                                      setPreviewFileSize(file.size || '');
+                                      setPreviewPublicUrl(file.publicUrl || file.url || '');
                                       setPreviewModalOpen(true);
                                     }}
-                                    className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-sm text-left transition"
+                                    className="p-1.5 bg-slate-100 hover:bg-[#eefcf4] text-slate-500 hover:text-[#008751] rounded-lg transition cursor-pointer"
+                                    title="View file"
                                   >
-                                    {editingFileName}
-                                  </button>
-                                  <span className="block text-[10px] text-slate-400 font-medium mt-0.5">Size: 1.24 MB</span>
-                                </div>
-                              </div>
-                            </td>
-
-                            {/* upload date */}
-                            <td className="px-5 py-5 text-center font-mono text-slate-450 font-semibold text-slate-500">
-                              {paper.receivedAt || "2026-06-08"}
-                            </td>
-
-                            {/* Article Text teal representation badge */}
-                            <td className="px-5 py-5 text-center">
-                              <span className="inline-block bg-[#eefcf4] text-[#008751] border border-emerald-100 px-3 py-1 font-bold text-[10.5px] rounded-full uppercase tracking-wider font-mono">
-                                Article Text
-                              </span>
-                            </td>
-
-                            {/* Options ellipsis */}
-                            <td className="px-5 py-5 text-center relative">
-                              <div className="inline-flex items-center gap-2">
-                                <button
-                                  id="view-file-quick"
-                                  onClick={() => {
-                                    setPreviewFileName(editingFileName);
-                                    setPreviewFileType('Manuscript');
-                                    setPreviewFileSize('1.24 MB');
-                                    setPreviewModalOpen(true);
-                                  }}
-                                  className="p-1.5 bg-slate-100 hover:bg-[#eefcf4] text-slate-500 hover:text-[#008751] rounded-lg transition cursor-pointer"
-                                  title="View galley document"
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </button>
-                                <button
-                                  id="actions-ellipsis-button"
-                                  onClick={() => setActiveFileDropdown(!activeFileDropdown)}
-                                  className={`p-1.5 rounded-lg border text-slate-500 hover:bg-slate-50 transition cursor-pointer ${
-                                    activeFileDropdown ? 'bg-slate-100 scale-95 border-slate-300' : 'border-slate-200 bg-white'
-                                  }`}
-                                >
-                                  <MoreHorizontal className="w-4 h-4" />
-                                </button>
-                              </div>
-
-                              {activeFileDropdown && (
-                                <div className="absolute right-5 top-12 w-32 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1.5 animate-in fade-in zoom-in-95 duration-100 text-left">
-                                  <button
-                                    id="menu-edit-name-btn"
-                                    onClick={() => {
-                                      setActiveFileDropdown(false);
-                                      setShowFileEditModal(true);
-                                    }}
-                                    className="w-full text-left font-bold text-slate-700 hover:bg-slate-50 hover:text-slate-900 px-4 py-2 transition text-xs flex items-center gap-2 cursor-pointer"
-                                  >
-                                    <SquarePen className="w-3.5 h-3.5 text-slate-400" />
-                                    <span>Edit Name</span>
-                                  </button>
-                                  <button
-                                    id="menu-delete-file-btn"
-                                    onClick={() => {
-                                      setActiveFileDropdown(false);
-                                      alert("Scholarly article text deleted in memory. The metadata persists.");
-                                    }}
-                                    className="w-full text-left font-bold text-red-650 text-red-600 hover:bg-red-50 px-4 py-2 transition text-xs flex items-center gap-2 cursor-pointer border-t border-slate-100"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                    <span>Delete</span>
+                                    <Eye className="w-4 h-4" />
                                   </button>
                                 </div>
-                              )}
-                            </td>
+                              </td>
 
-                          </tr>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
 
@@ -2647,7 +2443,7 @@ export default function OjsSubmissionDetail({
                           <div className="flex items-center gap-2 flex-wrap">
                             <button
                               type="button"
-                              onClick={() => handleSimulateUpload(true)}
+                              onClick={() => fileInputRef.current?.click()}
                               className="text-slate-700 hover:text-slate-900 bg-white p-1.5 px-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-100 transition font-bold font-mono tracking-wide flex items-center gap-1.5 text-[10.5px]"
                             >
                               <Paperclip className="w-4 h-4 text-slate-400" />
@@ -2813,7 +2609,7 @@ export default function OjsSubmissionDetail({
 
                             <button
                               type="button"
-                              onClick={() => handleSimulateUpload(false)}
+                              onClick={() => fileInputRef.current?.click()}
                               className="text-[10.5px] text-[#008751] hover:underline font-extrabold flex items-center gap-1 px-1 rounded cursor-pointer font-mono"
                             >
                               <Paperclip className="w-3.5 h-3.5" />
@@ -2844,7 +2640,7 @@ export default function OjsSubmissionDetail({
                           <div className="flex items-center gap-1.5 text-[10px]">
                             <button
                               type="button"
-                              onClick={() => handleSimulateUpload(false)}
+                              onClick={() => fileInputRef.current?.click()}
                               className="bg-white hover:bg-slate-100 border text-[#008751] px-2.5 py-1 rounded shadow-inner font-mono font-bold tracking-wide cursor-pointer transition flex items-center gap-0.5"
                             >
                               <Search className="w-3 h-3 text-[#008751]" />
@@ -2852,14 +2648,14 @@ export default function OjsSubmissionDetail({
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleSimulateUpload(false)}
+                              onClick={() => fileInputRef.current?.click()}
                               className="bg-white hover:bg-slate-100 border text-[#008751] px-2.5 py-1 rounded shadow-inner font-mono font-bold tracking-wide cursor-pointer transition"
                             >
                               <span>Upload File</span>
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleSimulateUpload(false)}
+                              onClick={() => fileInputRef.current?.click()}
                               className="bg-white hover:bg-slate-100 border text-[#008751] px-2.5 py-1 rounded shadow-inner font-mono font-bold tracking-wide cursor-pointer transition"
                             >
                               <span>Select Files</span>
@@ -3098,11 +2894,17 @@ export default function OjsSubmissionDetail({
                   {/* Detailed 12-stage academic tracker timeline */}
                   <div className="space-y-4 text-left">
                     <div className="relative pl-5 border-l border-slate-200 ml-2.5 space-y-5 text-xs">
-                      {getDetailedWorkflowState(paper).map((stage) => {
-                        const isDone = stage.status === 'completed';
-                        const isActive = stage.status === 'active';
-                        const isUpcoming = stage.status === 'upcoming';
-                        const isSkipped = stage.status === 'skipped';
+                      {getRealSubmissionTimeline(manuscriptDetails).map((realStage) => {
+                        const stage = {
+                          id: realStage.label,
+                          label: realStage.label,
+                          description: realStage.sub,
+                          dateCompleted: realStage.status === 'completed' ? realStage.sub : null,
+                        };
+                        const isDone = realStage.status === 'completed';
+                        const isActive = realStage.status === 'active';
+                        const isUpcoming = realStage.status === 'pending';
+                        const isSkipped = false;
 
                         let bulletColor = "bg-white border-slate-200 text-slate-350";
                         let textColor = "text-slate-400";
@@ -3168,17 +2970,17 @@ export default function OjsSubmissionDetail({
 
                 <div className="flex flex-col space-y-1 text-left">
                   <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold font-mono">Submitted On</span>
-                  <strong className="text-slate-800 font-extrabold font-mono text-xs">{paper.receivedAt || "2026-06-08"}</strong>
+                  <strong className="text-slate-800 font-extrabold font-mono text-xs">{manuscriptDetails?.manuscript.submitted_at ? formatDate(manuscriptDetails.manuscript.submitted_at) : '--'}</strong>
                 </div>
 
                 <div className="flex flex-col space-y-1 text-left">
                   <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold font-mono">Last Updated</span>
-                  <strong className="text-slate-800 font-extrabold font-mono text-xs">{paper.receivedAt || "2026-06-08"}</strong>
+                  <strong className="text-slate-800 font-extrabold font-mono text-xs">{manuscriptDetails?.manuscript.updated_at ? formatDate(manuscriptDetails.manuscript.updated_at) : '--'}</strong>
                 </div>
 
                 <div className="flex flex-col space-y-1 text-left">
                   <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold font-mono">Submission Files</span>
-                  <strong className="text-slate-800 font-extrabold font-mono text-xs">1 file</strong>
+                  <strong className="text-slate-800 font-extrabold font-mono text-xs">{uploadedFiles.length} file{uploadedFiles.length === 1 ? '' : 's'}</strong>
                 </div>
 
               </div>

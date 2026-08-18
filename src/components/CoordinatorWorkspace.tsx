@@ -6,11 +6,12 @@ import {
   ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, SuggestedReviewerRow, ProfileRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getStatusHistory, getSuggestedReviewers,
   listActiveProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished,
-  subscribeToManuscripts, PublishDecision, getRevisions
+  subscribeToManuscripts, PublishDecision, getRevisions, getReviewerAssignmentCounts
 } from '../lib/workflow';
 import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
+import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity } from 'lucide-react';
 
 interface CoordinatorWorkspaceProps {
@@ -52,6 +53,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [pendingApprovals, setPendingApprovals] = useState<ProfileRow[]>([]);
   const [editorialBoardProfiles, setEditorialBoardProfiles] = useState<ProfileRow[]>([]);
   const [reviewerProfiles, setReviewerProfiles] = useState<ProfileRow[]>([]);
+  const [reviewerAssignmentCounts, setReviewerAssignmentCounts] = useState<Record<string, { invited: number; accepted: number; completed: number }>>({});
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('ALL');
   const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS'>('MANUSCRIPT_QUEUE');
@@ -248,6 +250,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
       setPendingApprovals(approvals);
       setEditorialBoardProfiles(editors);
       setReviewerProfiles(reviewers);
+      setReviewerAssignmentCounts(await getReviewerAssignmentCounts(reviewers.map((r) => r.id)));
     } finally {
       setLoading(false);
     }
@@ -412,10 +415,12 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
             ) : isReviewersSection ? (
               <ReviewerDirectoryScreen
                 profiles={filteredReviewers}
+                assignmentCounts={reviewerAssignmentCounts}
                 loading={loading}
                 search={reviewerSearch}
                 onSearch={setReviewerSearch}
                 onInviteReviewer={handleOpenReviewerInvite}
+                onReviewerDetails={setSelectedEditorForDetails}
               />
             ) : isReportsSection ? (
               <ReportsAnalyticsScreen totalCount={totalCount} stageCounts={stageCounts} pendingApprovals={pendingApprovals.length} editors={editorialBoardProfiles.length} reviewers={reviewerProfiles.length} />
@@ -613,18 +618,6 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
   const associateEditorsCount = profiles.filter((p) => (p.role || '').toLowerCase().includes('associate')).length;
   const sectionEditorsCount = profiles.filter((p) => (p.role || '').toLowerCase().includes('section')).length;
 
-  const disciplineForProfile = (profile: ProfileRow, index: number) => {
-    const name = (profile.name || '').toLowerCase();
-    if (name.includes('elizabeth') || name.includes('sarah')) return 'AI in Healthcare';
-    if (name.includes('hiroshi') || name.includes('chen')) return 'Medical Imaging';
-    if (name.includes('arjun') || name.includes('maria')) return 'Machine Learning';
-    if (name.includes('james')) return 'Bioinformatics';
-    return ['AI in Healthcare', 'Medical Imaging', 'Machine Learning', 'Bioinformatics', 'Data Science'][index % 5];
-  };
-
-  const joinDates = ['Jan 15, 2024', 'Feb 20, 2024', 'Mar 10, 2024', 'Apr 05, 2024', 'May 12, 2024', 'Jun 20, 2026', 'Dec 01, 2023'];
-  const lastActives = ['2 hours ago', '1 day ago', '3 hours ago', '5 days ago', '2 days ago', '-', '60 days ago'];
-
   const filteredProfiles = profiles.filter((profile) => {
     const role = (profile.role || '').toLowerCase();
     if (activeTab === 'EDITORS') return ['editor-in-chief', 'editorial board', 'editor'].includes(role);
@@ -713,26 +706,21 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
                 <tr>
                   <th className="px-4 py-3">Member</th>
                   <th className="px-4 py-3">Role</th>
-                  <th className="px-4 py-3">Specialty Discipline</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Joined On</th>
-                  <th className="px-4 py-3">Last Active</th>
                   <th className="px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">Loading editor profiles...</td></tr>
+                  <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-400">Loading editor profiles...</td></tr>
                 ) : filteredProfiles.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">No editors found.</td></tr>
+                  <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-400">No editors found.</td></tr>
                 ) : (
-                  filteredProfiles.map((profile, index) => {
-                    const discipline = disciplineForProfile(profile, index);
-                    const joinedOn = joinDates[index % joinDates.length];
-                    const lastActive = lastActives[index % lastActives.length];
+                  filteredProfiles.map((profile) => {
+                    const joinedOn = profile.created_at ? formatDate(profile.created_at) : '--';
                     const statusText = profile.status.toLowerCase();
                     const statusColor = statusText === 'active' ? 'bg-emerald-100 text-emerald-700' : statusText === 'invited' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-600';
-                    const joinedColor = statusText === 'inactive' ? 'bg-slate-100' : 'bg-emerald-50';
                     const initials = (profile.name || 'UN').split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase();
 
                     return (
@@ -749,7 +737,6 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
                         <td className="px-4 py-4">
                           <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">{profile.role || 'Editorial Board'}</span>
                         </td>
-                        <td className="px-4 py-4 text-slate-600">{discipline}</td>
                         <td className="px-4 py-4">
                           <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${statusColor}`}>
                             <span className={`inline-block h-2.5 w-2.5 rounded-full ${statusText === 'active' ? 'bg-emerald-700' : statusText === 'invited' ? 'bg-blue-700' : 'bg-slate-500'}`} />
@@ -757,7 +744,6 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
                           </span>
                         </td>
                         <td className="px-4 py-4 text-slate-600">{joinedOn}</td>
-                        <td className="px-4 py-4 text-slate-600">{lastActive}</td>
                         <td className="px-4 py-4 text-right text-slate-500 hover:text-slate-900 cursor-pointer" onClick={() => onEditorDetails(profile)}><Eye className="h-4 w-4" /></td>
                       </tr>
                     );
@@ -1198,18 +1184,18 @@ function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onO
   );
 }
 
-function ReviewerDirectoryScreen({ profiles, loading, search, onSearch, onInviteReviewer }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInviteReviewer: () => void; }) {
+function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, onSearch, onInviteReviewer, onReviewerDetails }: { profiles: ProfileRow[]; assignmentCounts: Record<string, { invited: number; accepted: number; completed: number }>; loading: boolean; search: string; onSearch: (value: string) => void; onInviteReviewer: () => void; onReviewerDetails: (reviewer: ProfileRow) => void; }) {
   const totalReviewers = profiles.length;
   const activeReviewers = profiles.filter((p) => p.status === 'ACTIVE').length;
   const pendingInvitations = profiles.filter((p) => p.status === 'PENDING_APPROVAL' || p.status === 'INVITED').length;
   const declinedReviewers = profiles.filter((p) => p.status === 'DECLINED').length;
-  const tableRows = profiles.map((profile, index) => ({
+  const tableRows = profiles.map((profile) => ({
     id: profile.id,
+    profile,
     name: profile.name || 'Unknown Reviewer',
-    specialty: ['Medical Imaging', 'Machine Learning', 'AI in Healthcare', 'Bioinformatics', 'NLP in Medicine', 'Data Science'][index % 6],
-    invited: 15 + (index % 5) * 3,
-    accepted: 12 + (index % 4) * 2,
-    completed: 10 + (index % 3) * 1,
+    invited: assignmentCounts[profile.id]?.invited ?? 0,
+    accepted: assignmentCounts[profile.id]?.accepted ?? 0,
+    completed: assignmentCounts[profile.id]?.completed ?? 0,
     status: profile.status === 'ACTIVE' ? 'Active' : profile.status === 'INVITED' || profile.status === 'PENDING_APPROVAL' ? 'Pending' : profile.status === 'DECLINED' ? 'Declined' : 'Active',
   }));
 
@@ -1275,7 +1261,6 @@ function ReviewerDirectoryScreen({ profiles, loading, search, onSearch, onInvite
           <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
             <tr>
               <th className="px-4 py-3">Reviewer</th>
-              <th className="px-4 py-3">Specialty</th>
               <th className="px-4 py-3">Invited</th>
               <th className="px-4 py-3">Accepted</th>
               <th className="px-4 py-3">Completed</th>
@@ -1290,13 +1275,12 @@ function ReviewerDirectoryScreen({ profiles, loading, search, onSearch, onInvite
               </tr>
             ) : profiles.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-slate-400">No reviewers found.</td>
+                <td colSpan={6} className="px-4 py-10 text-center text-slate-400">No reviewers found.</td>
               </tr>
             ) : (
               tableRows.map((row) => (
                 <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-4 py-4 font-semibold text-slate-900">{row.name}</td>
-                  <td className="px-4 py-4 text-slate-600">{row.specialty}</td>
                   <td className="px-4 py-4 text-slate-600">{row.invited}</td>
                   <td className="px-4 py-4 text-slate-600">{row.accepted}</td>
                   <td className="px-4 py-4 text-slate-600">{row.completed}</td>
@@ -1306,7 +1290,7 @@ function ReviewerDirectoryScreen({ profiles, loading, search, onSearch, onInvite
                     </span>
                   </td>
                   <td className="px-4 py-4 text-right">
-                    <button className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">Profile</button>
+                    <button onClick={() => onReviewerDetails(row.profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
                   </td>
                 </tr>
               ))
@@ -1447,7 +1431,8 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
 
       {editorAssignments.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-4">Editor Assignment</h3>
+          <h3 className="text-sm font-black text-slate-900 mb-1">Review Evaluation</h3>
+          <p className="text-xs text-slate-500 mb-4">The editor's complete assessment -- review this before making a decision.</p>
           {editorAssignments.map((a) => (
             <div key={a.id} className="mb-4 last:mb-0">
               <div className="flex items-center justify-between text-xs mb-2">
@@ -1455,15 +1440,28 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
                 <span className={`px-2 py-0.5 rounded-full font-bold uppercase text-[10px] ${a.status === 'ACCEPTED' ? 'bg-emerald-50 text-emerald-700' : a.status === 'DECLINED' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{a.status}</span>
               </div>
               {a.assessment_status === 'SUBMITTED' && (
-                <div className="bg-slate-50 rounded-lg p-4 text-xs space-y-2">
-                  <div className="grid grid-cols-4 gap-2 text-[11px]">
-                    <Score label="Scientific Merit" value={a.scientific_merit} />
-                    <Score label="Novelty" value={a.novelty_innovation} />
-                    <Score label="Methodology" value={a.methodology_quality} />
-                    <Score label="Writing" value={a.writing_quality} />
+                <div className="bg-slate-50 rounded-lg p-4 text-xs space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                    {([
+                      ['scientificMerit', 'Scientific Merit', a.scientific_merit],
+                      ['noveltyInnovation', 'Novelty', a.novelty_innovation],
+                      ['methodologyQuality', 'Methodology', a.methodology_quality],
+                      ['literatureAdequacy', 'Literature', a.literature_adequacy],
+                      ['ethicalCompliance', 'Ethics', a.ethical_compliance],
+                      ['dataReliability', 'Data Reliability', a.data_reliability],
+                      ['writingQuality', 'Writing', a.writing_quality],
+                    ] as const).map(([key, label, value]) => (
+                      <div key={key}>
+                        <Score label={label} value={value} />
+                        {a.criteria_reasons?.[key] && (
+                          <p className="text-[10px] text-slate-500 italic mt-1 px-1">"{a.criteria_reasons[key]}"</p>
+                        )}
+                      </div>
+                    ))}
                   </div>
                   <p><strong>Strengths:</strong> {a.strengths}</p>
                   <p><strong>Weaknesses:</strong> {a.weaknesses}</p>
+                  {a.mandatory_revisions && <p><strong>Mandatory Revisions:</strong> {a.mandatory_revisions}</p>}
                   <p><strong>Comments to Coordinator:</strong> {a.comments_to_coordinator}</p>
                 </div>
               )}
@@ -1625,6 +1623,11 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
           }}
         />
       )}
+
+      <div>
+        <h3 className="text-sm font-black text-slate-900 mb-3">Revision History</h3>
+        <RevisionHistoryPanel manuscriptId={manuscript.id} profiles={profiles} />
+      </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
         <h3 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-2"><Clock className="w-4 h-4" /> Timeline</h3>

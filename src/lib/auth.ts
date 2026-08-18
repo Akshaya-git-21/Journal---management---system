@@ -137,9 +137,17 @@ export async function createUserAccount(
   role: 'EDITOR' | 'REVIEWER',
   metadata: Record<string, any> = {}
 ): Promise<void> {
+  const token = (await supabase.auth.getSession()).data.session?.access_token;
+  if (!token) {
+    throw new Error('Your session has expired. Please sign in again before creating an account.');
+  }
+
   const response = await fetch('/api/create-user', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
     body: JSON.stringify({
       email,
       password,
@@ -213,22 +221,64 @@ export async function verifyResetToken(): Promise<boolean> {
  * Used by Coordinators for testing access to editor accounts.
  * Returns the new password that was set.
  */
-export async function resetUserPassword(userId: string, newPassword: string, authToken: string): Promise<void> {
-  const response = await fetch('/api/reset-user-password', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${authToken}`
-    },
-    body: JSON.stringify({
-      userId,
-      newPassword
-    })
-  });
+export async function resetUserPassword(userId: string, newPassword: string, authToken?: string): Promise<void> {
+  // Always use a freshly-read session token rather than one captured earlier
+  // in a component's lifetime -- Supabase silently rotates access_token on
+  // refresh, and a token grabbed once on mount can go stale for a Coordinator
+  // who has had the page open for a while.
+  const token = authToken || (await supabase.auth.getSession()).data.session?.access_token;
+  if (!token) {
+    throw new Error('Your session has expired. Please sign in again before changing a password.');
+  }
 
-  const payload = await response.json();
+  let response: Response;
+  try {
+    response = await fetch('/api/reset-user-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        userId,
+        newPassword
+      })
+    });
+  } catch (networkError: any) {
+    // fetch() only throws for a true network-level failure (DNS, connection
+    // refused, CORS block) -- never for a non-2xx HTTP response.
+    console.error('[resetUserPassword] Network error calling /api/reset-user-password:', networkError);
+    throw new Error('Network error: could not reach the password reset service. Check your connection and try again.');
+  }
+
+  let payload: any = null;
+  let parseFailed = false;
+  try {
+    payload = await response.json();
+  } catch (parseError) {
+    parseFailed = true;
+    console.error('[resetUserPassword] Non-JSON response from /api/reset-user-password:', {
+      status: response.status,
+      statusText: response.statusText,
+      parseError
+    });
+  }
+
+  if (parseFailed) {
+    throw new Error(`API unavailable: the password reset endpoint returned an unexpected response (HTTP ${response.status}). It may not be deployed at this URL.`);
+  }
+
   if (!response.ok) {
-    throw new Error(payload?.error || 'Unable to reset password.');
+    console.error('[resetUserPassword] /api/reset-user-password returned an error:', { status: response.status, payload });
+    const message: string = payload?.error || 'Unable to reset password.';
+    // Re-categorize by HTTP status so the Coordinator sees a specific,
+    // actionable message instead of a raw server string.
+    if (response.status === 401) throw new Error(`Unauthorized: ${message}`);
+    if (response.status === 403) throw new Error(`Not permitted: ${message}`);
+    if (response.status === 404) throw new Error(`Invalid target user: ${message}`);
+    if (response.status === 400) throw new Error(message); // validation or Supabase Auth error, already descriptive
+    if (response.status >= 500) throw new Error(`Server error: ${message}`);
+    throw new Error(message);
   }
 }
 
