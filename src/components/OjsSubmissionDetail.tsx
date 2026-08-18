@@ -1684,39 +1684,32 @@ export default function OjsSubmissionDetail({
                       </div>
                     ) : activeThreadId === 'coordinator-chat' ? (
                       /* ========== COORDINATOR DIRECT CHAT ========== */
-                      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
+                      <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl overflow-hidden shadow-xs text-left p-4 flex flex-col justify-between h-[500px] relative">
 
-                        {/* Header Bar */}
-                        <div className="bg-[#008751] text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-sm z-10">
+                        {/* Header Row */}
+                        <div className="flex items-center justify-between shrink-0 gap-2">
                           <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => setActiveThreadId(null)}
-                              className="mr-1 hover:bg-[#007043]/60 p-1.5 rounded-full transition cursor-pointer flex items-center justify-center"
-                              title="Back to Discussions list"
-                            >
-                              <ChevronLeft className="w-5 h-5 text-white stroke-[3.5]" />
-                            </button>
-
-                            <div className="w-9 h-9 rounded-full bg-[#047857] text-white font-extrabold text-xs flex items-center justify-center border border-[#008751]/20 shadow-inner">
-                              CO
-                            </div>
-                            <div>
-                              <h4 className="font-bold text-xs text-slate-100 tracking-tight flex items-center gap-1">
-                                Coordinator Chat
-                              </h4>
-                              <p className="text-[10px] text-emerald-100 font-medium">
-                                Direct communication with manuscript coordinator
-                              </p>
-                            </div>
+                            <span className="w-2.5 h-2.5 rounded-full bg-[#008751]"></span>
+                            <h3 className="text-black text-[16px] font-semibold tracking-tight">
+                              Coordinator Chat
+                            </h3>
+                            <span className="text-[9px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                              Live
+                            </span>
                           </div>
 
-                          <span className="text-[10px] bg-[#004d2e] text-emerald-200 font-mono font-bold px-2.5 py-1 rounded-full uppercase border border-[#008751]">
-                            LIVE CHAT
-                          </span>
+                          <button
+                            onClick={() => setActiveThreadId(null)}
+                            className="text-[#008751] hover:text-[#007043] font-bold text-sm transition cursor-pointer"
+                            title="Back to Discussions list"
+                          >
+                            ← Back
+                          </button>
                         </div>
 
-                        {/* Chat Scroll Pane */}
-                        <div className="flex-grow p-4 overflow-y-auto space-y-3 flex flex-col justify-start bg-[#f8fcf9] relative min-h-0">
+                        {/* Chat Messages Area */}
+                        <div className="flex-grow overflow-y-auto space-y-3 flex flex-col justify-start bg-[#f8fcf9] relative min-h-0 mt-3">
                           {coordinatorMessages.map((msg) => (
                             <div
                               key={msg.id}
