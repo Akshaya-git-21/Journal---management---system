@@ -698,7 +698,7 @@ export default function OjsSubmissionDetail({
   const isSubmissionDashboard = (activeTab === 'SUBMISSION' || activeTab === 'overview') && viewState === 'DASHBOARD';
 
   return (
-    <div id="ojs-submission-detail-container" className="w-full bg-[#e8f3ed] min-h-screen text-slate-950 flex flex-col md:flex-row items-stretch border-t border-slate-200">
+    <div id="ojs-submission-detail-container" className="w-full bg-[#e8f3ed] min-h-screen text-slate-950 flex flex-col md:flex-row items-start border-t border-slate-200">
       
       {/* DATA-DRIVEN SIDEBAR - Real submission data */}
       <SubmissionSidebar
