@@ -474,7 +474,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>(initialReviewerAssignments || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'evaluation_timeline' | 'title_abstract' | 'authors' | 'manuscript' | 'references' | 'supplementary' | 'cover_letter' | 'discussions' | 'editor_evaluation' | 'reviews' | 'decision' | 'suggestions' | 'review_history' | 'metadata' | 'revisions' | 'production' | 'galley_files' | 'title' | 'contributors' | 'files' | 'evaluation' | 'history' | 'comments'>('editor_evaluation');
+  const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'decision' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments'>('evaluation');
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [decisionError, setDecisionError] = useState('');
   const [activePublication, setActivePublication] = useState<'title' | 'contributors' | 'metadata' | 'references' | 'galleries' | 'jats' | 'permissions' | 'issue'>('title');
@@ -762,355 +762,50 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="bg-white border-b border-slate-200 px-8 flex-shrink-0">
-          <div className="flex gap-8">
-            {tabs.map((tab) => {
-              const isDisabled = tab.id === 'evaluation' && !assignmentAccepted;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => !isDisabled && setActiveTab(tab.id as any)}
-                  disabled={isDisabled}
-                  className={`px-1 py-4 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
-                    isDisabled
-                      ? 'text-slate-400 border-transparent cursor-not-allowed'
-                      : activeTab === tab.id
-                      ? 'text-[#008751] border-[#008751]'
-                      : 'text-slate-600 border-transparent hover:text-slate-900'
-                  }`}
-                  title={isDisabled ? 'Accept assignment first to unlock evaluation' : ''}
-                >
-                  {tab.label}
-                  {isDisabled && <span className="ml-1 text-xs">🔒</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
 
         <div className="flex-1 flex overflow-hidden min-h-0">
-          {/* CENTER CONTENT */}
-          <div className="flex-1 overflow-y-auto p-8">
-            {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4 mb-6">{error}</div>}
+          {/* CENTER CONTENT - SCROLLABLE TABS */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Tabs Bar */}
+            <div className="bg-white border-b border-slate-200 px-8 flex-shrink-0 overflow-x-auto">
+              <div className="flex gap-8">
+                {[
+                  { id: 'files', label: 'Files for Review' },
+                  { id: 'evaluation', label: 'Editor Evaluation' },
+                  { id: 'decision', label: 'Decision' },
+                  { id: 'reviews', label: 'Reviews' },
+                  { id: 'suggestions', label: 'Suggestions' },
+                  { id: 'history', label: 'Review History' },
+                  { id: 'revisions', label: 'Revisions' },
+                  { id: 'comments', label: 'Collaboration' }
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`px-1 py-4 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
+                      activeTab === tab.id
+                        ? 'text-[#008751] border-[#008751]'
+                        : 'text-slate-600 border-transparent hover:text-slate-900'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-            {activePublication !== 'title' && (
-              <>
-                {activePublication === 'contributors' && (
-                  <div className="max-w-4xl">
-                    <div className="bg-white border border-slate-200 rounded-lg p-8">
-                      <h2 className="text-xl font-bold text-slate-900 mb-6">Contributors ({details.contributors?.length || 0})</h2>
-                      <div className="space-y-4">
-                        {details.contributors && details.contributors.length > 0 ? (
-                          details.contributors.map((contributor, idx) => (
-                            <div key={idx} className="border border-slate-200 rounded-lg p-4">
-                              <p className="font-semibold text-slate-900">{contributor.name || 'Unknown Author'}</p>
-                              <p className="text-sm text-slate-600">{contributor.contributor_role || 'Author'}</p>
-                              {contributor.affiliation && <p className="text-xs text-slate-500 mt-1">{contributor.affiliation}</p>}
-                              {contributor.email && <p className="text-xs text-slate-500">Email: {contributor.email}</p>}
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-slate-600">No contributor data available.</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
+            {/* Scrollable Content Area */}
+            <div className="flex-1 overflow-y-auto p-8">
+              {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4 mb-6">{error}</div>}
 
-                {activePublication === 'metadata' && (
-                  <div className="max-w-4xl">
-                    <div className="bg-white border border-slate-200 rounded-lg p-8">
-                      <h2 className="text-xl font-bold text-slate-900 mb-6">Metadata</h2>
-                      <div className="grid grid-cols-2 gap-6">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-600 mb-2">Manuscript ID</p>
-                          <p className="text-slate-900">{manuscript.id}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-slate-600 mb-2">Submission Date</p>
-                          <p className="text-slate-900">{formatDate(manuscript.submitted_at)}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-slate-600 mb-2">Status</p>
-                          <p className="text-slate-900">{manuscript.status || 'SUBMITTED'}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-slate-600 mb-2">Language</p>
-                          <p className="text-slate-900">{manuscript.language || 'English'}</p>
-                        </div>
-                        {manuscript.doi && (
-                          <div className="col-span-2">
-                            <p className="text-sm font-semibold text-slate-600 mb-2">DOI</p>
-                            <p className="text-slate-900">{manuscript.doi}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {activePublication === 'references' && (
-                  <div className="max-w-4xl">
-                    <div className="bg-white border border-slate-200 rounded-lg p-8">
-                      <h2 className="text-xl font-bold text-slate-900 mb-6">References</h2>
-                      <div className="space-y-3">
-                        {manuscript.references ? (
-                          <>
-                            {manuscript.references.split('\n').filter(ref => ref.trim()).map((ref, idx) => (
-                              <p key={idx} className="text-slate-700 leading-relaxed">{ref}</p>
-                            ))}
-                            <p className="text-slate-500 text-sm mt-6">
-                              Total References: {manuscript.references.split('\n').filter(ref => ref.trim()).length}
-                            </p>
-                          </>
-                        ) : (
-                          <div className="bg-slate-50 rounded-lg p-6 text-center">
-                            <p className="text-slate-600">No references submitted.</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {activePublication === 'galleries' && (
-                  <div className="max-w-4xl">
-                    <div className="bg-white border border-slate-200 rounded-lg p-8">
-                      <h2 className="text-xl font-bold text-slate-900 mb-6">Galleries & Figures</h2>
-                      {(() => {
-                        const figures = extractFigures();
-                        return figures.length > 0 ? (
-                          <div className="grid grid-cols-2 gap-4">
-                            {figures.map((figure) => (
-                              <div key={figure.id} className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
-                                <div className="aspect-video bg-slate-100 flex items-center justify-center">
-                                  {figure.file_name.match(/\.(jpg|jpeg|png|gif|svg)$/i) ? (
-                                    <img
-                                      src={figure.public_url || ''}
-                                      alt={figure.file_name}
-                                      className="max-h-full max-w-full object-contain"
-                                    />
-                                  ) : (
-                                    <div className="flex flex-col items-center gap-2">
-                                      <span className="text-2xl">📄</span>
-                                      <span className="text-xs text-slate-600">{figure.file_type}</span>
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="p-3 bg-white border-t border-slate-200">
-                                  <p className="text-sm font-semibold text-slate-900 truncate">{figure.file_name}</p>
-                                  <p className="text-xs text-slate-500">{figure.file_size} • {formatDate(figure.uploaded_at)}</p>
-                                  {figure.public_url && (
-                                    <div className="flex gap-2 mt-2">
-                                      <a href={figure.public_url} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
-                                        View →
-                                      </a>
-                                      <a href={figure.public_url} download className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
-                                        Download →
-                                      </a>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="bg-slate-50 rounded-lg p-12 text-center">
-                            <div className="text-3xl mb-3">🖼️</div>
-                            <p className="text-slate-600">No figures or supplementary materials uploaded.</p>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                )}
-
-                {activePublication === 'jats' && (
-                  <div className="max-w-4xl">
-                    <div className="bg-white border border-slate-200 rounded-lg p-8">
-                      <h2 className="text-xl font-bold text-slate-900 mb-6">JATS XML</h2>
-                      {(() => {
-                        const jatsFile = details.files?.find(f => f.file_type?.toLowerCase() === 'jats' || f.file_name?.toLowerCase().includes('.xml'));
-                        return jatsFile ? (
-                          <div className="space-y-4">
-                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-                              <p className="text-sm text-emerald-700 font-semibold">✓ JATS XML file available</p>
-                            </div>
-                            <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
-                              <p className="text-xs text-slate-600 mb-3">File: {jatsFile.file_name}</p>
-                              <p className="text-xs text-slate-600 mb-4">Size: {jatsFile.file_size} • Uploaded: {formatDate(jatsFile.uploaded_at)}</p>
-                              {jatsFile.public_url && (
-                                <div className="flex gap-2">
-                                  <a href={jatsFile.public_url} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
-                                    View XML →
-                                  </a>
-                                  <a href={jatsFile.public_url} download className="text-xs text-emerald-600 hover:text-emerald-700 font-bold">
-                                    Download →
-                                  </a>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="bg-slate-50 rounded-lg p-12 text-center">
-                            <div className="text-3xl mb-3">📋</div>
-                            <p className="text-slate-600 mb-2">No JATS XML file available for this manuscript.</p>
-                            <p className="text-xs text-slate-500">JATS XML may be generated during the publication workflow.</p>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                )}
-
-                {activePublication === 'permissions' && (
-                  <div className="max-w-4xl">
-                    <div className="bg-white border border-slate-200 rounded-lg p-8">
-                      <h2 className="text-xl font-bold text-slate-900 mb-6">Permissions & Disclosure</h2>
-                      <div className="bg-slate-50 rounded-lg p-8 text-center">
-                        <div className="text-3xl mb-3">🔐</div>
-                        <p className="text-slate-600 mb-2">Permission and disclosure information from author submission.</p>
-                        <p className="text-xs text-slate-500 mb-6">Review the submitted manuscript and associated files above for disclosure statements.</p>
-                        <div className="bg-white border border-slate-200 rounded-lg p-4 text-left max-w-2xl mx-auto">
-                          <p className="text-xs font-semibold text-slate-600 mb-3">Items to verify:</p>
-                          <ul className="text-xs text-slate-600 space-y-2">
-                            <li className="flex items-start gap-2">
-                              <span className="text-slate-400">□</span>
-                              <span>Conflict of Interest disclosure form completed</span>
-                            </li>
-                            <li className="flex items-start gap-2">
-                              <span className="text-slate-400">□</span>
-                              <span>Copyright transfer agreement signed</span>
-                            </li>
-                            <li className="flex items-start gap-2">
-                              <span className="text-slate-400">□</span>
-                              <span>Data availability statement included</span>
-                            </li>
-                            <li className="flex items-start gap-2">
-                              <span className="text-slate-400">□</span>
-                              <span>Author funding/support declaration</span>
-                            </li>
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {activePublication === 'issue' && (
-                  <div className="max-w-4xl">
-                    <div className="bg-white border border-slate-200 rounded-lg p-8">
-                      <h2 className="text-xl font-bold text-slate-900 mb-6">Issue Assignment</h2>
-                      {manuscript.volume || manuscript.issue ? (
-                        <div className="space-y-4">
-                          {manuscript.volume && (
-                            <div>
-                              <p className="text-sm font-semibold text-slate-600 mb-2">Volume</p>
-                              <p className="text-slate-900">{manuscript.volume}</p>
-                            </div>
-                          )}
-                          {manuscript.issue && (
-                            <div>
-                              <p className="text-sm font-semibold text-slate-600 mb-2">Issue</p>
-                              <p className="text-slate-900">{manuscript.issue}</p>
-                            </div>
-                          )}
-                          {manuscript.published_at && (
-                            <div>
-                              <p className="text-sm font-semibold text-slate-600 mb-2">Published Date</p>
-                              <p className="text-slate-900">{formatDate(manuscript.published_at)}</p>
-                            </div>
-                          )}
-                          {manuscript.doi && (
-                            <div>
-                              <p className="text-sm font-semibold text-slate-600 mb-2">DOI</p>
-                              <p className="text-slate-900 font-mono text-xs">{manuscript.doi}</p>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="bg-slate-50 rounded-lg p-12 text-center">
-                          <div className="text-3xl mb-3">📰</div>
-                          <p className="text-slate-600 mb-1">No issue assigned yet.</p>
-                          <p className="text-xs text-slate-500">Issue assignment will occur during the publication workflow.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {activePublication === 'title' && activeTab === 'title' && (
-              <div>
-                {/* PDF Viewer */}
-                <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden mb-6">
-                  {/* Toolbar */}
-                  <div className="bg-slate-100 border-b border-slate-200 px-6 py-3 flex items-center justify-between text-xs text-slate-600">
-                    <div className="flex items-center gap-3">
-                      <button className="p-1 hover:bg-slate-200 rounded">≡</button>
-                      <button className="p-1 hover:bg-slate-200 rounded">🔍</button>
-                      <button className="p-1 hover:bg-slate-200 rounded">↑</button>
-                      <button className="p-1 hover:bg-slate-200 rounded">↓</button>
-                    </div>
-                    <span className="font-semibold">{currentPage} of 3</span>
-                    <div className="flex items-center gap-2">
-                      <button className="p-1 hover:bg-slate-200 rounded">−</button>
-                      <span className="px-2">100%</span>
-                      <button className="p-1 hover:bg-slate-200 rounded">+</button>
-                    </div>
-                    <button className="p-1 hover:bg-slate-200 rounded">⛶</button>
-                    <button className="p-1 hover:bg-slate-200 rounded">⋮</button>
-                  </div>
-
-                  {/* Document */}
-                  <div className="bg-slate-50 p-12 min-h-[600px]">
-                    <div className="bg-white p-12 max-w-3xl mx-auto">
-                      <h2 className="text-2xl font-bold text-center mb-6">{manuscript.title}</h2>
-                      <div className="text-center mb-4">
-                        <p className="text-sm text-slate-700">
-                          {details.contributors && details.contributors.length > 0
-                            ? details.contributors.map((c, i) => `${c.name}${details.contributors && i < details.contributors.length - 1 ? ', ' : ''}`).join('')
-                            : manuscript.author_name}
-                        </p>
-                      </div>
-                      {details.contributors && details.contributors.length > 0 && (
-                        <div className="text-center mb-8 text-xs text-slate-600 border-b border-slate-200 pb-6">
-                          {details.contributors.map((c, i) => (
-                            <div key={i}>
-                              {c.affiliation && <p>{c.affiliation}</p>}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <div className="mb-6">
-                        <p className="text-xs"><span className="font-semibold">Submitted:</span> <span className="text-slate-600">{formatDate(manuscript.submitted_at)}</span></p>
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-emerald-700 mb-3 uppercase">Abstract</h3>
-                        <p className="text-sm text-slate-700 leading-relaxed">
-                          {manuscript.abstract || '(No abstract provided)'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Footer */}
-                  <div className="bg-slate-100 border-t border-slate-200 px-8 py-3 text-xs text-slate-600 flex justify-between">
-                    <span>Page 1 of 3</span>
-                    <span>Language: {manuscript.language || 'English'}</span>
-                    <span>Close Viewer</span>
-                  </div>
-                </div>
-
-                {/* Files Section */}
-                <div className="bg-white border border-slate-200 rounded-lg p-6">
-                  <h3 className="font-bold text-slate-900 mb-4">FILES FOR REVIEW ({details.files?.length || 0})</h3>
-                  <div className="space-y-3">
-                    {details.files && details.files.length > 0 ? (
-                      details.files.map((file) => (
-                        <div key={file.id} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 cursor-pointer transition">
+              {/* Files Tab */}
+              {activeTab === 'files' && (
+                <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-black text-slate-900 mb-4">FILES FOR REVIEW ({details.files?.length || 0})</h3>
+                  {details.files && details.files.length > 0 ? (
+                    <div className="space-y-3">
+                      {details.files.map((file) => (
+                        <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 transition">
                           <div className="flex items-center gap-3 flex-1">
                             <span className="text-lg">📄</span>
                             <div className="flex-1">
@@ -1121,71 +816,21 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                           <div className="flex gap-2">
                             {file.public_url && (
                               <>
-                                <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-1">👁️</a>
-                                <a href={file.public_url} download className="text-slate-600 hover:text-slate-900 p-1">📥</a>
+                                <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
+                                <a href={file.public_url} download className="text-slate-600 hover:text-slate-900 p-2">📥</a>
                               </>
                             )}
                           </div>
                         </div>
-                      ))
-                    ) : (
-                      <p className="text-slate-600 text-sm">No files uploaded.</p>
-                    )}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-slate-400 text-sm">No files available.</div>
+                  )}
                 </div>
-              </div>
-            )}
+              )}
 
-            {activeTab === 'contributors' && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <h3 className="text-sm font-black text-slate-900 mb-4">Manuscript Contributors ({details.contributors?.length || 0})</h3>
-                {details.contributors && details.contributors.length > 0 ? (
-                  <div className="space-y-3">
-                    {details.contributors.map((contributor, idx) => (
-                      <div key={idx} className="border border-slate-200 rounded p-4">
-                        <p className="font-semibold text-slate-900">{contributor.name}</p>
-                        <p className="text-sm text-slate-600">{contributor.contributor_role}</p>
-                        {contributor.affiliation && <p className="text-xs text-slate-500 mt-1">{contributor.affiliation}</p>}
-                        {contributor.email && <p className="text-xs text-slate-500">Email: {contributor.email}</p>}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-slate-400 text-sm">No contributors data available.</div>
-                )}
-              </div>
-            )}
 
-            {activeTab === 'files' && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <h3 className="text-sm font-black text-slate-900 mb-4">FILES FOR REVIEW ({details.files?.length || 0})</h3>
-                {details.files && details.files.length > 0 ? (
-                  <div className="space-y-3">
-                    {details.files.map((file) => (
-                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 transition">
-                        <div className="flex items-center gap-3 flex-1">
-                          <span className="text-lg">📄</span>
-                          <div className="flex-1">
-                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
-                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          {file.public_url && (
-                            <>
-                              <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
-                              <a href={file.public_url} download className="text-slate-600 hover:text-slate-900 p-2">📥</a>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-slate-400 text-sm">No files available.</div>
-                )}
-              </div>
-            )}
 
             {activeTab === 'evaluation' && (
               <EditorEvaluationFormTab
@@ -1467,6 +1112,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                 )}
               </div>
             )}
+            </div>
           </div>
 
           {/* RIGHT SIDEBAR - EDITOR EVALUATION PANEL */}
