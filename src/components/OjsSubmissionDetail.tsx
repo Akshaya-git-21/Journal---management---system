@@ -739,14 +739,8 @@ export default function OjsSubmissionDetail({
               </div>
             </div>
 
-            {/* DASHBOARD LAYOUT: Header + Two-Column Stack + Right Sidebar */}
+            {/* TWO-COLUMN STACK (Center Column + Right Details Sidebar) */}
             <div className="w-full flex flex-col lg:flex-row items-start gap-6 lg:gap-8">
-
-              {/* LEFT SECTION: Center content */}
-              <div className="flex-grow w-full lg:min-w-0 flex flex-col">
-
-              {/* TWO-COLUMN STACK (Center Column) */}
-              <div className="w-full flex flex-col lg:flex-row items-start gap-6 lg:gap-8">
 
               {/* CENTER CORE COLUMN (COLUMN 2) */}
               <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full lg:min-w-0">
@@ -1745,9 +1739,7 @@ export default function OjsSubmissionDetail({
 
               </div>
 
-              </div>
-
-              {/* RIGHT DETAILS SIDEBAR (COLUMN 3) */}
+               {/* RIGHT DETAILS SIDEBAR (COLUMN 3) */}
               <aside id="ojs-column-right-details-dashboard" className="w-full lg:w-96 shrink-0 space-y-6 text-left leading-normal mt-0">
 
                 {/* Submission Timeline */}
@@ -1857,8 +1849,6 @@ export default function OjsSubmissionDetail({
                 </div>
 
               </aside>
-
-            </div>
 
             </div>
 
