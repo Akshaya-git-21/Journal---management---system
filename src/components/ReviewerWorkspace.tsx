@@ -516,6 +516,9 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
   const [scores, setScores] = useState<ScoreState>({
     scientificMerit: 0, noveltyInnovation: 0, methodologyQuality: 0, literatureAdequacy: 0, ethicalCompliance: 0, dataReliability: 0, writingQuality: 0, overallRecommendationScore: 0
   });
+  const [criteriaReasons, setCriteriaReasons] = useState<Record<string, string>>({
+    scientificMerit: '', noveltyInnovation: '', methodologyQuality: '', literatureAdequacy: '', ethicalCompliance: '', dataReliability: '', writingQuality: '', overallRecommendationScore: ''
+  });
   const [recommendation, setRecommendation] = useState<ReviewerRecommendation>('MINOR_REVISION');
   const [commentsToAuthor, setCommentsToAuthor] = useState('');
   const [commentsToEditor, setCommentsToEditor] = useState('');
@@ -615,7 +618,8 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
         commentsToEditor,
         strengths,
         weaknesses,
-        mandatory_revisions: revisions
+        mandatory_revisions: revisions,
+        criteriaReasons
       });
       setSuccess('Review submitted successfully!');
       setTimeout(() => onSubmitted(), 1500);
@@ -710,7 +714,16 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
                       </button>
                     ))}
                   </div>
-                  <p className="text-[10px] text-blue-600 font-bold">SCORE SELECTION: {scores[key]} / 10</p>
+                  <p className="text-[10px] text-blue-600 font-bold mb-2">SCORE SELECTION: {scores[key]} / 10</p>
+                  <label className="block text-xs font-bold text-slate-700 mb-2">Reason for this score</label>
+                  <textarea
+                    value={criteriaReasons[key]}
+                    onChange={(e) => setCriteriaReasons(prev => ({ ...prev, [key]: e.target.value }))}
+                    placeholder="Explain your score for this criterion..."
+                    disabled={busy}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
+                    rows={2}
+                  />
                 </div>
               ))}
             </div>

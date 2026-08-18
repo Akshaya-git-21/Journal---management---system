@@ -45,6 +45,17 @@ export function EditorEvaluationFormTab({
     writingQuality: 5,
   });
 
+  // Per-criterion reasons
+  const [criteriaReasons, setCriteriaReasons] = useState({
+    scientificMerit: '',
+    noveltyInnovation: '',
+    methodologyQuality: '',
+    literatureAdequacy: '',
+    ethicalCompliance: '',
+    dataReliability: '',
+    writingQuality: '',
+  });
+
   // Qualitative feedback
   const [strengths, setStrengths] = useState('');
   const [weaknesses, setWeaknesses] = useState('');
@@ -122,6 +133,7 @@ export function EditorEvaluationFormTab({
         weaknesses,
         mandatoryRevisions,
         commentsToCoordinator,
+        criteriaReasons,
         suggestedReviewers: validSuggestions,
       });
 
@@ -165,9 +177,9 @@ export function EditorEvaluationFormTab({
       {/* Evaluation Criteria */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
         <h3 className="text-sm font-black text-slate-900 mb-6">Evaluation Criteria (1-10 scale)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-6">
           {CRITERIA.map(c => (
-            <div key={c.key}>
+            <div key={c.key} className="border border-slate-200 rounded-lg p-4">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs font-bold text-slate-700">{c.label}</label>
                 <input
@@ -180,13 +192,22 @@ export function EditorEvaluationFormTab({
                   className="w-16 px-2 py-1 border border-slate-300 rounded text-sm font-bold text-center"
                 />
               </div>
-              <p className="text-xs text-slate-600 mb-2">{c.description}</p>
-              <div className="w-full bg-slate-200 rounded-full h-2">
+              <p className="text-xs text-slate-600 mb-3">{c.description}</p>
+              <div className="w-full bg-slate-200 rounded-full h-2 mb-4">
                 <div
                   className="bg-emerald-600 h-2 rounded-full transition-all"
                   style={{ width: `${((scores as any)[c.key] / 10) * 100}%` }}
                 ></div>
               </div>
+              <label className="block text-xs font-bold text-slate-700 mb-2">Reason for this score</label>
+              <textarea
+                value={(criteriaReasons as any)[c.key]}
+                onChange={(e) => setCriteriaReasons(prev => ({ ...prev, [c.key]: e.target.value }))}
+                placeholder="Explain your score for this criterion..."
+                disabled={loading}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
+                rows={2}
+              />
             </div>
           ))}
         </div>
