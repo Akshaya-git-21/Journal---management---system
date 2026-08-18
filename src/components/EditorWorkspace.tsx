@@ -38,7 +38,6 @@ import RevisionReview from './RevisionReview';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
 import EditorEvaluationSidebar from './EditorEvaluationSidebar';
-import EditorEvaluationPanel from './EditorEvaluationPanel';
 
 interface EditorWorkspaceProps {
   manuscripts?: any[];
@@ -498,10 +497,6 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [assignmentAccepted] = useState(assignment.status === 'ACCEPTED');
   const evaluationSubmitted = assignment.assessment_status === 'SUBMITTED';
 
-  // Evaluation Panel State
-  const [isSavingEvaluation, setIsSavingEvaluation] = useState(false);
-  const [isSubmittingEvaluation, setIsSubmittingEvaluation] = useState(false);
-
   // Phase 4: Set up real-time subscriptions for manuscript updates
   useEffect(() => {
     if (!manuscript.id) return;
@@ -624,38 +619,6 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
       await handleError(e, 'Post Internal Note');
     } finally {
       setBusy(false);
-    }
-  };
-
-  // Evaluation Panel Handlers
-  const handleSaveEvaluationDraft = async (state: any) => {
-    setIsSavingEvaluation(true);
-    try {
-      // Save to database or local state
-      console.log('Saving evaluation draft:', state);
-      setNotification({ type: 'success', message: 'Draft saved' });
-      setTimeout(() => setNotification(null), 3000);
-    } catch (error) {
-      console.error('Error saving draft:', error);
-      setNotification({ type: 'error', message: 'Failed to save draft' });
-    } finally {
-      setIsSavingEvaluation(false);
-    }
-  };
-
-  const handleSubmitEvaluation = async (state: any) => {
-    setIsSubmittingEvaluation(true);
-    try {
-      // Submit to database
-      console.log('Submitting evaluation:', state);
-      setNotification({ type: 'success', message: 'Evaluation submitted successfully' });
-      setTimeout(() => setNotification(null), 3000);
-      // Optionally navigate to next manuscript or refresh
-    } catch (error) {
-      console.error('Error submitting evaluation:', error);
-      setNotification({ type: 'error', message: 'Failed to submit evaluation' });
-    } finally {
-      setIsSubmittingEvaluation(false);
     }
   };
 
@@ -1590,16 +1553,6 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
           </aside>
         </div>
       </main>
-
-      {/* RIGHT SIDEBAR - EVALUATION PANEL */}
-      <EditorEvaluationPanel
-        currentEvaluation={1}
-        totalEvaluations={5}
-        isSaving={isSavingEvaluation}
-        isSubmitting={isSubmittingEvaluation}
-        onSaveDraft={handleSaveEvaluationDraft}
-        onSubmitEvaluation={handleSubmitEvaluation}
-      />
     </div>
   );
 }
