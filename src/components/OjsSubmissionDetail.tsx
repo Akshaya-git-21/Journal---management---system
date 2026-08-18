@@ -1740,10 +1740,10 @@ export default function OjsSubmissionDetail({
               </div>
 
                {/* RIGHT DETAILS SIDEBAR (COLUMN 3) */}
-              <aside id="ojs-column-right-details-dashboard" className="w-full lg:w-96 shrink-0 space-y-6 text-left leading-normal">
-                
+              <aside id="ojs-column-right-details-dashboard" className="w-full lg:w-96 shrink-0 space-y-6 text-left leading-normal mt-0">
+
                 {/* Submission Timeline */}
-                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left">
+                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left mt-0">
                   <h3 className="text-black text-[18px] font-semibold tracking-tight mb-5 border-b pb-3 border-emerald-100">Submission Timeline</h3>
                   
                   <div className="relative pl-5 ml-2.5 space-y-6 text-xs border-l-2 border-emerald-100">
