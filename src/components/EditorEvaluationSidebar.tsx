@@ -183,15 +183,12 @@ export default function EditorEvaluationSidebar({
         </span>
       </div>
       <nav className="flex flex-col space-y-1">
-        {items.map((item: any) => {
-          const mappedTab = TAB_MAP[item.id] || item.id;
-          const isActive = activeTab === item.id || TAB_MAP[activeTab] === mappedTab;
-          return (
+        {items.map((item: any) => (
           <button
             key={item.id}
             onClick={() => onTabChange(item.id)}
             className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all duration-150 ${
-              isActive
+              activeTab === item.id
                 ? 'bg-emerald-100/75 text-[#005a36] border-l-[3px] border-[#008751]'
                 : 'text-slate-700 hover:bg-emerald-50/50'
             }`}
@@ -212,8 +209,7 @@ export default function EditorEvaluationSidebar({
               </span>
             )}
           </button>
-        );
-        })}
+        ))}
       </nav>
     </div>
   );
