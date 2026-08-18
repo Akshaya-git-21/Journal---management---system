@@ -102,34 +102,6 @@ export default function SubmissionSidebar({
   return (
     <aside className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 p-5 space-y-6 text-left font-sans overflow-y-auto">
 
-      {/* SUBMISSION SECTION */}
-      <SidebarSection
-        title="SUBMISSION"
-        items={[
-          {
-            id: 'submission_title',
-            label: `${m?.title?.substring(0, 40)}${(m?.title?.length || 0) > 40 ? '...' : ''}` || 'Untitled',
-            description: 'Manuscript Title',
-            status: currentStatus
-          },
-          {
-            id: 'submission_id',
-            label: m?.id?.substring(0, 8).toUpperCase() || 'N/A',
-            description: `ID: ${m?.id}`
-          },
-          {
-            id: 'submission_date',
-            label: m?.submitted_at ? new Date(m.submitted_at).toLocaleDateString() : 'Not submitted',
-            description: 'Submitted Date'
-          },
-          {
-            id: 'submission_status',
-            label: currentStatus.label,
-            status: currentStatus
-          }
-        ]}
-      />
-
       {/* CONTENT SECTION */}
       <SidebarSection
         title="CONTENT"
@@ -173,39 +145,6 @@ export default function SubmissionSidebar({
         ]}
       />
 
-      {/* EDITORIAL SECTION */}
-      {(reviewCount > 0 || editorCount > 0) && (
-        <SidebarSection
-          title="EDITORIAL"
-          items={[
-            {
-              id: 'review',
-              label: 'Review',
-              badge: reviewCount,
-              icon: MessageSquare
-            },
-            {
-              id: 'reviewers',
-              label: 'Reviewers',
-              badge: reviewCount,
-              icon: Users
-            },
-            {
-              id: 'editorial_decision',
-              label: 'Editorial Decision',
-              badge: manuscript.editorAssignments?.[0]?.recommendation ? '✓' : '○',
-              icon: CheckCircle2
-            },
-            {
-              id: 'revision_history',
-              label: 'Revision History',
-              badge: manuscript.revisions?.length || 0,
-              icon: Clock
-            }
-          ]}
-        />
-      )}
-
       {/* PUBLICATION SECTION */}
       <SidebarSection
         title="PUBLICATION"
@@ -242,21 +181,6 @@ export default function SubmissionSidebar({
           }
         ]}
       />
-
-      {/* REVISION HISTORY SECTION */}
-      {manuscript.revisions && manuscript.revisions.length > 0 && (
-        <SidebarSection
-          title="REVISION HISTORY"
-          items={[
-            {
-              id: 'revision_history',
-              label: 'Revision History',
-              badge: manuscript.revisions.length,
-              icon: Clock
-            }
-          ]}
-        />
-      )}
 
       {/* HELP SECTION */}
       <div className="mt-auto pt-4 border-t border-slate-200">

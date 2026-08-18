@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import FilePreviewModal from './FilePreviewModal';
 import SubmissionSidebar from './SubmissionSidebar';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
+import ViewSubmissionContent from './ViewSubmissionContent';
 import {
   uploadManuscriptFile,
   syncManuscriptFilesToSupabase,
@@ -2771,7 +2772,12 @@ export default function OjsSubmissionDetail({
                   <p className="text-slate-500">No manuscript selected</p>
                 )}
               </div>
-            ) : null}
+            ) : (
+              <ViewSubmissionContent
+                activeTab={activeTab}
+                manuscriptDetails={manuscriptDetails}
+              />
+            )}
 
           </div>
 
