@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, MessageSquare, Search } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { postDiscussionMessage } from '../lib/workflow';
 
 interface CoordinatorMessage {
   id: string;
@@ -58,16 +60,30 @@ export default function CoordinatorMessages({ coordinatorName = 'Coordinator', o
     if (!replyText.trim() || !selectedMessage) return;
 
     try {
+      // Get current coordinator user
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (!user || userError) {
+        console.error('Could not get current user');
+        return;
+      }
+
       if (onSendReply) {
         onSendReply(selectedMessage.manuscriptId, replyText);
       }
+
+      // Post message to database so it appears in author's chat in real-time
+      await postDiscussionMessage(
+        selectedMessage.manuscriptId,
+        user.id,
+        `[Coordinator Chat] ${replyText.trim()}`
+      );
 
       // Mark as read
       setMessages(messages.map(m =>
         m.id === selectedMessage.id ? { ...m, isRead: true } : m
       ));
 
-      // Add reply message
+      // Add reply message to local state
       const replyMessage: CoordinatorMessage = {
         id: 'reply-' + Date.now(),
         manuscriptId: selectedMessage.manuscriptId,

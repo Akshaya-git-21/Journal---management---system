@@ -245,19 +245,6 @@ export default function OjsSubmissionDetail({
       // Post to discussion messages
       await postDiscussionMessage(paper.id, user.id, `[Coordinator Chat] ${coordinatorInput.trim()}`);
       setCoordinatorInput("");
-
-      // Simulate coordinator response (in real implementation, this would come from backend)
-      setTimeout(() => {
-        const coordinatorResponse = {
-          id: 'msg-' + (Date.now() + 1),
-          sender: 'Coordinator',
-          senderRole: 'COORDINATOR',
-          text: 'Thank you for your message. I will look into this and get back to you shortly.',
-          timestamp: new Date().toISOString(),
-          isMe: false
-        };
-        setCoordinatorMessages(prev => [...prev, coordinatorResponse]);
-      }, 1500);
     } catch (error) {
       console.error('Error sending coordinator message:', error);
     }
@@ -520,6 +507,42 @@ export default function OjsSubmissionDetail({
       onUpdatePaperDiscussions(paper.id, discussionThreads);
     }
   }, [discussionThreads, paper.id]);
+
+  // Real-time subscription to coordinator messages
+  useEffect(() => {
+    if (!paper?.id) return;
+
+    const channel = supabase
+      .channel(`coordinator-messages-${paper.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'discussion_messages',
+          filter: `manuscript_id=eq.${paper.id}`
+        },
+        (payload: any) => {
+          const newMsg = payload.new;
+          if (newMsg.message && newMsg.message.includes('[Coordinator Chat]')) {
+            const coordinatorMsg = {
+              id: newMsg.id,
+              sender: newMsg.sender_name || 'Coordinator',
+              senderRole: 'COORDINATOR',
+              text: newMsg.message.replace('[Coordinator Chat] ', '').trim(),
+              timestamp: newMsg.created_at,
+              isMe: false
+            };
+            setCoordinatorMessages(prev => [...prev, coordinatorMsg]);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [paper?.id]);
 
   // Note: file/discussion realtime sync is already handled by the
   // manuscript-id-filtered subscribeToManuscriptDetails() effect above
