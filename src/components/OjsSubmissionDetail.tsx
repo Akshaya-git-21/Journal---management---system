@@ -2892,7 +2892,7 @@ export default function OjsSubmissionDetail({
             </div>
 
           </aside>
-          );
+            );
           })()}
 
         </div>
