@@ -42,17 +42,99 @@ export default function EditorEvaluationSidebar({
   onTabChange
 }: EditorEvaluationSidebarProps) {
   const [isOpen, setIsOpen] = useState(true);
+  const [localDetails, setLocalDetails] = useState<EditorManuscriptDetails | null>(details);
 
-  // Real-time updates: parent component (EditorWorkspace) handles Supabase subscriptions
-  // and passes updated details prop. Badges and counts recalculate automatically when
-  // details changes, ensuring all data stays in sync with database state without
-  // requiring additional subscriptions in this component.
+  // Real-time subscriptions for manuscript data
   useEffect(() => {
-    // Badge calculations run automatically when details prop changes
-    // This happens when EditorWorkspace receives real-time updates from Supabase
+    if (!details?.manuscript?.id) return;
+
+    const manuscriptId = details.manuscript.id;
+
+    // Subscribe to manuscript file changes
+    const filesChannel = supabase
+      .channel(`manuscript-files-${manuscriptId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'manuscript_files',
+          filter: `manuscript_id=eq.${manuscriptId}`
+        },
+        () => {
+          // Trigger update
+          setLocalDetails(prev => prev ? { ...prev } : null);
+        }
+      )
+      .subscribe();
+
+    // Subscribe to discussions
+    const discussionsChannel = supabase
+      .channel(`discussions-${manuscriptId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'discussion_messages',
+          filter: `manuscript_id=eq.${manuscriptId}`
+        },
+        () => {
+          setLocalDetails(prev => prev ? { ...prev } : null);
+        }
+      )
+      .subscribe();
+
+    // Subscribe to revisions
+    const revisionsChannel = supabase
+      .channel(`revisions-${manuscriptId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'manuscript_revisions',
+          filter: `manuscript_id=eq.${manuscriptId}`
+        },
+        () => {
+          setLocalDetails(prev => prev ? { ...prev } : null);
+        }
+      )
+      .subscribe();
+
+    // Subscribe to editor assignments
+    const assignmentChannel = supabase
+      .channel(`assignment-${manuscriptId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'editor_assignments',
+          filter: `manuscript_id=eq.${manuscriptId}`
+        },
+        () => {
+          setLocalDetails(prev => prev ? { ...prev } : null);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(filesChannel);
+      supabase.removeChannel(discussionsChannel);
+      supabase.removeChannel(revisionsChannel);
+      supabase.removeChannel(assignmentChannel);
+    };
+  }, [details?.manuscript?.id]);
+
+  // Keep local details in sync with prop
+  useEffect(() => {
+    setLocalDetails(details);
   }, [details]);
 
-  if (!details) {
+  const displayDetails = localDetails || details;
+
+  if (!displayDetails) {
     return (
       <aside className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 p-5 space-y-6 text-left font-sans overflow-y-auto">
         <div className="text-center py-8 text-slate-500">Loading evaluation details...</div>
@@ -60,36 +142,36 @@ export default function EditorEvaluationSidebar({
     );
   }
 
-  const m = details.manuscript;
-  const assignment = details.assignment;
+  const m = displayDetails.manuscript;
+  const assignment = displayDetails.assignment;
 
   // Calculate badge values from actual data
   const titleAbstractBadge = (m?.title && m?.abstract) ? '✓' : '○';
-  const authorsBadge = details.contributors?.length || 0;
-  const manuscriptBadge = details.files?.filter(f => f.file_type?.toLowerCase().includes('manuscript')).length || 0;
+  const authorsBadge = displayDetails.contributors?.length || 0;
+  const manuscriptBadge = displayDetails.files?.filter(f => f.file_type?.toLowerCase().includes('manuscript')).length || 0;
   const referencesBadge = m?.references ? '✓' : '○';
-  const supplementaryBadge = details.files?.filter(f =>
+  const supplementaryBadge = displayDetails.files?.filter(f =>
     f.file_type?.toLowerCase().includes('supplementary') ||
     f.file_type?.toLowerCase().includes('additional')
   ).length || 0;
-  const coverLetterBadge = details.files?.some(f =>
+  const coverLetterBadge = displayDetails.files?.some(f =>
     f.file_name?.toLowerCase().includes('cover') ||
     f.file_name?.toLowerCase().includes('letter')
   ) ? '✓' : '○';
-  const discussionsBadge = details.discussions?.length || 0;
+  const discussionsBadge = displayDetails.discussions?.length || 0;
 
   // Evaluation section badges
   const evaluationBadge = assignment?.assessment_status === 'SUBMITTED' ? '✓' : '○';
-  const reviewsBadge = details.reviewers?.length || 0;
+  const reviewsBadge = displayDetails.reviewers?.length || 0;
   const decisionBadge = assignment?.recommendation ? '✓' : '○';
-  const suggestionsBadge = details.suggestedReviewers?.length || 0;
-  const reviewHistoryBadge = details.revisions?.length > 0 ? '✓' : '○';
+  const suggestionsBadge = displayDetails.suggestedReviewers?.length || 0;
+  const reviewHistoryBadge = displayDetails.revisions?.length > 0 ? '✓' : '○';
 
   // Publication section badges
   const metadataBadge = '✓'; // Metadata is typically always present
-  const revisionsBadge = details.revisions?.length || 0;
+  const revisionsBadge = displayDetails.revisions?.length || 0;
   const productionBadge = m?.production_stage ? '✓' : '○';
-  const galleyFilesBadge = details.files?.filter(f =>
+  const galleyFilesBadge = displayDetails.files?.filter(f =>
     f.file_type?.toLowerCase().includes('galley')
   ).length || 0;
 

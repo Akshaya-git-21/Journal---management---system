@@ -1469,86 +1469,157 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
             )}
           </div>
 
-          {/* RIGHT SIDEBAR */}
-          <aside className="w-80 bg-slate-50 border-l border-slate-200 overflow-y-auto p-6 flex flex-col">
-            {/* DECISION */}
-            <div className="mb-6">
-              <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">DECISION</p>
-              {assignment.status === 'DECLINED' ? (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                  <p className="text-xs font-semibold text-red-700 text-center">✕ Assignment Declined</p>
+          {/* RIGHT SIDEBAR - EDITOR EVALUATION PANEL */}
+          <aside className="w-80 bg-slate-50 border-l border-slate-200 flex flex-col h-full overflow-hidden">
+            {/* HEADER - STICKY */}
+            <div className="shrink-0 bg-white border-b border-slate-200 p-6 space-y-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
+                    Editor Evaluation
+                  </h2>
+                  <p className="text-[11px] text-slate-500 mt-1">Assessment in progress</p>
                 </div>
-              ) : evaluationSubmitted ? (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-                  <p className="text-xs font-semibold text-emerald-700 text-center">✓ Decision Submitted</p>
-                  <p className="text-xs text-emerald-600 text-center mt-1">Awaiting coordinator action</p>
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-50 border border-blue-200 rounded-md text-[11px] font-semibold text-blue-700">
+                  <Clock className="w-3 h-3" />
+                  In Progress
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-600">Evaluation Progress</span>
+                  <span className="font-semibold text-slate-900">1 of 5</span>
                 </div>
-              ) : (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <p className="text-xs font-semibold text-blue-700 text-center">📝 Complete Evaluation</p>
-                  <p className="text-xs text-blue-600 text-center mt-1">Decision buttons at bottom of form</p>
+                <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500" style={{ width: '20%' }} />
                 </div>
-              )}
+              </div>
             </div>
 
-            {/* REVIEW ROUND */}
-            <div className="mb-6 bg-white border border-slate-200 rounded-lg p-4">
-              <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4">REVIEW ROUND</p>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs text-slate-600">Status</p>
-                  <p className="text-sm font-semibold text-blue-600">{manuscript.status || 'In Progress'}</p>
+            {/* SCROLLABLE CONTENT */}
+            <div className="flex-1 overflow-y-auto">
+              <div className="p-6 space-y-6">
+
+                {/* DECISION STATUS */}
+                <div className="space-y-3">
+                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
+                    Decision Status
+                  </h3>
+                  {assignment.status === 'DECLINED' ? (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <p className="text-xs font-semibold text-red-700 text-center">✕ Assignment Declined</p>
+                    </div>
+                  ) : evaluationSubmitted ? (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                      <p className="text-xs font-semibold text-emerald-700 text-center">✓ Evaluation Submitted</p>
+                      <p className="text-xs text-emerald-600 text-center mt-1">Awaiting coordinator action</p>
+                    </div>
+                  ) : (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <p className="text-xs font-semibold text-blue-700 text-center">In Progress</p>
+                      <p className="text-xs text-blue-600 text-center mt-1">Complete your evaluation below</p>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <p className="text-xs text-slate-600">Reviewers Assigned</p>
-                  <p className="text-sm font-bold text-slate-900">{reviewerAssignments?.length || 0}</p>
+
+                {/* REVIEW ROUND SUMMARY */}
+                <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-3">
+                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
+                    Review Round
+                  </h3>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-slate-500 uppercase">Status</span>
+                      <span className="text-[13px] font-bold text-slate-900">{manuscript.status?.replace(/_/g, ' ') || 'In Progress'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-slate-500 uppercase">Reviewers Assigned</span>
+                      <span className="text-[13px] font-bold text-slate-900">{reviewerAssignments?.length || 0}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-slate-500 uppercase">Reviews Completed</span>
+                      <span className="text-[13px] font-bold text-slate-900">
+                        {reviewerAssignments?.filter(r => r.status === 'SUBMITTED').length || 0} / {reviewerAssignments?.length || 0}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs text-slate-600">Reviews Completed</p>
-                  <p className="text-sm font-bold text-slate-900">
-                    {reviewerAssignments?.filter(r => r.status === 'SUBMITTED').length || 0} / {reviewerAssignments?.length || 0}
-                  </p>
-                </div>
+
+                {/* ASSIGNED REVIEWERS */}
                 {reviewerAssignments && reviewerAssignments.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-slate-200">
-                    <p className="text-xs text-slate-600 mb-2">Assigned Reviewers:</p>
-                    {reviewerAssignments.slice(0, 3).map((ra) => (
-                      <div key={ra.id} className="text-xs mb-1 p-1 rounded">
-                        <span className="text-slate-700">
-                          • {details.profiles.get(ra.reviewer_id)?.name || 'Unknown'} ({ra.status || 'Pending'})
-                        </span>
-                      </div>
-                    ))}
-                    {reviewerAssignments.length > 3 && (
-                      <p className="text-xs text-slate-500 mt-1">+{reviewerAssignments.length - 3} more</p>
-                    )}
+                  <div className="space-y-3">
+                    <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
+                      Assigned Reviewers
+                    </h3>
+                    <div className="space-y-2">
+                      {reviewerAssignments.slice(0, 3).map((ra) => (
+                        <div key={ra.id} className="p-3 bg-white rounded-lg border border-slate-200">
+                          <p className="text-sm font-semibold text-slate-900">
+                            {details.profiles.get(ra.reviewer_id)?.name || 'Unknown'}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {ra.status === 'SUBMITTED' ? '✓ Review Submitted' : `⏳ ${ra.status || 'Pending'}`}
+                          </p>
+                        </div>
+                      ))}
+                      {reviewerAssignments.length > 3 && (
+                        <p className="text-xs text-slate-500 text-center py-2">+{reviewerAssignments.length - 3} more reviewers</p>
+                      )}
+                    </div>
                   </div>
                 )}
+
+                {/* SUGGESTED PEER REVIEWERS */}
+                <div className="space-y-3">
+                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
+                    Suggested Reviewers ({details.suggestedReviewers?.length || 0})
+                  </h3>
+                  <p className="text-[11px] text-slate-600">
+                    {evaluationSubmitted
+                      ? '✓ Submitted with your evaluation'
+                      : 'Suggest reviewers from the evaluation form'}
+                  </p>
+                  <div className="space-y-2">
+                    {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
+                      details.suggestedReviewers.map((reviewer) => (
+                        <div key={reviewer.id} className="p-3 bg-white rounded-lg border border-slate-200">
+                          <p className="text-sm font-semibold text-slate-900">
+                            👤 {reviewer.name}
+                          </p>
+                          <p className="text-xs text-slate-600 mt-0.5">{reviewer.email}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-3 bg-slate-100 rounded-lg text-center">
+                        <p className="text-xs text-slate-500">No reviewers suggested yet</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
               </div>
             </div>
 
-            {/* SUGGESTED PEER REFEREES */}
-            <div className="bg-white border border-slate-200 rounded-lg p-4">
-              <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">SUGGESTED PEER REFEREES ({details.suggestedReviewers?.length || 0})</p>
-              <p className="text-xs text-slate-600 mb-4">
-                {evaluationSubmitted
-                  ? 'Reviewer suggestions submitted with your evaluation.'
-                  : 'Suggest 2+ potential reviewers from the Editor Evaluation tab.'}
-              </p>
-              <div className="space-y-3">
-                {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
-                  details.suggestedReviewers.map((reviewer) => (
-                    <div key={reviewer.id} className="p-3 bg-slate-50 rounded border border-slate-200">
-                      <p className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                        <span>👤</span> {reviewer.name}
-                      </p>
-                      <p className="text-xs text-slate-600">{reviewer.email}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-xs text-slate-400 text-center py-4">No reviewers suggested yet</p>
-                )}
-              </div>
+            {/* FOOTER - STICKY ACTIONS */}
+            <div className="shrink-0 bg-white border-t border-slate-200 p-6 space-y-3">
+              <button
+                disabled={evaluationSubmitted}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save Draft
+              </button>
+              <button
+                disabled={evaluationSubmitted}
+                className={`w-full px-4 py-2.5 rounded-lg text-[13px] font-semibold text-white transition-colors flex items-center justify-center gap-2 ${
+                  evaluationSubmitted
+                    ? 'bg-slate-300 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                <Send className="w-4 h-4" />
+                {evaluationSubmitted ? 'Evaluation Submitted' : 'Submit Evaluation'}
+              </button>
             </div>
           </aside>
         </div>
