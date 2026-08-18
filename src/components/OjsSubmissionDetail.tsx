@@ -1109,7 +1109,7 @@ export default function OjsSubmissionDetail({
                           </div>
 
                           <button
-                            onClick={() => setViewState('ADD_DISCUSSION')}
+                            disabled style={{display: 'none'}}
                             className="bg-[#eefcf4] border border-[#008751]/30 text-[#004d2e] hover:bg-[#e1f9eb] px-3 py-1.5 rounded-lg text-[12px] font-bold flex items-center gap-1 cursor-pointer transition shadow-2xs"
                           >
                             <Plus className="w-3.5 h-3.5 text-[#008751] stroke-[3]" />
@@ -1309,7 +1309,7 @@ export default function OjsSubmissionDetail({
 
                           <div className="flex items-center gap-3">
                             <button
-                              onClick={() => setViewState('ADD_DISCUSSION')}
+                              disabled style={{display: 'none'}}
                               className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl transition cursor-pointer"
                               title="New Thread Inquiry"
                             >
@@ -1404,7 +1404,7 @@ export default function OjsSubmissionDetail({
                         {/* Pre-review custom links footer bar */}
                         <div className="bg-white px-4 py-2 border-t border-slate-100 flex items-center justify-between text-[10.5px] font-mono shrink-0">
                           <button
-                            onClick={() => setViewState('ADD_DISCUSSION')}
+                            disabled style={{display: 'none'}}
                             className="text-[#008751] hover:underline font-extrabold flex items-center gap-1 cursor-pointer"
                           >
                             <span>+ Official Thread Inquiry</span>
@@ -2129,7 +2129,7 @@ export default function OjsSubmissionDetail({
 
                         <button
                           id="initiate-discussion-btn"
-                          onClick={() => setViewState('ADD_DISCUSSION')}
+                          disabled style={{display: 'none'}}
                           className="bg-[#008751] hover:bg-[#007043] transition-all text-white font-extrabold text-xs px-5 py-2.5 rounded-lg shadow-sm hover:shadow-md cursor-pointer tracking-wider flex items-center gap-1.5"
                         >
                           <Plus className="w-4 h-4 text-white font-bold stroke-[3]" />
