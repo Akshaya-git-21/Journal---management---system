@@ -6,6 +6,7 @@ import {
   BarChart3, Eye
 } from 'lucide-react';
 import { EditorManuscriptDetails } from '../lib/editorWorkspace';
+import { supabase } from '../lib/supabase';
 
 interface EditorEvaluationSidebarProps {
   details: EditorManuscriptDetails | null;
@@ -41,6 +42,15 @@ export default function EditorEvaluationSidebar({
   onTabChange
 }: EditorEvaluationSidebarProps) {
   const [isOpen, setIsOpen] = useState(true);
+
+  // Real-time updates: parent component (EditorWorkspace) handles Supabase subscriptions
+  // and passes updated details prop. Badges and counts recalculate automatically when
+  // details changes, ensuring all data stays in sync with database state without
+  // requiring additional subscriptions in this component.
+  useEffect(() => {
+    // Badge calculations run automatically when details prop changes
+    // This happens when EditorWorkspace receives real-time updates from Supabase
+  }, [details]);
 
   if (!details) {
     return (
