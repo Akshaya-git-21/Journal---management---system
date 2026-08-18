@@ -740,7 +740,7 @@ export default function OjsSubmissionDetail({
             </div>
 
             {/* TWO-COLUMN STACK (Center Column + Right Details Sidebar) */}
-            <div className="w-full flex flex-col lg:flex-row items-start gap-6 lg:gap-8">
+            <div className="w-full flex flex-col lg:flex-row items-start gap-6 lg:gap-8 -mt-4">
 
               {/* CENTER CORE COLUMN (COLUMN 2) */}
               <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full lg:min-w-0">
