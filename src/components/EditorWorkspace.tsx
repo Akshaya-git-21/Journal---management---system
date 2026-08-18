@@ -37,6 +37,7 @@ import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock
 import RevisionReview from './RevisionReview';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
+import EditorEvaluationSidebar from './EditorEvaluationSidebar';
 
 interface EditorWorkspaceProps {
   manuscripts?: any[];
@@ -473,7 +474,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>(initialReviewerAssignments || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'decision' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments'>('title');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'evaluation_timeline' | 'title_abstract' | 'authors' | 'manuscript' | 'references' | 'supplementary' | 'cover_letter' | 'discussions' | 'editor_evaluation' | 'reviews' | 'decision' | 'suggestions' | 'review_history' | 'metadata' | 'revisions' | 'production' | 'galley_files' | 'title' | 'contributors' | 'files' | 'evaluation' | 'history' | 'comments'>('editor_evaluation');
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [decisionError, setDecisionError] = useState('');
   const [activePublication, setActivePublication] = useState<'title' | 'contributors' | 'metadata' | 'references' | 'galleries' | 'jats' | 'permissions' | 'issue'>('title');
@@ -698,122 +699,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
       )}
 
       {/* LEFT SIDEBAR */}
-      <aside className="w-64 bg-white border-r border-slate-200 overflow-y-auto p-6 flex flex-col">
-        {/* WORKFLOW */}
-        <div className="mb-8">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">WORKFLOW</p>
-          <div className="space-y-2">
-            {computeWorkflowStages().map((item) => (
-              <div key={item.label} className="flex items-center gap-2">
-                {item.done ? (
-                  <Check className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-                ) : (
-                  <div className="w-5 h-5 border-2 border-slate-300 rounded flex-shrink-0" />
-                )}
-                <span className={`text-sm ${item.done ? 'text-slate-900 font-semibold' : 'text-slate-600'}`}>
-                  {item.label}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* PUBLICATION */}
-        <div className="mb-8">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">PUBLICATION</p>
-          <div className="space-y-2">
-            {[
-              { id: 'title', label: 'Title & Abstract', icon: '📄' },
-              { id: 'contributors', label: 'Contributors', icon: '👥' },
-              { id: 'metadata', label: 'Metadata', icon: '⚙️' },
-              { id: 'references', label: 'References', icon: '📚' },
-              { id: 'galleries', label: 'Galleries', icon: '🖼️' },
-              { id: 'jats', label: 'JATS XML', icon: '📋' },
-              { id: 'permissions', label: 'Permissions & Disclosure', icon: '🔐' },
-              { id: 'issue', label: 'Issue', icon: '📰' }
-            ].map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setActivePublication(item.id as any)}
-                className={`w-full text-left flex items-center gap-2 text-sm p-2 rounded transition ${
-                  activePublication === item.id
-                    ? 'bg-emerald-50 text-emerald-700 font-semibold'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-              >
-                <span>{item.icon}</span>
-                <span>{item.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* STATUS TRACKING */}
-        <div className="mb-8">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">STATUS TRACKING</p>
-          <div className="space-y-2">
-            {details.statusHistory && details.statusHistory.length > 0 ? (
-              details.statusHistory.map((status, idx) => (
-                <div key={idx} className="flex items-start gap-2">
-                  <Check className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <p className="text-sm text-slate-900 font-semibold">{status.to_status}</p>
-                    {status.created_at && <p className="text-xs text-slate-500">{formatDate(status.created_at)}</p>}
-                    {status.note && <p className="text-xs text-slate-600 mt-1">{status.note}</p>}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-xs text-slate-500">No status history available.</p>
-            )}
-          </div>
-        </div>
-
-        {/* COORDINATOR NOTIFICATIONS */}
-        <div className="mb-6 bg-white border border-slate-200 rounded-lg p-4">
-          <p className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">COORDINATOR ACTIONS</p>
-          <div className="space-y-2">
-            <button
-              onClick={() => {
-                notifyCoordinator(manuscript.id, currentUser?.email || 'unknown', 'READY_FOR_REVIEW', 'Reviewers assigned and ready for review');
-                setError('Notification sent to coordinator');
-                setTimeout(() => setError(''), 3000);
-              }}
-              className="w-full text-left text-xs px-3 py-2 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100 font-bold transition"
-            >
-              ✓ Ready for Review
-            </button>
-            <button
-              onClick={() => {
-                notifyCoordinator(manuscript.id, currentUser?.email || 'unknown', 'REVIEWS_COMPLETE', 'All reviews received and compiled');
-                setError('Notification sent to coordinator');
-                setTimeout(() => setError(''), 3000);
-              }}
-              className="w-full text-left text-xs px-3 py-2 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 font-bold transition"
-            >
-              ✓ Reviews Complete
-            </button>
-            <button
-              onClick={() => {
-                notifyCoordinator(manuscript.id, currentUser?.email || 'unknown', 'DECISION_READY', 'Final editorial decision submitted');
-                setError('Notification sent to coordinator');
-                setTimeout(() => setError(''), 3000);
-              }}
-              className="w-full text-left text-xs px-3 py-2 bg-purple-50 text-purple-700 rounded hover:bg-purple-100 font-bold transition"
-            >
-              ✓ Decision Ready
-            </button>
-          </div>
-          <p className="text-xs text-slate-500 mt-3 text-center">Alerts coordination team</p>
-        </div>
-
-        {/* NEED HELP */}
-        <div className="mt-auto p-4 bg-slate-50 rounded-lg border border-slate-200">
-          <p className="font-bold text-sm text-slate-900 mb-1">Need Help?</p>
-          <p className="text-xs text-slate-600 mb-3">Contact Support</p>
-          <button className="text-xs text-[#008751] font-bold hover:underline">Learn more →</button>
-        </div>
-      </aside>
+      <EditorEvaluationSidebar
+        details={details}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+      />
 
       {/* MAIN CONTENT */}
       <main className="flex-1 flex flex-col overflow-hidden">
