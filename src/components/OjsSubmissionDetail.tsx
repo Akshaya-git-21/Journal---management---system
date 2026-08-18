@@ -695,7 +695,7 @@ export default function OjsSubmissionDetail({
     ];
   };
 
-  const isSubmissionDashboard = activeTab === 'SUBMISSION' && viewState === 'DASHBOARD';
+  const isSubmissionDashboard = (activeTab === 'SUBMISSION' || activeTab === 'overview') && viewState === 'DASHBOARD';
 
   return (
     <div id="ojs-submission-detail-container" className="w-full bg-[#e8f3ed] min-h-screen text-slate-950 flex flex-col md:flex-row items-stretch border-t border-slate-200">
@@ -732,26 +732,9 @@ export default function OjsSubmissionDetail({
                 <p className="text-[12px] text-[#005e38] mt-1 font-medium">Track and manage your manuscript submission.</p>
               </div>
               <div className="flex items-center gap-3">
-                {/* + New Submission Button */}
-                <button
-                  onClick={() => alert("Simulating launching a new academic manuscript submission workflow in TULITICS Author Workspace.")}
-                  className="bg-[#008751] hover:bg-[#007043] text-white text-[14px] font-bold px-5 py-2.5 rounded-full flex items-center gap-1.5 transition duration-150 shadow-md cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
-                >
-                  <Plus className="w-4 h-4 text-white font-bold stroke-[3]" />
-                  <span>New Submission</span>
-                </button>
-                {/* Notification Bell */}
-                <div className="relative p-2.5 bg-white border border-emerald-200 hover:bg-emerald-50 rounded-full transition cursor-pointer shadow-2xs">
-                  <div className="absolute right-1 top-1 w-2 h-2 bg-red-600 rounded-full border border-white" />
-                  <Bell className="w-4 h-4 text-slate-900 stroke-[2.5]" />
-                </div>
-                {/* Profile Avatar Block */}
-                <div className="flex items-center gap-2 cursor-pointer hover:opacity-90 select-none pl-2 border-l border-emerald-200">
-                  <div className="w-9 h-9 rounded-full bg-[#008751] text-white font-bold text-xs flex items-center justify-center font-mono shadow-xs border border-white">
-                    {(currentUser?.name || 'U').split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase()}
-                  </div>
-                  <span className="text-[14px] font-semibold text-black font-sans hidden sm:inline">{currentUser?.name || 'Author'}</span>
-                  <ChevronDown className="w-4 h-4 text-slate-900 stroke-[2.5]" />
+                {/* Profile Section */}
+                <div className="text-right">
+                  <span className="text-[14px] font-semibold text-black font-sans block">{currentUser?.name || 'Author'}</span>
                 </div>
               </div>
             </div>

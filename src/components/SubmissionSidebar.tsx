@@ -2,7 +2,7 @@ import React from 'react';
 import {
   ChevronUp, ChevronDown, Check, FileText, MessageSquare, SquarePen, Printer,
   Globe, Layers, Sliders, Briefcase, AlertCircle, HelpCircle, ExternalLink,
-  Users, Clock, CheckCircle2, Circle, AlertTriangle, Plus, BookOpen
+  Users, Clock, CheckCircle2, Circle, AlertTriangle, Plus, BookOpen, LayoutDashboard
 } from 'lucide-react';
 import { AuthorManuscriptDetails } from '../lib/authorManuscriptDetails';
 
@@ -101,6 +101,18 @@ export default function SubmissionSidebar({
 
   return (
     <aside className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 p-5 space-y-6 text-left font-sans overflow-y-auto">
+
+      {/* OVERVIEW TAB */}
+      <SidebarSection
+        title="OVERVIEW"
+        items={[
+          {
+            id: 'overview',
+            label: 'Dashboard',
+            icon: LayoutDashboard
+          }
+        ]}
+      />
 
       {/* CONTENT SECTION */}
       <SidebarSection

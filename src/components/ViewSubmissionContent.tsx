@@ -290,8 +290,26 @@ export default function ViewSubmissionContent({
     </div>
   );
 
+  const renderOverview = () => (
+    <div className="bg-white border border-slate-200 rounded-xl p-6">
+      <h3 className="text-sm font-bold text-slate-900 mb-4 uppercase tracking-wide">Submission Overview</h3>
+      <div className="space-y-4">
+        <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 rounded-lg p-4">
+          <p className="text-sm font-semibold text-slate-900 mb-2">{m?.title || 'Untitled Manuscript'}</p>
+          <p className="text-xs text-slate-600">Manuscript ID: {m?.id}</p>
+          <p className="text-xs text-slate-600 mt-1">Status: <span className="font-semibold text-emerald-700">{m?.status || 'Not submitted'}</span></p>
+          <p className="text-xs text-slate-600 mt-1">Submitted: {m?.submitted_at ? new Date(m.submitted_at).toLocaleDateString() : 'Not yet submitted'}</p>
+        </div>
+        <p className="text-sm text-slate-600 leading-relaxed">
+          Use the navigation menu on the left to view and edit different sections of your submission, including content, publication details, and more.
+        </p>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex-grow flex flex-col p-6 overflow-y-auto">
+      {activeTab === 'overview' && renderOverview()}
       {activeTab === 'title_abstract' && renderTitleAbstract()}
       {activeTab === 'authors' && renderAuthors()}
       {activeTab === 'manuscript' && renderManuscript()}
