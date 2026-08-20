@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, listActiveProfilesByRole, assignEditor } from '../../../lib/workflow';
 import { CheckCircle2, Circle, AlertCircle, FileText, Loader2 } from 'lucide-react';
+import { AssignmentConfirmationDialog } from '../../AssignmentConfirmationDialog';
 
 interface Props {
   manuscript: ManuscriptRow;
@@ -31,29 +32,33 @@ export function OverviewTab({
   const [selectedEditorId, setSelectedEditorId] = useState('');
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState('');
+  const [showEditorConfirmation, setShowEditorConfirmation] = useState(false);
 
   useEffect(() => {
     if (manuscript.status !== 'SUBMITTED') return;
     listActiveProfilesByRole('EDITOR').then(setAvailableEditors).catch((e) => setAssignError(e.message));
   }, [manuscript.status]);
 
-  const handleAssignEditor = async () => {
+  const handleAssignEditorClick = () => {
+    if (!selectedEditorId) return;
+    setShowEditorConfirmation(true);
+  };
+
+  const handleConfirmEditorAssignment = async () => {
     if (!selectedEditorId) return;
     setAssigning(true);
     setAssignError('');
     try {
       await assignEditor(manuscript.id, selectedEditorId);
       onWorkflowChange?.();
+      setShowEditorConfirmation(false);
+      setSelectedEditorId('');
     } catch (e: any) {
       setAssignError(e.message || 'Failed to assign editor');
     } finally {
       setAssigning(false);
     }
   };
-
-  const daysAgo = Math.floor(
-    (Date.now() - (manuscript.submitted_at ? new Date(manuscript.submitted_at).getTime() : 0)) / (1000 * 60 * 60 * 24)
-  );
 
   // Fixed status description - account for evaluation submission
   const getStatusDescription = (): string => {
@@ -78,17 +83,17 @@ export function OverviewTab({
       {activeEditor && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6">
           <h3 className="text-sm font-black text-slate-900 mb-4">Editor Assignment & Recommendation</h3>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="border-r border-slate-200 pr-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="sm:border-r border-slate-200 sm:pr-4">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Editor</p>
               <p className="text-sm font-semibold text-slate-900">{profiles[activeEditor.editor_id]?.name || 'Unknown'}</p>
-              <p className="text-xs text-slate-600">{profiles[activeEditor.editor_id]?.email}</p>
+              <p className="text-xs text-slate-600 truncate">{profiles[activeEditor.editor_id]?.email}</p>
             </div>
-            <div className="border-r border-slate-200 pr-4">
+            <div className="xl:border-r border-slate-200 xl:pr-4">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Assignment Status</p>
               <p className="text-sm font-semibold text-slate-900">{activeEditor.status}</p>
             </div>
-            <div className="border-r border-slate-200 pr-4">
+            <div className="sm:border-r border-slate-200 sm:pr-4">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Evaluation</p>
               <p className="text-sm font-semibold text-emerald-700">{activeEditor.assessment_status === 'SUBMITTED' ? '✓ Submitted' : 'Not Started'}</p>
               {activeEditor.assessment_submitted_at && (
@@ -147,28 +152,69 @@ export function OverviewTab({
         </div>
       </div>
 
-      {/* Editor-Suggested Reviewers Card */}
-      {suggestedReviewers.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-4">
-            Editor-Suggested Reviewers ({suggestedReviewers.length})
-          </h3>
-          <div className="space-y-3">
-            {suggestedReviewers.map((reviewer) => (
-              <div key={reviewer.id} className="border border-slate-200 rounded-lg p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <p className="font-semibold text-slate-900">{reviewer.name}</p>
-                    <p className="text-xs text-slate-600">{reviewer.email}</p>
-                    {reviewer.note && <p className="text-xs text-slate-500 mt-1">Expertise: {reviewer.note}</p>}
+      {/* Suggested Reviewers Card -- merges Author and Editor suggestions,
+          deduplicating by email so a reviewer suggested by both shows once
+          with a combined "Author & Editor" badge. */}
+      {(() => {
+        const merged = new Map<string, { id: string; name: string; email: string; note: string | null; sources: Set<'AUTHOR' | 'EDITOR'> }>();
+        for (const reviewer of suggestedReviewers) {
+          const key = reviewer.email.trim().toLowerCase();
+          const existing = merged.get(key);
+          if (existing) {
+            existing.sources.add(reviewer.suggested_by);
+            if (!existing.note && reviewer.note) existing.note = reviewer.note;
+          } else {
+            merged.set(key, {
+              id: reviewer.id,
+              name: reviewer.name,
+              email: reviewer.email,
+              note: reviewer.note,
+              sources: new Set([reviewer.suggested_by]),
+            });
+          }
+        }
+        const uniqueReviewers = Array.from(merged.values());
+
+        if (uniqueReviewers.length === 0) return null;
+
+        return (
+          <div className="bg-white border border-slate-200 rounded-2xl p-6">
+            <h3 className="text-sm font-black text-slate-900 mb-4">
+              Suggested Reviewers ({uniqueReviewers.length})
+            </h3>
+            <div className="space-y-3">
+              {uniqueReviewers.map((reviewer) => {
+                const hasAuthor = reviewer.sources.has('AUTHOR');
+                const hasEditor = reviewer.sources.has('EDITOR');
+                const badgeLabel = hasAuthor && hasEditor
+                  ? 'Suggested by Author & Editor'
+                  : hasAuthor
+                  ? 'Suggested by Author'
+                  : 'Suggested by Editor';
+                const badgeStyle = hasAuthor && hasEditor
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : hasAuthor
+                  ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                  : 'bg-teal-50 text-teal-700 border border-teal-200';
+                return (
+                  <div key={reviewer.id} className="border border-slate-200 rounded-lg p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold text-slate-900">{reviewer.name}</p>
+                        <p className="text-xs text-slate-600">{reviewer.email}</p>
+                        {reviewer.note && <p className="text-xs text-slate-500 mt-1">Expertise: {reviewer.note}</p>}
+                      </div>
+                      <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${badgeStyle}`}>
+                        {badgeLabel}
+                      </span>
+                    </div>
                   </div>
-                  <span className="text-xs font-bold text-slate-500">Suggested by Editor</span>
-                </div>
-              </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Review Board Summary Card */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
@@ -230,7 +276,7 @@ export function OverviewTab({
                   ))}
                 </select>
                 <button
-                  onClick={handleAssignEditor}
+                  onClick={handleAssignEditorClick}
                   disabled={!selectedEditorId || assigning}
                   className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2"
                 >
@@ -249,26 +295,21 @@ export function OverviewTab({
         )}
       </div>
 
-      {/* SLA / Age Card */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
-        <h3 className="text-sm font-black text-slate-900 mb-4">SLA / Age</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <p className="text-3xl font-black text-slate-900">{daysAgo}</p>
-            <p className="text-xs text-slate-600 mt-1">Days since submission</p>
-          </div>
-          <div>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">SLA Target</p>
-            <p className="text-sm font-semibold text-slate-900">30 Days</p>
-          </div>
-          <div>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">SLA Status</p>
-            <p className={`text-sm font-bold ${daysAgo > 30 ? 'text-red-700' : daysAgo > 25 ? 'text-amber-700' : 'text-emerald-700'}`}>
-              {daysAgo > 30 ? 'Overdue' : daysAgo > 25 ? 'At Risk' : 'On Track'}
-            </p>
-          </div>
-        </div>
-      </div>
+      <AssignmentConfirmationDialog
+        isOpen={showEditorConfirmation}
+        title="Confirm Editor Assignment"
+        message="Do you confirm the assignment of this editor to review this manuscript?"
+        editorName={selectedEditorId ? profiles[selectedEditorId]?.name : undefined}
+        editorEmail={selectedEditorId ? profiles[selectedEditorId]?.email : undefined}
+        confirmText="Confirm Assign"
+        cancelText="Cancel"
+        isLoading={assigning}
+        onConfirm={handleConfirmEditorAssignment}
+        onCancel={() => {
+          setShowEditorConfirmation(false);
+          setSelectedEditorId('');
+        }}
+      />
     </div>
   );
 }

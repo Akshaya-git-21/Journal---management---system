@@ -31,13 +31,15 @@ import {
   categorizeError,
   validateAssignmentData,
   formatDate,
-  formatDateTime
+  formatDateTime,
+  addSuggestedReviewer
 } from '../lib/editorWorkspace';
 import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send } from 'lucide-react';
 import RevisionReview from './RevisionReview';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
 import EditorEvaluationSidebar from './EditorEvaluationSidebar';
+import FilePreviewModal from './FilePreviewModal';
 
 interface EditorWorkspaceProps {
   manuscripts?: any[];
@@ -77,7 +79,8 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
     copyedit: false
   });
   const [showAcceptModal, setShowAcceptModal] = useState(false);
-  const [respondingToAssignment, setRespondingToAssignment] = useState(false);
+  const [acceptingAssignment, setAcceptingAssignment] = useState(false);
+  const [decliningAssignment, setDecliningAssignment] = useState(false);
   const [sectionFilter, setSectionFilter] = useState<string | null>(null);
 
   // Real predicates over actual assignment/manuscript/reviewer data -- no
@@ -165,7 +168,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
       <AcceptDeclineModal
         details={selected}
         onAccept={async () => {
-          setRespondingToAssignment(true);
+          setAcceptingAssignment(true);
           try {
             await respondToAssignment(selected.assignment.id, true);
             setShowAcceptModal(false);
@@ -173,11 +176,11 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
           } catch (error: any) {
             alert('Error accepting assignment: ' + error.message);
           } finally {
-            setRespondingToAssignment(false);
+            setAcceptingAssignment(false);
           }
         }}
         onDecline={async () => {
-          setRespondingToAssignment(true);
+          setDecliningAssignment(true);
           try {
             await respondToAssignment(selected.assignment.id, false);
             setShowAcceptModal(false);
@@ -186,10 +189,11 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
           } catch (error: any) {
             alert('Error declining assignment: ' + error.message);
           } finally {
-            setRespondingToAssignment(false);
+            setDecliningAssignment(false);
           }
         }}
-        isLoading={respondingToAssignment}
+        isAcceptLoading={acceptingAssignment}
+        isDeclineLoading={decliningAssignment}
       />
     );
   }
@@ -374,27 +378,6 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-black text-slate-900">Submissions Intake Checksum Checklist</h2>
-              <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] px-2.5 py-1 rounded-full font-bold">Automatic Validation Engine Active</span>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { check: true, text: 'PDF Layout Constraints Verified (Format OK)' },
-                { check: false, text: 'CrossRef Manuscript Uniqueness: 98.4% Uniqueness Check' },
-                { check: true, text: 'Author Identity Header Metadata Purged' },
-                { check: true, text: 'Mandatory COI Conflict Disclosures Signed' }
-              ].map((item, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <div className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 mt-0.5 ${item.check ? 'bg-emerald-100 border-emerald-300' : 'bg-slate-100 border-slate-300'}`}>
-                    {item.check && <CheckCircle className="w-4 h-4 text-emerald-600" />}
-                  </div>
-                  <p className={`text-xs ${item.check ? 'text-slate-700' : 'text-slate-500 line-through'}`}>{item.text}</p>
-                </div>
-              ))}
-            </div>
-          </div>
 
           {loading ? (
             <div className="flex items-center justify-center py-24 text-slate-400">
@@ -414,36 +397,28 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
                 </button>
               </div>
             ) : (
-              <AssignmentList rows={filteredRows} onOpen={setSelectedManuscriptId} />
+              <AssignmentListWithPagination rows={filteredRows} onOpen={setSelectedManuscriptId} />
             )}
 
-          {!selected && filteredRows.length > 0 && (
-            <div className="grid grid-cols-4 gap-4 mt-8">
-              {[
-                { icon: '🔐', title: 'Strict Workflow Lock', desc: 'This workspace is protected under strict workflow governance.' },
-                { icon: '🏢', title: 'Multi-Tenant Secure', desc: 'Isolated editorial environment with role-based access.' },
-                { icon: '🤖', title: 'Smart Review Orchestration', desc: 'Automate assignments, reminders and decision pathways.' },
-                { icon: '📊', title: 'Data Integrity First', desc: 'All actions are logged and fully auditable.' }
-              ].map((item, i) => (
-                <div key={i} className="bg-white border border-slate-200 rounded-xl p-4">
-                  <div className="text-2xl mb-2">{item.icon}</div>
-                  <h3 className="text-xs font-bold text-slate-900 mb-1">{item.title}</h3>
-                  <p className="text-[10px] text-slate-500">{item.desc}</p>
-                  <button className="text-emerald-600 text-[10px] font-bold mt-2 hover:text-emerald-700">Learn more →</button>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </main>
     </div>
   );
 }
 
-function AssignmentList({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onOpen: (id: string) => void }) {
+function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onOpen: (id: string) => void }) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   if (rows.length === 0) {
     return <div className="text-center py-24 bg-white border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">No manuscript assignments yet.</div>;
   }
+
+  const totalPages = Math.ceil(rows.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedRows = rows.slice(startIndex, endIndex);
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
       <table className="w-full text-left text-sm">
@@ -456,7 +431,7 @@ function AssignmentList({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onO
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {rows.map((details) => (
+          {paginatedRows.map((details) => (
             <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id)}>
               <td className="px-4 py-3 font-bold text-slate-800">{details.manuscript.title}</td>
               <td className="px-4 py-3"><StatusBadge status={details.manuscript.status} /></td>
@@ -466,6 +441,45 @@ function AssignmentList({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onO
           ))}
         </tbody>
       </table>
+
+      {totalPages > 1 && (
+        <div className="border-t border-slate-100 bg-slate-50 px-6 py-4 flex items-center justify-between">
+          <div className="text-xs text-slate-600 font-medium">
+            Showing {startIndex + 1} to {Math.min(endIndex, rows.length)} of {rows.length} manuscripts
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ← Previous
+            </button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`w-8 h-8 rounded text-xs font-semibold transition ${
+                    currentPage === page
+                      ? 'bg-[#008751] text-white'
+                      : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={currentPage === totalPages}
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -474,11 +488,17 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>(initialReviewerAssignments || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'title' | 'contributors' | 'files' | 'evaluation' | 'decision' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments'>('evaluation');
+  const [sidebarSection, setSidebarSection] = useState<'dashboard' | 'evaluation_timeline' | 'title_abstract' | 'authors' | 'manuscript' | 'references' | 'supplementary' | 'cover_letter' | 'discussions' | 'editor_evaluation' | 'reviews' | 'decision' | 'suggestions' | 'review_history' | 'metadata' | 'revisions' | 'production' | 'galley_files'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'files' | 'evaluation' | 'decision' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments'>('files');
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [decisionError, setDecisionError] = useState('');
   const [activePublication, setActivePublication] = useState<'title' | 'contributors' | 'metadata' | 'references' | 'galleries' | 'jats' | 'permissions' | 'issue'>('title');
   const [currentPage] = useState(1);
+  const [showAddReviewerForm, setShowAddReviewerForm] = useState(false);
+  const [newReviewerForm, setNewReviewerForm] = useState({ name: '', email: '', note: '' });
+  const [addingReviewer, setAddingReviewer] = useState(false);
+  const [savingReviewer, setSavingReviewer] = useState(false);
+  const [saveReviewerError, setSaveReviewerError] = useState('');
 
   // Phase 2: Reviewer Management (display only — assignment happens via Coordinator Review Board)
 
@@ -496,6 +516,8 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   // Editor Evaluation Workflow
   const [assignmentAccepted] = useState(assignment.status === 'ACCEPTED');
   const evaluationSubmitted = assignment.assessment_status === 'SUBMITTED';
+
+  const [previewFile, setPreviewFile] = useState<any>(null);
 
   // Phase 4: Set up real-time subscriptions for manuscript updates
   useEffect(() => {
@@ -515,6 +537,9 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
           setDiscussions(updated);
         },
         onStatusChange: () => {
+          onChanged();
+        },
+        onAssignmentChange: () => {
           onChanged();
         }
       }
@@ -669,7 +694,6 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     { id: 'contributors', label: 'Contributors' },
     { id: 'files', label: 'Files for Review' },
     { id: 'evaluation', label: 'Editor Evaluation' },
-    { id: 'decision', label: 'Decision' },
     { id: 'reviews', label: 'Reviews' },
     { id: 'suggestions', label: 'Suggestions' },
     { id: 'history', label: 'Review History' },
@@ -701,12 +725,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
       {/* LEFT SIDEBAR */}
       <EditorEvaluationSidebar
         details={details}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
+        activeTab={sidebarSection}
+        onTabChange={setSidebarSection}
       />
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden relative">
         {/* Header with Breadcrumb */}
         <div className="bg-white border-b border-slate-200 px-8 py-4 shrink-0">
           <div className="flex items-center justify-between mb-3">
@@ -765,41 +789,42 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
 
         <div className="flex-1 flex overflow-hidden min-h-0">
           {/* CENTER CONTENT - SCROLLABLE TABS */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Tabs Bar */}
-            <div className="bg-white border-b border-slate-200 px-8 flex-shrink-0 overflow-x-auto">
-              <div className="flex gap-8">
-                {[
-                  { id: 'files', label: 'Files for Review' },
-                  { id: 'evaluation', label: 'Editor Evaluation' },
-                  { id: 'decision', label: 'Decision' },
-                  { id: 'reviews', label: 'Reviews' },
-                  { id: 'suggestions', label: 'Suggestions' },
-                  { id: 'history', label: 'Review History' },
-                  { id: 'revisions', label: 'Revisions' },
-                  { id: 'comments', label: 'Collaboration' }
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
-                    className={`px-1 py-4 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
-                      activeTab === tab.id
-                        ? 'text-[#008751] border-[#008751]'
-                        : 'text-slate-600 border-transparent hover:text-slate-900'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+          <div className="flex-1 flex flex-col overflow-hidden min-w-0" style={{ paddingRight: '320px' }}>
+            {/* Tabs Bar - Only show for Dashboard */}
+            {sidebarSection === 'dashboard' && (
+              <div className="bg-white border-b border-slate-200 flex-shrink-0 overflow-x-scroll" style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 #f1f5f9', scrollbarGutter: 'stable' }}>
+                <div className="flex gap-8 px-8 py-0 min-w-max">
+                  {[
+                    { id: 'files', label: 'Files for Review (1)' },
+                    { id: 'evaluation', label: 'Editor Evaluation (2)' },
+                    { id: 'reviews', label: 'Reviews (3)' },
+                    { id: 'suggestions', label: 'Suggestions (4)' },
+                    { id: 'history', label: 'Review History (5)' },
+                    { id: 'revisions', label: 'Revisions (6)' },
+                    { id: 'comments', label: 'Collaboration (7)' }
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id as 'files' | 'evaluation' | 'decision' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments')}
+                      className={`px-1 py-4 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
+                        activeTab === tab.id
+                          ? 'text-[#008751] border-[#008751]'
+                          : 'text-slate-600 border-transparent hover:text-slate-900'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Scrollable Content Area */}
-            <div className="flex-1 overflow-y-auto p-8">
+            <div className="flex-1 overflow-y-scroll overflow-x-scroll p-8" style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 #f1f5f9', scrollbarGutter: 'stable' }}>
               {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4 mb-6">{error}</div>}
 
-              {/* Files Tab */}
-              {activeTab === 'files' && (
+              {/* DASHBOARD TABS CONTENT - Only show when on dashboard */}
+              {sidebarSection === 'dashboard' && activeTab === 'files' && (
                 <div className="bg-white border border-slate-200 rounded-2xl p-6">
                   <h3 className="text-sm font-black text-slate-900 mb-4">FILES FOR REVIEW ({details.files?.length || 0})</h3>
                   {details.files && details.files.length > 0 ? (
@@ -816,8 +841,14 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                           <div className="flex gap-2">
                             {file.public_url && (
                               <>
-                                <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
-                                <a href={file.public_url} download className="text-slate-600 hover:text-slate-900 p-2">📥</a>
+                                <button
+                                  onClick={() => setPreviewFile(file)}
+                                  className="text-slate-600 hover:text-slate-900 p-2"
+                                  title="View"
+                                >
+                                  👁️
+                                </button>
+                                <a href={file.public_url} download={file.file_name} className="text-slate-600 hover:text-slate-900 p-2" title="Download">📥</a>
                               </>
                             )}
                           </div>
@@ -830,9 +861,18 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                 </div>
               )}
 
+            {previewFile && (
+              <FilePreviewModal
+                isOpen={!!previewFile}
+                onClose={() => setPreviewFile(null)}
+                fileName={previewFile.file_name}
+                fileType={previewFile.file_type}
+                fileSize={previewFile.file_size}
+                publicUrl={previewFile.public_url || undefined}
+              />
+            )}
 
-
-            {activeTab === 'evaluation' && (
+            {sidebarSection === 'dashboard' && activeTab === 'evaluation' && (
               <EditorEvaluationFormTab
                 assignmentId={assignment.id}
                 manuscriptId={manuscript.id}
@@ -842,7 +882,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               />
             )}
 
-            {activeTab === 'decision' && (
+            {sidebarSection === 'dashboard' && activeTab === 'decision' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
                 <h3 className="text-sm font-black text-slate-900">Editor Recommendation</h3>
 
@@ -891,7 +931,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               </div>
             )}
 
-            {activeTab === 'reviews' && (
+            {sidebarSection === 'dashboard' && activeTab === 'reviews' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
                 <h3 className="text-sm font-black text-slate-900 mb-4">PEER REVIEWS ({reviewerAssignments?.length || 0})</h3>
                 {reviewerAssignments && reviewerAssignments.length > 0 ? (
@@ -943,59 +983,148 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
             )}
 
             {activeTab === 'suggestions' && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <h3 className="text-sm font-black text-slate-900 mb-4">REVIEWER SUGGESTIONS ({details.suggestedReviewers?.length || 0})</h3>
-                {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
-                  <div className="space-y-3">
-                    {details.suggestedReviewers.map((reviewer) => {
-                      const isAssigned = reviewerAssignments?.some(r => details.profiles.get(r.reviewer_id)?.email === reviewer.email);
-                      return (
-                        <div key={reviewer.id} className={`border rounded-lg p-4 ${isAssigned ? 'bg-emerald-50 border-emerald-200' : 'border-slate-200'}`}>
-                          <div className="flex items-start justify-between mb-2">
-                            <div className="flex-1">
-                              <p className="font-semibold text-slate-900">{reviewer.name}</p>
-                              <p className="text-xs text-slate-600">{reviewer.email}</p>
-                              {reviewer.note && (
-                                <p className="text-xs text-slate-500 mt-1">Note: {reviewer.note}</p>
-                              )}
-                              <p className="text-[10px] text-slate-400 mt-1">Suggested by {reviewer.suggested_by === 'EDITOR' ? 'you' : 'author'}</p>
-                            </div>
-                            {isAssigned && (
-                              <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded">✓ Assigned</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-slate-400 text-sm">No suggested reviewers yet. Add suggestions from the Editor Evaluation tab when submitting your assessment.</div>
-                )}
-              </div>
-            )}
+              <div className="space-y-6">
+                {/* Add Reviewer Suggestions Form */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-black text-slate-900 mb-3">Reviewer Suggestions (Optional)</h3>
+                  <p className="text-xs text-slate-600 mb-4">Suggesting reviewers is optional -- you may submit your evaluation with none, one, or several.</p>
 
-            {activeTab === 'history' && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <h3 className="text-sm font-black text-slate-900 mb-4">REVIEW HISTORY ({details.statusHistory?.length || 0})</h3>
-                {details.statusHistory && details.statusHistory.length > 0 ? (
-                  <div className="space-y-4">
-                    {details.statusHistory.map((item, idx) => (
-                      <div key={idx} className="border border-slate-200 rounded p-4">
-                        <div className="flex items-start justify-between mb-2">
-                          <p className="font-semibold text-slate-900">{item.to_status}</p>
-                          <p className="text-xs text-slate-500">{formatDateTime(item.created_at)}</p>
-                        </div>
-                        {item.note && <p className="text-sm text-slate-600">{item.note}</p>}
+                  {showAddReviewerForm ? (
+                    <div className="space-y-4 mb-4">
+                      <input
+                        type="text"
+                        placeholder="Reviewer Name"
+                        value={newReviewerForm.name}
+                        onChange={(e) => setNewReviewerForm({ ...newReviewerForm, name: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <input
+                        type="email"
+                        placeholder="Email Address"
+                        value={newReviewerForm.email}
+                        onChange={(e) => setNewReviewerForm({ ...newReviewerForm, email: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <textarea
+                        placeholder="Optional Note"
+                        value={newReviewerForm.note}
+                        onChange={(e) => setNewReviewerForm({ ...newReviewerForm, note: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        rows={2}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setNewReviewerForm({ name: '', email: '', note: '' });
+                            setShowAddReviewerForm(false);
+                          }}
+                          className="flex-1 px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-200 transition"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!newReviewerForm.name || !newReviewerForm.email) return;
+                            setSavingReviewer(true);
+                            setSaveReviewerError('');
+                            try {
+                              await addSuggestedReviewer(manuscript.id, newReviewerForm);
+                              onChanged();
+                              showNotification('success', 'Reviewer suggestion saved');
+                              setNewReviewerForm({ name: '', email: '', note: '' });
+                              setShowAddReviewerForm(false);
+                            } catch (e: any) {
+                              setSaveReviewerError(e.message || 'Failed to save reviewer suggestion');
+                            } finally {
+                              setSavingReviewer(false);
+                            }
+                          }}
+                          disabled={!newReviewerForm.name || !newReviewerForm.email || savingReviewer}
+                          className="flex-1 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition disabled:opacity-50"
+                        >
+                          {savingReviewer ? 'Saving...' : 'Add Reviewer'}
+                        </button>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-slate-400 text-sm">No history available.</div>
-                )}
+                      {saveReviewerError && (
+                        <p className="text-xs text-red-600 mt-2">{saveReviewerError}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowAddReviewerForm(true)}
+                      className="w-full border-2 border-dashed border-slate-300 rounded-lg py-3 text-slate-600 hover:text-slate-900 hover:border-slate-400 text-sm font-semibold transition"
+                    >
+                      + Add Another Reviewer
+                    </button>
+                  )}
+
+                  <p className="text-xs text-slate-500 text-center mt-4">Suggestions are saved immediately -- this is optional, you may submit without any.</p>
+                </div>
+
+                {/* List of Suggested Reviewers */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-black text-slate-900 mb-4">REVIEWER SUGGESTIONS ({details.suggestedReviewers?.length || 0})</h3>
+                  {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
+                    <div className="space-y-3">
+                      {details.suggestedReviewers.map((reviewer) => {
+                        const isAssigned = reviewerAssignments?.some(r => details.profiles.get(r.reviewer_id)?.email === reviewer.email);
+                        return (
+                          <div key={reviewer.id} className={`border rounded-lg p-4 ${isAssigned ? 'bg-emerald-50 border-emerald-200' : 'border-slate-200'}`}>
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex-1">
+                                <p className="font-semibold text-slate-900">{reviewer.name}</p>
+                                <p className="text-xs text-slate-600">{reviewer.email}</p>
+                                {reviewer.note && (
+                                  <p className="text-xs text-slate-500 mt-1">Note: {reviewer.note}</p>
+                                )}
+                                <span className={`inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  reviewer.suggested_by === 'EDITOR'
+                                    ? 'bg-teal-50 text-teal-700 border border-teal-200'
+                                    : 'bg-purple-50 text-purple-700 border border-purple-200'
+                                }`}>
+                                  Suggested by {reviewer.suggested_by === 'EDITOR' ? 'you' : 'author'}
+                                </span>
+                              </div>
+                              {isAssigned && (
+                                <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded">✓ Assigned</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-slate-400 text-sm">No suggested reviewers yet.</div>
+                  )}
+                </div>
               </div>
             )}
 
-            {activeTab === 'revisions' && (
+            {activeTab === 'history' && (() => {
+              const realHistory = (details.statusHistory || []).filter(item => item.from_status !== item.to_status);
+              return (
+                <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-black text-slate-900 mb-4">REVIEW HISTORY ({realHistory.length})</h3>
+                  {realHistory.length > 0 ? (
+                    <div className="space-y-4">
+                      {realHistory.map((item, idx) => (
+                        <div key={idx} className="border border-slate-200 rounded p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <p className="font-semibold text-slate-900">{item.to_status.replace(/_/g, ' ')}</p>
+                            <p className="text-xs text-slate-500">{formatDateTime(item.created_at)}</p>
+                          </div>
+                          {item.note && <p className="text-sm text-slate-600">{item.note}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-slate-400 text-sm">No history available.</div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {sidebarSection === 'dashboard' && activeTab === 'revisions' && (
               <div className="space-y-6">
                 <RevisionReview manuscriptId={manuscript.id} onStatusUpdate={onChanged} />
                 <div>
@@ -1005,7 +1134,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               </div>
             )}
 
-            {activeTab === 'comments' && (
+            {sidebarSection === 'dashboard' && activeTab === 'comments' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-sm font-black text-slate-900">DISCUSSION & COLLABORATION ({discussions?.length || 0})</h3>
@@ -1017,49 +1146,56 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   </button>
                 </div>
 
-                {/* Discussion Posts */}
-                <div className="mb-6">
+                {/* Discussion Chat */}
+                <div className="mb-6 flex flex-col h-96">
                   <h4 className="text-xs font-bold text-slate-700 mb-4">TEAM DISCUSSIONS</h4>
-                  {discussions && discussions.length > 0 ? (
-                    <div className="space-y-4 mb-6">
-                      {discussions.filter(d => !(d as any).is_internal).map((discussion, idx) => (
-                        <div key={idx} className="border border-slate-200 rounded p-4 hover:bg-slate-50">
-                          <div className="flex items-start justify-between mb-2">
-                            <div>
-                              <p className="font-semibold text-slate-900">
-                                {details.profiles.get(discussion.sender_id)?.name || 'Unknown User'}
-                              </p>
-                              <p className="text-xs text-slate-500">{details.profiles.get(discussion.sender_id)?.role || 'Member'}</p>
-                            </div>
-                            <p className="text-xs text-slate-500">{formatDateTime(discussion.created_at)}</p>
-                          </div>
-                          <p className="text-sm text-slate-700 mt-2">{discussion.message}</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-500 mb-6">No discussions yet. Start a discussion below.</p>
-                  )}
 
-                  {/* Post Comment Form */}
-                  <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                  {/* Chat Messages */}
+                  <div className="flex-1 overflow-y-auto mb-4 space-y-3 border border-slate-200 rounded-lg p-4 bg-white">
+                    {discussions && discussions.length > 0 ? (
+                      discussions.filter(d => !(d as any).is_internal).map((discussion, idx) => {
+                        const isCurrentUser = discussion.sender_id === currentUser?.email;
+                        return (
+                          <div key={idx} className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-xs px-4 py-2 rounded-lg ${
+                              isCurrentUser
+                                ? 'bg-emerald-500 text-white'
+                                : 'bg-slate-100 text-slate-900'
+                            }`}>
+                              <div className={`text-xs font-semibold mb-1 ${isCurrentUser ? 'text-emerald-100' : 'text-slate-600'}`}>
+                                {details.profiles.get(discussion.sender_id)?.name || 'Unknown User'}
+                              </div>
+                              <p className="text-sm break-words">{discussion.message}</p>
+                              <div className={`text-xs mt-1 ${isCurrentUser ? 'text-emerald-100' : 'text-slate-500'}`}>
+                                {formatDateTime(discussion.created_at)}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-slate-500">
+                        <p className="text-xs">No discussions yet. Start a discussion below.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Message Input Form */}
+                  <div className="flex gap-2">
                     <textarea
                       value={newComment}
                       onChange={(e) => setNewComment(e.target.value)}
-                      placeholder="Add a team discussion comment..."
-                      className="w-full text-xs border border-slate-300 rounded px-3 py-2 mb-3 focus:outline-none focus:border-emerald-500"
-                      rows={3}
+                      placeholder="Type a message..."
+                      className="flex-1 text-xs border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500 resize-none"
+                      rows={2}
                     />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handlePostComment}
-                        disabled={busy || !newComment.trim()}
-                        className="flex-1 bg-emerald-600 text-white text-xs font-bold py-2 rounded hover:bg-emerald-700 disabled:opacity-50"
-                      >
-                        {busy ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : <Send className="w-3 h-3 inline mr-1" />}
-                        Post Comment
-                      </button>
-                    </div>
+                    <button
+                      onClick={handlePostComment}
+                      disabled={busy || !newComment.trim()}
+                      className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold px-4 rounded-lg transition self-end"
+                    >
+                      {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
 
@@ -1112,37 +1248,381 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                 )}
               </div>
             )}
+
+            {/* CONTENT SECTION ITEMS - Only show when sidebar section is selected */}
+            {sidebarSection === 'title_abstract' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">TITLE & ABSTRACT</h3>
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-600 mb-1">TITLE</p>
+                    <p className="text-sm text-slate-900">{details.manuscript?.title || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-slate-600 mb-1">ABSTRACT</p>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{details.manuscript?.abstract || 'No abstract provided'}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {sidebarSection === 'authors' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">AUTHORS / CONTRIBUTORS ({details.contributors?.length || 0})</h3>
+                {details.contributors && details.contributors.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.contributors.map((contributor, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4 hover:bg-slate-50">
+                        <p className="font-semibold text-slate-900">{contributor.full_name}</p>
+                        <p className="text-xs text-slate-600">{contributor.email}</p>
+                        {contributor.institution && <p className="text-xs text-slate-600">{contributor.institution}</p>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No contributors found.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'manuscript' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">MANUSCRIPT ({details.files?.filter(f => f.file_type?.toLowerCase().includes('manuscript')).length || 0})</h3>
+                {details.files && details.files.filter(f => f.file_type?.toLowerCase().includes('manuscript')).length > 0 ? (
+                  <div className="space-y-3">
+                    {details.files.filter(f => f.file_type?.toLowerCase().includes('manuscript')).map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📄</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                          </div>
+                        </div>
+                        {file.public_url && (
+                          <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No manuscript files found.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'references' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">REFERENCES</h3>
+                {details.manuscript?.references ? (
+                  <div className="text-sm text-slate-700 whitespace-pre-wrap">{details.manuscript.references}</div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No references provided.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'supplementary' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">SUPPLEMENTARY FILES ({details.files?.filter(f => f.file_type?.toLowerCase().includes('supplementary') || f.file_type?.toLowerCase().includes('additional')).length || 0})</h3>
+                {details.files && details.files.filter(f => f.file_type?.toLowerCase().includes('supplementary') || f.file_type?.toLowerCase().includes('additional')).length > 0 ? (
+                  <div className="space-y-3">
+                    {details.files.filter(f => f.file_type?.toLowerCase().includes('supplementary') || f.file_type?.toLowerCase().includes('additional')).map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📎</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                          </div>
+                        </div>
+                        {file.public_url && (
+                          <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No supplementary files found.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'cover_letter' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">COVER LETTER</h3>
+                {details.files && details.files.some(f => f.file_name?.toLowerCase().includes('cover')) ? (
+                  <div className="space-y-3">
+                    {details.files.filter(f => f.file_name?.toLowerCase().includes('cover')).map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📝</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                          </div>
+                        </div>
+                        {file.public_url && (
+                          <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No cover letter provided.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'discussions' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">DISCUSSIONS ({details.discussions?.length || 0})</h3>
+                {details.discussions && details.discussions.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.discussions.map((discussion, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4 hover:bg-slate-50">
+                        <p className="font-semibold text-slate-900">{discussion.sender_id}</p>
+                        <p className="text-sm text-slate-700 mt-2">{discussion.message}</p>
+                        <p className="text-xs text-slate-500 mt-2">{formatDateTime(discussion.created_at)}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No discussions yet.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'evaluation_timeline' && (() => {
+              const realHistory = (details.statusHistory || []).filter(item => item.from_status !== item.to_status);
+              return (
+                <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-black text-slate-900 mb-4">EVALUATION TIMELINE ({realHistory.length})</h3>
+                  {realHistory.length > 0 ? (
+                    <div className="space-y-4">
+                      {realHistory.map((item, idx) => (
+                        <div key={idx} className="border border-slate-200 rounded p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <p className="font-semibold text-slate-900">{item.to_status.replace(/_/g, ' ')}</p>
+                            <p className="text-xs text-slate-500">{formatDateTime(item.created_at)}</p>
+                          </div>
+                          {item.note && <p className="text-sm text-slate-600">{item.note}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-slate-400 text-sm">No timeline events yet.</div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {sidebarSection === 'editor_evaluation' && (
+              <EditorEvaluationFormTab
+                assignmentId={assignment.id}
+                manuscriptId={manuscript.id}
+                assignment={assignment}
+                suggestedReviewers={details.suggestedReviewers}
+                onSubmitSuccess={onChanged}
+              />
+            )}
+
+            {sidebarSection === 'reviews' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">PEER REVIEWS ({reviewerAssignments?.length || 0})</h3>
+                {reviewerAssignments && reviewerAssignments.length > 0 ? (
+                  <div className="space-y-4">
+                    {reviewerAssignments.map((ra) => (
+                      <div key={ra.id} className="border border-slate-200 rounded-lg p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {details.profiles.get(ra.reviewer_id)?.name || 'Unknown Reviewer'}
+                            </p>
+                            <p className="text-xs text-slate-600">{details.profiles.get(ra.reviewer_id)?.email}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className={`inline-flex text-xs font-bold px-2 py-1 rounded ${
+                              ra.status === 'SUBMITTED'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : ra.status === 'ACCEPTED'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {ra.status || 'Pending'}
+                            </span>
+                            {ra.submitted_at && (
+                              <p className="text-xs text-slate-500 mt-1">{formatDate(ra.submitted_at)}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {ra.status === 'SUBMITTED' && (
+                          <div className="bg-slate-50 rounded p-3 text-sm text-slate-700 space-y-2 mt-3">
+                            <p><span className="font-semibold">Recommendation:</span> {ra.recommendation || 'N/A'}</p>
+                            {ra.comments_to_editor && (
+                              <p><span className="font-semibold">Comments:</span> {ra.comments_to_editor}</p>
+                            )}
+                          </div>
+                        )}
+
+                        {ra.status === 'ACCEPTED' && (
+                          <p className="text-xs text-slate-500 italic mt-3">Awaiting review submission...</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet. Reviewer assignment is handled by the Coordinator.</div>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'decision' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+                <h3 className="text-sm font-black text-slate-900">Editor Recommendation</h3>
+
+                {!evaluationSubmitted ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
+                    You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
+                  </div>
+                ) : assignment.recommendation ? (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
+                    <p className="text-sm font-bold text-emerald-900">
+                      Recommendation submitted: {assignment.recommendation.replace(/_/g, ' ')}
+                    </p>
+                    {assignment.recommendation_submitted_at && (
+                      <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
+                    )}
+                    <p className="text-xs text-slate-500 mt-3">Your recommendation is with the Coordinator for review.</p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-slate-600">
+                      Select one decision based on your evaluation and (if applicable) the reviewers' recommendations.
+                    </p>
+                    {decisionError && (
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {[
+                        { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                        { value: 'MINOR_REVISION' as ReviewerRecommendation, label: 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
+                        { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
+                        { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          disabled={decisionBusy}
+                          onClick={() => handleSubmitRecommendation(opt.value)}
+                          className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'suggestions' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">SUGGESTIONS ({details.suggestedReviewers?.length || 0})</h3>
+                {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.suggestedReviewers.map((reviewer, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4">
+                        <p className="font-semibold text-slate-900">{reviewer.name || 'N/A'}</p>
+                        <p className="text-xs text-slate-600">{reviewer.email}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No suggested reviewers.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'review_history' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">REVIEW HISTORY ({details.revisions?.length || 0})</h3>
+                {details.revisions && details.revisions.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.revisions.map((revision, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4">
+                        <p className="font-semibold text-slate-900">{revision.revision_number}</p>
+                        <p className="text-xs text-slate-600">{formatDate(revision.created_at)}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No revision history.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'metadata' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">METADATA</h3>
+                <div className="space-y-3 text-sm">
+                  <div><span className="font-semibold text-slate-900">Manuscript ID:</span> <span className="text-slate-700">{details.manuscript?.id}</span></div>
+                  <div><span className="font-semibold text-slate-900">Status:</span> <span className="text-slate-700">{details.manuscript?.status}</span></div>
+                  <div><span className="font-semibold text-slate-900">Submitted:</span> <span className="text-slate-700">{formatDate(details.manuscript?.created_at)}</span></div>
+                  {details.manuscript?.published_at && (
+                    <div><span className="font-semibold text-slate-900">Published:</span> <span className="text-slate-700">{formatDate(details.manuscript?.published_at)}</span></div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {sidebarSection === 'production' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">PRODUCTION</h3>
+                <div className="space-y-3 text-sm">
+                  <p className="text-slate-700">{details.manuscript?.production_stage ? `Stage: ${details.manuscript.production_stage}` : 'Not in production'}</p>
+                </div>
+              </div>
+            )}
+
+            {sidebarSection === 'galley_files' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">GALLEY FILES ({details.files?.filter(f => f.file_type?.toLowerCase().includes('galley')).length || 0})</h3>
+                {details.files && details.files.filter(f => f.file_type?.toLowerCase().includes('galley')).length > 0 ? (
+                  <div className="space-y-3">
+                    {details.files.filter(f => f.file_type?.toLowerCase().includes('galley')).map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📰</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                          </div>
+                        </div>
+                        {file.public_url && (
+                          <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No galley files found.</p>
+                )}
+              </div>
+            )}
+
+            {/* Dashboard Content - shown when sidebarSection is 'dashboard' */}
+            {sidebarSection === 'dashboard' && (
+              <div className="text-center py-8 text-slate-500">
+                <p>Select a tab to view dashboard content</p>
+              </div>
+            )}
             </div>
           </div>
 
-          {/* RIGHT SIDEBAR - EDITOR EVALUATION PANEL */}
-          <aside className="w-80 bg-slate-50 border-l border-slate-200 flex flex-col h-full overflow-hidden">
-            {/* HEADER - STICKY */}
-            <div className="shrink-0 bg-white border-b border-slate-200 p-6 space-y-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h2 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
-                    Editor Evaluation
-                  </h2>
-                  <p className="text-[11px] text-slate-500 mt-1">Assessment in progress</p>
-                </div>
-                <span className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-50 border border-blue-200 rounded-md text-[11px] font-semibold text-blue-700">
-                  <Clock className="w-3 h-3" />
-                  In Progress
-                </span>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-slate-600">Evaluation Progress</span>
-                  <span className="font-semibold text-slate-900">1 of 5</span>
-                </div>
-                <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500" style={{ width: '20%' }} />
-                </div>
-              </div>
-            </div>
-
+          {/* RIGHT SIDEBAR - EDITOR EVALUATION PANEL - FIXED */}
+          <aside className="fixed right-0 top-14 w-80 bg-slate-50 border-l border-slate-200 flex flex-col overflow-hidden" style={{ right: '0', height: 'calc(100vh - 3.5rem)' }}>
             {/* SCROLLABLE CONTENT */}
             <div className="flex-1 overflow-y-auto">
               <div className="p-6 space-y-6">
@@ -1169,104 +1649,105 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   )}
                 </div>
 
-                {/* REVIEW ROUND SUMMARY */}
-                <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-3">
-                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
-                    Review Round
-                  </h3>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-medium text-slate-500 uppercase">Status</span>
-                      <span className="text-[13px] font-bold text-slate-900">{manuscript.status?.replace(/_/g, ' ') || 'In Progress'}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-medium text-slate-500 uppercase">Reviewers Assigned</span>
-                      <span className="text-[13px] font-bold text-slate-900">{reviewerAssignments?.length || 0}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-medium text-slate-500 uppercase">Reviews Completed</span>
-                      <span className="text-[13px] font-bold text-slate-900">
-                        {reviewerAssignments?.filter(r => r.status === 'SUBMITTED').length || 0} / {reviewerAssignments?.length || 0}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* ASSIGNED REVIEWERS */}
-                {reviewerAssignments && reviewerAssignments.length > 0 && (
-                  <div className="space-y-3">
+                {/* EDITOR DECISION */}
+                {evaluationSubmitted && assignment.recommendation && (
+                  <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-1">
                     <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
-                      Assigned Reviewers
+                      Editor Decision
                     </h3>
-                    <div className="space-y-2">
-                      {reviewerAssignments.slice(0, 3).map((ra) => (
-                        <div key={ra.id} className="p-3 bg-white rounded-lg border border-slate-200">
-                          <p className="text-sm font-semibold text-slate-900">
-                            {details.profiles.get(ra.reviewer_id)?.name || 'Unknown'}
-                          </p>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {ra.status === 'SUBMITTED' ? '✓ Review Submitted' : `⏳ ${ra.status || 'Pending'}`}
-                          </p>
-                        </div>
-                      ))}
-                      {reviewerAssignments.length > 3 && (
-                        <p className="text-xs text-slate-500 text-center py-2">+{reviewerAssignments.length - 3} more reviewers</p>
-                      )}
-                    </div>
+                    <p className="text-sm font-bold text-slate-900">{assignment.recommendation.replace(/_/g, ' ')}</p>
+                    <p className="text-xs text-slate-500">Recommendation submitted</p>
                   </div>
                 )}
 
-                {/* SUGGESTED PEER REVIEWERS */}
-                <div className="space-y-3">
-                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
-                    Suggested Reviewers ({details.suggestedReviewers?.length || 0})
+                {/* REVIEW WORKFLOW */}
+                <div className="bg-white rounded-xl border border-slate-200 p-5">
+                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900 mb-5">
+                    Review Workflow
                   </h3>
-                  <p className="text-[11px] text-slate-600">
-                    {evaluationSubmitted
-                      ? '✓ Submitted with your evaluation'
-                      : 'Suggest reviewers from the evaluation form'}
-                  </p>
-                  <div className="space-y-2">
-                    {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
-                      details.suggestedReviewers.map((reviewer) => (
-                        <div key={reviewer.id} className="p-3 bg-white rounded-lg border border-slate-200">
-                          <p className="text-sm font-semibold text-slate-900">
-                            👤 {reviewer.name}
-                          </p>
-                          <p className="text-xs text-slate-600 mt-0.5">{reviewer.email}</p>
+                  {(() => {
+                    const reviewersAssignedDone = !!(reviewerAssignments && reviewerAssignments.length > 0);
+                    const reviewsCompletedCount = reviewerAssignments?.filter(r => r.status === 'SUBMITTED').length || 0;
+                    const peerReviewDone = reviewersAssignedDone && reviewsCompletedCount === reviewerAssignments!.length;
+                    const coordinatorActionDone = manuscript.status && !['DRAFT', 'SUBMITTED', 'EDITOR_REVIEW'].includes(manuscript.status);
+                    const finalDecisionDone = manuscript.status && ['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
+                    const steps = [
+                      { label: 'Assignment accepted', done: assignment.status === 'ACCEPTED' || evaluationSubmitted },
+                      { label: 'Editor evaluation', done: evaluationSubmitted },
+                      { label: 'Coordinator action', done: !!coordinatorActionDone },
+                      { label: 'Reviewer assignment', done: reviewersAssignedDone },
+                      { label: 'Peer review', done: peerReviewDone },
+                      { label: 'Final decision', done: !!finalDecisionDone },
+                    ];
+                    const currentIdx = steps.findIndex(s => !s.done);
+                    return steps.map((step, idx) => {
+                      const isCurrent = idx === currentIdx;
+                      const isUpNext = idx === currentIdx + 1;
+                      const statusLabel = step.done ? 'COMPLETED' : isCurrent ? 'IN PROGRESS' : isUpNext ? 'UP NEXT' : null;
+                      return (
+                        <div key={step.label} className={`relative flex gap-3.5 ${idx === steps.length - 1 ? '' : 'pb-7'}`}>
+                          {idx !== steps.length - 1 && (
+                            <div
+                              className={`absolute left-[15px] top-8 bottom-0 w-0.5 ${step.done ? 'bg-emerald-400' : 'bg-slate-200'}`}
+                            />
+                          )}
+                          <div className="relative z-10 flex-shrink-0">
+                            {step.done ? (
+                              <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm">
+                                <Check className="w-4 h-4 text-white" strokeWidth={3} />
+                              </div>
+                            ) : isCurrent ? (
+                              <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center ring-4 ring-blue-100 shadow-sm">
+                                <span className="w-2 h-2 rounded-full bg-white" />
+                              </div>
+                            ) : (
+                              <div className="w-8 h-8 rounded-full border-2 border-slate-200 bg-white" />
+                            )}
+                          </div>
+                          <div className="pt-1.5 min-w-0">
+                            <p className={`text-[13px] leading-tight ${
+                              step.done ? 'font-medium text-slate-800' : isCurrent ? 'font-bold text-slate-900' : 'font-medium text-slate-400'
+                            }`}>
+                              {step.label}
+                            </p>
+                            {statusLabel && (
+                              <span className={`inline-block mt-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded ${
+                                step.done
+                                  ? 'text-emerald-700 bg-emerald-50'
+                                  : isCurrent
+                                  ? 'text-blue-700 bg-blue-50'
+                                  : 'text-slate-500 bg-slate-100'
+                              }`}>
+                                {statusLabel}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      ))
-                    ) : (
-                      <div className="p-3 bg-slate-100 rounded-lg text-center">
-                        <p className="text-xs text-slate-500">No reviewers suggested yet</p>
-                      </div>
-                    )}
+                      );
+                    });
+                  })()}
+                </div>
+
+                {/* REVIEWERS */}
+                <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-2">
+                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
+                    Reviewers
+                  </h3>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-slate-500 uppercase">Assigned</span>
+                    <span className="text-[13px] font-bold text-slate-900">{reviewerAssignments?.length || 0}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-slate-500 uppercase">Completed</span>
+                    <span className="text-[13px] font-bold text-slate-900">
+                      {reviewerAssignments?.filter(r => r.status === 'SUBMITTED').length || 0} / {reviewerAssignments?.length || 0}
+                    </span>
                   </div>
                 </div>
 
               </div>
             </div>
 
-            {/* FOOTER - STICKY ACTIONS */}
-            <div className="shrink-0 bg-white border-t border-slate-200 p-6 space-y-3">
-              <button
-                disabled={evaluationSubmitted}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Save Draft
-              </button>
-              <button
-                disabled={evaluationSubmitted}
-                className={`w-full px-4 py-2.5 rounded-lg text-[13px] font-semibold text-white transition-colors flex items-center justify-center gap-2 ${
-                  evaluationSubmitted
-                    ? 'bg-slate-300 cursor-not-allowed'
-                    : 'bg-blue-600 hover:bg-blue-700'
-                }`}
-              >
-                <Send className="w-4 h-4" />
-                {evaluationSubmitted ? 'Evaluation Submitted' : 'Submit Evaluation'}
-              </button>
-            </div>
           </aside>
         </div>
       </main>
@@ -1278,68 +1759,66 @@ function AcceptDeclineModal({
   details,
   onAccept,
   onDecline,
-  isLoading
+  isAcceptLoading,
+  isDeclineLoading
 }: {
   details: EditorManuscriptDetails;
   onAccept: () => Promise<void>;
   onDecline: () => Promise<void>;
-  isLoading: boolean;
+  isAcceptLoading?: boolean;
+  isDeclineLoading?: boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-[#1a4038] to-[#0f2e2a] text-white p-6 rounded-t-2xl">
+        <div className="bg-gradient-to-r from-emerald-700 to-emerald-800 text-white p-6 rounded-t-2xl shrink-0">
           <h2 className="text-2xl font-black">Editorial Assignment</h2>
           <p className="text-emerald-100 text-sm mt-1">You have been invited to evaluate a manuscript</p>
         </div>
 
         {/* Content */}
-        <div className="p-8">
-          <div className="mb-6">
-            <p className="text-slate-600 text-sm mb-4">
-              You have been assigned to provide an editorial assessment for:
-            </p>
+        <div className="p-8 space-y-6 overflow-y-auto">
+          {/* Title */}
+          <div>
+            <p className="text-xs uppercase tracking-wider font-semibold text-slate-600 mb-2">Title</p>
+            <h3 className="font-bold text-slate-900 text-base leading-tight">{details.manuscript.title}</h3>
+          </div>
 
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4">
-              <p className="font-bold text-slate-900 text-sm mb-2">{details.manuscript.title}</p>
-              <p className="text-xs text-slate-500 mb-2">
-                <strong>Author:</strong> {details.manuscript.author_name}
-              </p>
-              <p className="text-xs text-slate-600 line-clamp-2">
-                {details.manuscript.abstract}
-              </p>
-            </div>
+          {/* Subtitle (section) */}
+          <div>
+            <p className="text-xs uppercase tracking-wider font-semibold text-slate-600 mb-2">Subtitle</p>
+            <p className="text-sm text-slate-700">{details.manuscript.section || 'Not provided'}</p>
+          </div>
 
-            <p className="text-sm text-slate-700 mb-4">
-              If you accept, you will evaluate this manuscript using our 7-criteria framework and recommend whether to proceed to peer review or request revisions.
+          {/* Abstract */}
+          <div>
+            <p className="text-xs uppercase tracking-wider font-semibold text-slate-600 mb-2">Abstract</p>
+            <p className="text-sm text-slate-700 leading-relaxed">
+              {details.manuscript.abstract || 'Not provided'}
             </p>
           </div>
 
           {/* Buttons */}
-          <div className="space-y-3">
+          <div className="space-y-3 pt-4">
             <button
               onClick={onAccept}
-              disabled={isLoading}
-              className="w-full bg-emerald-600 text-white py-3 rounded-lg font-semibold hover:bg-emerald-700 disabled:opacity-50 transition flex items-center justify-center gap-2"
+              disabled={isAcceptLoading}
+              className="w-full bg-emerald-600 text-white py-3 rounded-lg font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
             >
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-5 h-5" />}
-              {isLoading ? 'Processing...' : '✓ Accept Assignment'}
+              {isAcceptLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-5 h-5" />}
+              {isAcceptLoading ? 'Accepting...' : '✓ Accept Assignment'}
             </button>
 
             <button
               onClick={onDecline}
-              disabled={isLoading}
-              className="w-full border-2 border-red-600 text-red-600 py-3 rounded-lg font-semibold hover:bg-red-50 disabled:opacity-50 transition flex items-center justify-center gap-2"
+              disabled={isDeclineLoading}
+              className="w-full border-2 border-red-600 text-red-600 py-3 rounded-lg font-semibold hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
             >
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <XIcon className="w-5 h-5" />}
-              {isLoading ? 'Processing...' : '✕ Decline Assignment'}
+              {isDeclineLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <XIcon className="w-5 h-5" />}
+              {isDeclineLoading ? 'Declining...' : '✕ Decline Assignment'}
             </button>
           </div>
-
-          <p className="text-xs text-slate-500 text-center mt-4">
-            If you decline, the Coordinator will be notified and can assign another editor.
-          </p>
         </div>
       </div>
     </div>

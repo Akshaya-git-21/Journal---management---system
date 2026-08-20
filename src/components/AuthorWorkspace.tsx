@@ -58,6 +58,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState({ submissions: true });
   const [statusFilter, setStatusFilter] = useState<'active' | 'review' | 'revisions' | 'accepted' | 'rejected' | 'published'>('active');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Load manuscripts for current user
   const load = async () => {
@@ -122,6 +124,17 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       m.id.toLowerCase().includes(query)
     );
   });
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedItems = filteredItems.slice(startIndex, endIndex);
+
+  // Reset to page 1 when search/filter changes
+  useMemo(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
 
   // Calculate status counts
   const statusCounts = {
@@ -605,7 +618,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {filteredItems.map((m) => (
+                        {paginatedItems.map((m) => (
                           <tr key={m.id} className="hover:bg-slate-50 transition">
                             <td className="px-6 py-4 font-mono text-xs text-slate-500 whitespace-nowrap">{m.id}</td>
                             <td className="px-6 py-4">
@@ -678,6 +691,46 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                     </table>
                   )}
                 </div>
+
+                {/* Pagination Controls */}
+                {filteredItems.length > 0 && (
+                  <div className="border-t border-slate-100 bg-slate-50 px-6 py-4 flex items-center justify-between">
+                    <div className="text-xs text-slate-600 font-medium">
+                      Showing {startIndex + 1} to {Math.min(endIndex, filteredItems.length)} of {filteredItems.length} manuscripts
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1}
+                        className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        ← Previous
+                      </button>
+                      <div className="flex items-center gap-1">
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                          <button
+                            key={page}
+                            onClick={() => setCurrentPage(page)}
+                            className={`w-8 h-8 rounded text-xs font-semibold transition ${
+                              currentPage === page
+                                ? 'bg-[#008751] text-white'
+                                : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            {page}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                        disabled={currentPage === totalPages}
+                        className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

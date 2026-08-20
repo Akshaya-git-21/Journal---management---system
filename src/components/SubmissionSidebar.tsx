@@ -62,20 +62,20 @@ export default function SubmissionSidebar({
   const galleryFiles = manuscript.files?.filter(f => f.file_type?.toLowerCase().includes('galley')) || [];
 
   const SidebarSection = ({ title, icon: Icon, items }: any) => (
-    <div className="space-y-2.5">
-      <div className="flex items-center justify-between">
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between px-3 pt-2">
         <span className="block text-[10px] font-semibold uppercase tracking-widest text-[#004d2e] font-mono">
           {title}
         </span>
       </div>
-      <nav className="flex flex-col space-y-1">
+      <nav className="flex flex-col space-y-1.5">
         {items.map((item: any) => (
           <button
             key={item.id}
             onClick={() => onTabChange(item.id)}
             className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all duration-150 ${
               activeTab === item.id
-                ? 'bg-emerald-100/75 text-[#005a36] border-l-[3px] border-[#008751]'
+                ? 'bg-emerald-100/75 text-[#005a36]'
                 : 'text-slate-700 hover:bg-emerald-50/50'
             }`}
           >
@@ -100,7 +100,7 @@ export default function SubmissionSidebar({
   );
 
   return (
-    <aside className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 p-5 space-y-6 text-left font-sans overflow-y-auto">
+    <aside className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 p-5 space-y-8 text-left font-sans overflow-y-auto">
 
       {/* OVERVIEW SECTION */}
       <SidebarSection

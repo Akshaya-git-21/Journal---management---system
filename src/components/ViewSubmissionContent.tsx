@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AuthorManuscriptDetails } from '../lib/authorManuscriptDetails';
-import { FileText, Users, Layers, AlertCircle } from 'lucide-react';
+import { FileText, Users, Layers, AlertCircle, Eye, Download } from 'lucide-react';
 import DiscussionsTab from './DiscussionsTab';
+import FilePreviewModal from './FilePreviewModal';
 
 interface ViewSubmissionContentProps {
   activeTab: string;
@@ -16,6 +17,8 @@ export default function ViewSubmissionContent({
   currentUserId,
   onRefreshData
 }: ViewSubmissionContentProps) {
+  const [previewFile, setPreviewFile] = useState<any>(null);
+
   if (!manuscriptDetails) {
     return (
       <div className="flex-grow flex items-center justify-center p-8">
@@ -94,9 +97,25 @@ export default function ViewSubmissionContent({
                     </p>
                   </div>
                   {f.public_url && (
-                    <a href={f.public_url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-emerald-700 hover:underline">
-                      View
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setPreviewFile(f)}
+                        className="flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-800 transition"
+                        title="Preview file"
+                      >
+                        <Eye className="w-4 h-4" />
+                        Preview
+                      </button>
+                      <a
+                        href={f.public_url}
+                        download={f.file_name}
+                        className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-slate-800 transition"
+                        title="Download file"
+                      >
+                        <Download className="w-4 h-4" />
+                        Download
+                      </a>
+                    </div>
                   )}
                 </div>
               </div>
@@ -122,10 +141,18 @@ export default function ViewSubmissionContent({
   );
 
   const renderSupplementary = () => {
-    const suppFiles = (manuscriptDetails.files || []).filter(f =>
-      f.file_type?.toLowerCase().includes('supplementary') ||
-      f.file_type?.toLowerCase().includes('additional')
-    );
+    const suppFiles = (manuscriptDetails.files || []).filter(f => {
+      if (!f.file_type) return false;
+      const type = f.file_type.toLowerCase();
+      return (
+        type.includes('supplementary') ||
+        type.includes('additional') ||
+        type.includes('dataset') ||
+        type.includes('data set') ||
+        type.includes('figure') ||
+        type.includes('appendix')
+      );
+    });
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-6">
         <h3 className="text-sm font-bold text-slate-900 mb-4 uppercase tracking-wide">Supplementary Files</h3>
@@ -139,9 +166,25 @@ export default function ViewSubmissionContent({
                     <p className="text-xs text-slate-600 mt-1">{f.file_type} • {f.file_size}</p>
                   </div>
                   {f.public_url && (
-                    <a href={f.public_url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-emerald-700 hover:underline">
-                      View
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setPreviewFile(f)}
+                        className="flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-800 transition"
+                        title="Preview file"
+                      >
+                        <Eye className="w-4 h-4" />
+                        Preview
+                      </button>
+                      <a
+                        href={f.public_url}
+                        download={f.file_name}
+                        className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-slate-800 transition"
+                        title="Download file"
+                      >
+                        <Download className="w-4 h-4" />
+                        Download
+                      </a>
+                    </div>
                   )}
                 </div>
               </div>
@@ -369,6 +412,18 @@ export default function ViewSubmissionContent({
       {activeTab === 'production' && renderProduction()}
       {activeTab === 'galleys' && renderGalleys()}
       {activeTab === 'publication_details' && renderPublicationDetails()}
+
+      {/* File Preview Modal */}
+      {previewFile && (
+        <FilePreviewModal
+          isOpen={true}
+          onClose={() => setPreviewFile(null)}
+          fileName={previewFile.file_name}
+          fileType={previewFile.file_type}
+          fileSize={previewFile.file_size}
+          publicUrl={previewFile.public_url}
+        />
+      )}
     </div>
   );
 }

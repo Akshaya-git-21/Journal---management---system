@@ -414,6 +414,7 @@ export async function getSuggestedReviewers(manuscriptId: string): Promise<Sugge
   return data ?? [];
 }
 
+
 export async function getDiscussions(manuscriptId: string): Promise<DiscussionRow[]> {
   const { data, error } = await supabase.from('manuscript_discussions').select('*').eq('manuscript_id', manuscriptId).order('created_at', { ascending: true });
   if (error) throw new Error(error.message);

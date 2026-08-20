@@ -9,6 +9,7 @@ import ManuscriptDetailTabs from './manuscript-detail/ManuscriptDetailTabs';
 
 interface CoordinatorManuscriptDetailProps {
   manuscript: ManuscriptRow;
+  showAllFiles?: boolean;
   onBack: () => void;
   onChanged: () => void;
 }
@@ -24,7 +25,7 @@ interface ManuscriptDetailData {
   revisions: any[];
 }
 
-export default function CoordinatorManuscriptDetail({ manuscript, onBack, onChanged }: CoordinatorManuscriptDetailProps) {
+export default function CoordinatorManuscriptDetail({ manuscript, showAllFiles = false, onBack, onChanged }: CoordinatorManuscriptDetailProps) {
   const [data, setData] = useState<ManuscriptDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'manuscript' | 'files' | 'evaluation' | 'review-board' | 'reviewers' | 'reviews' | 'decision' | 'timeline' | 'history' | 'notes'>('overview');
@@ -224,6 +225,7 @@ export default function CoordinatorManuscriptDetail({ manuscript, onBack, onChan
         data={data}
         onDataChange={loadData}
         onWorkflowChange={onChanged}
+        showAllFiles={showAllFiles}
       />
     </div>
   );

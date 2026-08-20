@@ -49,6 +49,7 @@ export function ReviewBoardTab({
 
   // Accept-a-new-reviewer flow: suggestion accepted but no matching account exists yet
   const [needsAccount, setNeedsAccount] = useState<{ suggestionId: string; name: string; email: string; note: string | null } | null>(null);
+  const [accountForm, setAccountForm] = useState({ name: '', email: '', note: '', password: '' });
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [createdCredentials, setCreatedCredentials] = useState<{ email: string; password: string } | null>(null);
 
@@ -109,6 +110,12 @@ export function ReviewBoardTab({
           email: result.email,
           note: result.note
         });
+        setAccountForm({
+          name: result.name,
+          email: result.email,
+          note: result.note || '',
+          password: generateTempPassword()
+        });
         return;
       }
       setActions(prev => [...prev, { suggestion_id: suggestionId, action: 'ACCEPTED' }]);
@@ -126,22 +133,32 @@ export function ReviewBoardTab({
   // then finalize the acceptance against the (new or pre-existing) reviewer.
   const handleCreateReviewerAccount = async () => {
     if (!needsAccount) return;
+
+    const name = accountForm.name.trim();
+    const email = accountForm.email.trim().toLowerCase();
+    const note = accountForm.note.trim();
+    const password = accountForm.password.trim();
+
+    if (!name) { setError('Please enter the reviewer name.'); return; }
+    if (!email) { setError('Please enter the reviewer email.'); return; }
+    if (password.length < 6) { setError('Password must be at least 6 characters long.'); return; }
+
     setCreatingAccount(true);
     setError('');
 
     try {
       let profileId: string | null = null;
-      let password: string | null = null;
+      let issuedPassword: string | null = null;
       let freshlyCreated = false;
 
       try {
-        password = generateTempPassword();
-        await createReviewerAccount(needsAccount.email, password, needsAccount.name, needsAccount.note || '');
+        await createReviewerAccount(email, password, name, note);
+        issuedPassword = password;
         freshlyCreated = true;
 
         // The profile row is created asynchronously by the signup trigger -- poll for it.
         for (let attempt = 0; attempt < 8; attempt += 1) {
-          const { data } = await supabase.from('profiles').select('id').eq('email', needsAccount.email).maybeSingle();
+          const { data } = await supabase.from('profiles').select('id').eq('email', email).maybeSingle();
           if (data) {
             profileId = data.id;
             break;
@@ -161,8 +178,8 @@ export function ReviewBoardTab({
         // profile and proceed directly to assignment/invitation instead of
         // failing. No new password is set for a pre-existing account.
         freshlyCreated = false;
-        password = null;
-        const { data: existing } = await supabase.from('profiles').select('id').eq('email', needsAccount.email).maybeSingle();
+        issuedPassword = null;
+        const { data: existing } = await supabase.from('profiles').select('id').eq('email', email).maybeSingle();
         if (!existing) {
           throw new Error('An account with this email already exists in authentication, but no matching profile was found. Please contact support.');
         }
@@ -183,8 +200,8 @@ export function ReviewBoardTab({
 
       setActions(prev => [...prev, { suggestion_id: needsAccount.suggestionId, action: 'ACCEPTED' }]);
       setNeedsAccount(null);
-      if (password) {
-        setCreatedCredentials({ email: needsAccount.email, password });
+      if (issuedPassword) {
+        setCreatedCredentials({ email, password: issuedPassword });
       } else {
         setSuccess('Existing account resolved -- reviewer assigned to this manuscript and invitation sent.');
         setTimeout(() => setSuccess(''), 4000);
@@ -292,6 +309,21 @@ export function ReviewBoardTab({
 
   return (
     <div className="space-y-6">
+      {/* Messages */}
+      {error && (
+        <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
+
+      {success && (
+        <div className="flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
+          <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-emerald-700">{success}</p>
+        </div>
+      )}
+
       {/* Assignment Status */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6">
         <h3 className="text-sm font-black text-slate-900 mb-4">Reviewer Assignment Status</h3>
@@ -309,28 +341,14 @@ export function ReviewBoardTab({
         </div>
       </div>
 
-      {/* Messages */}
-      {error && (
-        <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <p className="text-sm text-red-700">{error}</p>
-        </div>
-      )}
-
-      {success && (
-        <div className="flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
-          <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-          <p className="text-sm text-emerald-700">{success}</p>
-        </div>
-      )}
-
       {/* Editor Suggested Reviewers */}
       {editorSuggestions.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-          <div className="flex items-center gap-2 mb-4">
+        <div className="bg-white border-2 border-amber-200 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center gap-2 mb-1">
             <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
-            <h3 className="text-sm font-black text-slate-900">Editor Suggested Reviewers ({editorSuggestions.length})</h3>
+            <h3 className="text-sm font-black text-slate-900">Suggested Reviewers ({editorSuggestions.length})</h3>
           </div>
+          <p className="text-xs text-slate-500 mb-4">Reviewers suggested by the editor. Accept to create an account and send an invitation, or choose from Available Reviewers below instead.</p>
 
           <div className="space-y-3">
             {editorSuggestions.map(suggestion => {
@@ -485,6 +503,29 @@ export function ReviewBoardTab({
                     </div>
                     <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
                   </div>
+
+                  {(assignment.invited_at || assignment.responded_at || assignment.submitted_at) && (
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm mt-3 pt-3 border-t border-emerald-200">
+                      {assignment.invited_at && (
+                        <div>
+                          <p className="text-xs font-bold text-slate-500 uppercase mb-1">Invited At</p>
+                          <p className="text-slate-700">{new Date(assignment.invited_at).toLocaleDateString()}</p>
+                        </div>
+                      )}
+                      {assignment.responded_at && (
+                        <div>
+                          <p className="text-xs font-bold text-slate-500 uppercase mb-1">Responded At</p>
+                          <p className="text-slate-700">{new Date(assignment.responded_at).toLocaleDateString()}</p>
+                        </div>
+                      )}
+                      {assignment.submitted_at && (
+                        <div>
+                          <p className="text-xs font-bold text-slate-500 uppercase mb-1">Submitted At</p>
+                          <p className="text-slate-700">{new Date(assignment.submitted_at).toLocaleDateString()}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -495,7 +536,8 @@ export function ReviewBoardTab({
       {/* Available Reviewers for Direct Assignment */}
       {assignedCount < 2 && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-4">Available Reviewers</h3>
+          <h3 className="text-sm font-black text-slate-900 mb-1">Available Reviewers</h3>
+          <p className="text-xs text-slate-500 mb-4">Existing reviewer accounts. Assign directly to invite them — no account creation needed.</p>
           {loadingReviewers ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-4 h-4 animate-spin text-slate-600 mr-2" />
@@ -528,31 +570,6 @@ export function ReviewBoardTab({
         </div>
       )}
 
-      {/* Finalize Button */}
-      {manuscript.status === 'EDITOR_REVIEW' && (
-        <button
-          onClick={handleFinalize}
-          disabled={!canFinalize || finalizing}
-          className={`w-full px-6 py-3 rounded-lg font-bold text-sm transition flex items-center justify-center gap-2 ${
-            canFinalize
-              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-              : 'bg-slate-200 text-slate-500 cursor-not-allowed'
-          }`}
-        >
-          {finalizing ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Finalizing...
-            </>
-          ) : (
-            <>
-              <CheckCircle className="w-4 h-4" />
-              Confirm Reviewer Assignments & Transition to Peer Review
-            </>
-          )}
-        </button>
-      )}
-
       {/* Already Finalized Message */}
       {manuscript.status !== 'EDITOR_REVIEW' && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 text-center">
@@ -571,16 +588,49 @@ export function ReviewBoardTab({
               <h3 className="text-lg font-black text-slate-900">Reviewer Account Required</h3>
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4">
-              <p className="font-semibold text-slate-900">{needsAccount.name}</p>
-              <p className="text-sm text-slate-600">{needsAccount.email}</p>
-              {needsAccount.note && <p className="text-xs text-slate-500 mt-1">Expertise: {needsAccount.note}</p>}
+            <p className="text-sm text-slate-700 mb-4">
+              This reviewer has been accepted by the Coordinator but does not have an account yet.
+              Set a password and create the account to continue.
+            </p>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4 space-y-2">
+              <div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Name</p>
+                <p className="text-sm text-slate-900">{accountForm.name}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Email</p>
+                <p className="text-sm text-slate-900">{accountForm.email}</p>
+              </div>
+              {accountForm.note && (
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Expertise / Note</p>
+                  <p className="text-sm text-slate-900">{accountForm.note}</p>
+                </div>
+              )}
             </div>
 
-            <p className="text-sm text-slate-700 mb-6">
-              This reviewer has been accepted by the Coordinator but does not have an account yet.
-              Create the reviewer account to continue.
-            </p>
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Password</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={accountForm.password}
+                    onChange={(e) => setAccountForm({ ...accountForm, password: e.target.value })}
+                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAccountForm({ ...accountForm, password: generateTempPassword() })}
+                    className="px-3 py-2 border border-slate-300 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-50 transition"
+                  >
+                    Generate
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">At least 6 characters. Share this with the reviewer after creating the account.</p>
+              </div>
+            </div>
 
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-3 mb-4">{error}</div>

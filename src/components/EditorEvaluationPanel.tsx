@@ -140,7 +140,7 @@ export default function EditorEvaluationPanel({
   };
 
   return (
-    <aside className="w-80 bg-slate-50 border-l border-slate-200 flex flex-col h-screen overflow-hidden">
+    <aside className="w-80 bg-slate-50 border-l border-slate-200 flex flex-col h-[calc(100vh-80px)] overflow-hidden mt-20">
       {/* Header Section - Sticky */}
       <div className="shrink-0 bg-white border-b border-slate-200 p-6 space-y-4">
         {/* Title and Status */}
@@ -174,7 +174,7 @@ export default function EditorEvaluationPanel({
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-6 pb-8">
 
           {/* Overall Recommendation Section */}
           <div className="space-y-3">
@@ -355,28 +355,6 @@ export default function EditorEvaluationPanel({
         </div>
       </div>
 
-      {/* Sticky Action Area */}
-      <div className="shrink-0 bg-white border-t border-slate-200 p-6 space-y-3">
-        <button
-          onClick={handleSaveDraft}
-          disabled={isSaving}
-          className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50"
-        >
-          {isSaving ? 'Saving Draft...' : 'Save Draft'}
-        </button>
-        <button
-          onClick={handleSubmitEvaluation}
-          disabled={isSubmitting || !hasRequiredFields}
-          className={`w-full px-4 py-2.5 rounded-lg text-[13px] font-semibold text-white transition-colors flex items-center justify-center gap-2 ${
-            hasRequiredFields && !isSubmitting
-              ? 'bg-blue-600 hover:bg-blue-700'
-              : 'bg-blue-400 cursor-not-allowed opacity-75'
-          }`}
-        >
-          <Send className="w-4 h-4" />
-          {isSubmitting ? 'Submitting...' : 'Submit Evaluation'}
-        </button>
-      </div>
     </aside>
   );
 }

@@ -23,7 +23,13 @@ export function DecisionTab({
 
   const hasEditorEvaluation = editorAssignments.some(a => a.assessment_status === 'SUBMITTED');
   const hasRequiredReviews = reviewerAssignments.every(r => r.status === 'SUBMITTED');
-  const canDecide = hasEditorEvaluation && (reviewerAssignments.length === 0 || hasRequiredReviews);
+  // The backend (publish_decision RPC) only accepts a decision once the
+  // manuscript has actually reached AWAITING_DECISION -- checking just
+  // hasEditorEvaluation/hasRequiredReviews let the form render as "ready"
+  // before reviewers were even assigned (reviewerAssignments.length === 0
+  // trivially satisfies hasRequiredReviews), so Submit always failed with
+  // "Manuscript is not awaiting a decision".
+  const canDecide = manuscript.status === 'AWAITING_DECISION' && hasEditorEvaluation && (reviewerAssignments.length === 0 || hasRequiredReviews);
 
   const handleMakeDecision = async () => {
     if (!decision) return;
@@ -49,6 +55,9 @@ export function DecisionTab({
     if (reviewerAssignments.length > 0 && !hasRequiredReviews) {
       const pending = reviewerAssignments.filter(r => r.status !== 'SUBMITTED').length;
       missing.push(`${pending} reviewer report(s)`);
+    }
+    if (hasEditorEvaluation && (reviewerAssignments.length === 0 || hasRequiredReviews) && manuscript.status !== 'AWAITING_DECISION') {
+      missing.push(`manuscript to reach Awaiting Decision (currently ${manuscript.status.replace(/_/g, ' ')})`);
     }
 
     return (

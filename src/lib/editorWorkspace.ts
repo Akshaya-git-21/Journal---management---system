@@ -353,9 +353,7 @@ export async function postDiscussion(
         manuscript_id: manuscriptId,
         sender_id: senderId,
         message: message,
-        discussion_type: discussionType,
-        created_at: new Date().toISOString(),
-        is_internal: discussionType === 'EDITORIAL'
+        created_at: new Date().toISOString()
       });
 
     if (error) throw new Error(error.message);
@@ -422,6 +420,30 @@ export async function submitReviewerSuggestion(
     if (error) throw new Error(error.message);
   } catch (error) {
     console.error('Error submitting reviewer suggestion:', error);
+    throw error;
+  }
+}
+
+/** Persists a single editor-suggested reviewer immediately (independent of
+ * submit_editor_assessment) -- used by the Editor workspace's standalone
+ * "Suggestions" tab. Requires the caller to be the manuscript's accepted
+ * editor; see add_suggested_reviewer() in 0012_editor_suggest_reviewer.sql. */
+export async function addSuggestedReviewer(
+  manuscriptId: string,
+  reviewer: { name: string; email: string; note?: string }
+): Promise<SuggestedReviewerRow> {
+  try {
+    const { data, error } = await supabase.rpc('add_suggested_reviewer', {
+      p_manuscript_id: manuscriptId,
+      p_name: reviewer.name,
+      p_email: reviewer.email,
+      p_note: reviewer.note ?? ''
+    }).single();
+
+    if (error) throw new Error(error.message);
+    return data as SuggestedReviewerRow;
+  } catch (error) {
+    console.error('Error adding suggested reviewer:', error);
     throw error;
   }
 }
@@ -502,6 +524,7 @@ export function subscribeToAllManuscriptUpdates(
     onReviewerChange?: (reviewers: ReviewerAssignmentRow[]) => void;
     onDiscussionChange?: (discussions: DiscussionRow[]) => void;
     onStatusChange?: (history: StatusHistoryRow[]) => void;
+    onAssignmentChange?: () => void;
   }
 ): () => void {
   const unsubscribers: (() => void)[] = [];
@@ -614,6 +637,27 @@ export function subscribeToAllManuscriptUpdates(
     .subscribe();
 
   unsubscribers.push(() => statusChannel.unsubscribe());
+
+  // Subscribe to editor assignment changes (assessment/recommendation updates)
+  const assignmentChannel = supabase
+    .channel(`manuscript:${manuscriptId}:editor_assignments_rt`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'editor_assignments',
+        filter: `manuscript_id=eq.${manuscriptId}`
+      },
+      () => {
+        if (callbacks.onAssignmentChange) {
+          callbacks.onAssignmentChange();
+        }
+      }
+    )
+    .subscribe();
+
+  unsubscribers.push(() => assignmentChannel.unsubscribe());
 
   // Return unified cleanup function
   return () => {

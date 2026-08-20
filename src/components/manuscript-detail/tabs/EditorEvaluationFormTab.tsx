@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Plus, Trash2, Loader2, AlertCircle, CheckCircle, Send } from 'lucide-react';
 import { EditorAssignmentRow, SuggestedReviewerRow, submitEditorAssessment } from '../../../lib/workflow';
 import { supabase } from '../../../lib/supabase';
 
@@ -69,6 +69,7 @@ export function EditorEvaluationFormTab({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [submittedRecommendation, setSubmittedRecommendation] = useState<'minor_revision' | 'major_revision' | 'accept' | null>(null);
 
   // Reviewer suggestions are entirely optional (0, 1, or more) -- only
   // duplicate emails among whatever was entered are blocked.
@@ -112,6 +113,9 @@ export function EditorEvaluationFormTab({
     setLoading(true);
 
     try {
+      // Get the recommendation from the button that was clicked
+      const recommendation = (e.currentTarget as any).dataset.recommendation as 'minor_revision' | 'major_revision' | 'accept';
+
       // Filter out empty suggestions
       const validSuggestions = suggestions
         .filter(s => s.name.trim() || s.email.trim())
@@ -137,6 +141,7 @@ export function EditorEvaluationFormTab({
         suggestedReviewers: validSuggestions,
       });
 
+      setSubmittedRecommendation(recommendation);
       setSuccess('Evaluation submitted successfully! The coordinator will now review your reviewer suggestions.');
       setTimeout(() => {
         onSubmitSuccess();
@@ -149,17 +154,34 @@ export function EditorEvaluationFormTab({
   };
 
   if (assignment.assessment_status === 'SUBMITTED') {
+    const getRecommendationDisplay = () => {
+      const recommendations: Record<string, { label: string; color: string; bgColor: string }> = {
+        minor_revision: { label: 'Minor Revision', color: 'text-yellow-900', bgColor: 'bg-yellow-50 border-yellow-200' },
+        major_revision: { label: 'Major Revision', color: 'text-red-900', bgColor: 'bg-red-50 border-red-200' },
+        accept: { label: 'Accept Submission', color: 'text-green-900', bgColor: 'bg-green-50 border-green-200' }
+      };
+      return recommendations[submittedRecommendation || 'minor_revision'];
+    };
+
+    const recommendation = getRecommendationDisplay();
+
     return (
-      <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-8 text-center">
-        <CheckCircle className="w-12 h-12 text-emerald-600 mx-auto mb-4" />
-        <p className="text-emerald-900 font-semibold mb-2">Evaluation Submitted</p>
-        <p className="text-sm text-emerald-700">Your evaluation and reviewer suggestions have been submitted to the coordinator.</p>
+      <div className="space-y-6 pt-4">
+        <div className={`border rounded-2xl p-8 text-center ${recommendation.bgColor}`}>
+          <CheckCircle className={`w-12 h-12 mx-auto mb-4 ${recommendation.color}`} />
+          <p className={`${recommendation.color} font-semibold mb-2`}>Evaluation Submitted</p>
+          <p className={`text-sm ${recommendation.color}`}>Your evaluation and reviewer suggestions have been submitted to the coordinator.</p>
+          <div className="mt-4 pt-4 border-t border-current border-opacity-20">
+            <p className={`text-xs font-semibold uppercase tracking-wide ${recommendation.color} mb-2`}>Decision Made</p>
+            <p className={`text-lg font-black ${recommendation.color}`}>{recommendation.label}</p>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6 pb-32 pt-4">
       {/* Error/Success Messages */}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-800 flex items-start gap-3">
@@ -175,42 +197,60 @@ export function EditorEvaluationFormTab({
       )}
 
       {/* Evaluation Criteria */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
-        <h3 className="text-sm font-black text-slate-900 mb-6">Evaluation Criteria (1-10 scale)</h3>
-        <div className="space-y-6">
-          {CRITERIA.map(c => (
-            <div key={c.key} className="border border-slate-200 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-bold text-slate-700">{c.label}</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={(scores as any)[c.key]}
-                  onChange={(e) => handleScoreChange(c.key as any, parseInt(e.target.value) || 5)}
-                  disabled={loading}
-                  className="w-16 px-2 py-1 border border-slate-300 rounded text-sm font-bold text-center"
-                />
-              </div>
-              <p className="text-xs text-slate-600 mb-3">{c.description}</p>
-              <div className="w-full bg-slate-200 rounded-full h-2 mb-4">
-                <div
-                  className="bg-emerald-600 h-2 rounded-full transition-all"
-                  style={{ width: `${((scores as any)[c.key] / 10) * 100}%` }}
-                ></div>
-              </div>
-              <label className="block text-xs font-bold text-slate-700 mb-2">Reason for this score</label>
-              <textarea
-                value={(criteriaReasons as any)[c.key]}
-                onChange={(e) => setCriteriaReasons(prev => ({ ...prev, [c.key]: e.target.value }))}
-                placeholder="Explain your score for this criterion..."
-                disabled={loading}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
-                rows={2}
-              />
-            </div>
-          ))}
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-black text-slate-900">EVALUATION CRITERIA</h3>
+          <span className="text-sm text-blue-600 font-semibold">Scale: 1 (Poor) to 10 (Excellent)</span>
         </div>
+
+        {CRITERIA.map((c, idx) => (
+          <div key={c.key} className="border-b border-slate-200 pb-6">
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h4 className="text-sm font-black text-slate-900">{idx + 1}. {c.label.toUpperCase()}</h4>
+                <p className="text-xs text-slate-600 mt-1">{c.description}</p>
+              </div>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  disabled={loading}
+                  className="w-4 h-4 border border-slate-300 rounded"
+                />
+                <span className="text-xs font-semibold text-slate-700">N/A</span>
+              </label>
+            </div>
+
+            <div className="flex gap-2 mb-3 flex-wrap">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => handleScoreChange(c.key as any, num)}
+                  disabled={loading}
+                  className={`w-10 h-10 rounded text-sm font-bold transition ${
+                    (scores as any)[c.key] === num
+                      ? 'bg-slate-400 text-white'
+                      : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                  }`}
+                >
+                  {num}
+                </button>
+              ))}
+            </div>
+
+            <p className="text-xs text-blue-600 font-semibold mb-3">SCORE SELECTION: {(scores as any)[c.key]} / 10</p>
+
+            <label className="block text-xs font-bold text-slate-700 mb-2">Reason for this score</label>
+            <textarea
+              value={(criteriaReasons as any)[c.key]}
+              onChange={(e) => setCriteriaReasons(prev => ({ ...prev, [c.key]: e.target.value }))}
+              placeholder="Explain your score for this criterion..."
+              disabled={loading}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
+              rows={2}
+            />
+          </div>
+        ))}
       </div>
 
       {/* Qualitative Feedback */}
@@ -266,82 +306,47 @@ export function EditorEvaluationFormTab({
         </div>
       </div>
 
-      {/* Reviewer Suggestions */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-        <div>
-          <h3 className="text-sm font-black text-slate-900 mb-1">Reviewer Suggestions (Optional)</h3>
-          <p className="text-xs text-slate-600 mb-4">Suggesting reviewers is optional -- you may submit your evaluation with none, one, or several.</p>
-        </div>
-
-        <div className="space-y-3">
-          {suggestions.map((suggestion, idx) => (
-            <div key={idx} className="border border-slate-200 rounded-lg p-4 space-y-2">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-slate-700">Reviewer {idx + 1}</span>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveSuggestion(idx)}
-                  disabled={loading}
-                  className="text-slate-400 hover:text-red-600 transition"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-              <input
-                type="text"
-                placeholder="Reviewer name"
-                value={suggestion.name}
-                onChange={(e) => handleUpdateSuggestion(idx, 'name', e.target.value)}
-                disabled={loading}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:outline-none focus:border-emerald-500"
-              />
-              <input
-                type="email"
-                placeholder="reviewer@example.com"
-                value={suggestion.email}
-                onChange={(e) => handleUpdateSuggestion(idx, 'email', e.target.value)}
-                disabled={loading}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:outline-none focus:border-emerald-500"
-              />
-              <input
-                type="text"
-                placeholder="Expertise or note (optional)"
-                value={suggestion.note}
-                onChange={(e) => handleUpdateSuggestion(idx, 'note', e.target.value)}
-                disabled={loading}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-          ))}
-        </div>
-
+      {/* Submit Buttons with Recommendations */}
+      <div className="flex gap-3 pt-4">
         <button
-          type="button"
-          onClick={handleAddSuggestion}
-          disabled={loading}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition"
+          type="submit"
+          onClick={(e) => {
+            e.currentTarget.dataset.recommendation = 'minor_revision';
+            handleSubmit(e as any);
+          }}
+          disabled={!canSubmit || loading}
+          className="flex-1 bg-yellow-700 hover:bg-yellow-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 px-4 rounded transition flex items-center justify-center gap-2"
         >
-          <Plus className="w-4 h-4" />
-          Add Another Reviewer
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          Minor Revision
         </button>
 
-        <div className="text-xs text-slate-600 space-y-1">
-          <p>{suggestions.filter(s => s.name.trim() || s.email.trim()).length > 0
-            ? `✓ ${suggestions.filter(s => s.name.trim() || s.email.trim()).length} suggestion(s) provided`
-            : 'No reviewer suggestions provided -- this is optional, you may submit without any.'}</p>
-          {suggestionsHaveDuplicates && <p className="text-red-600">⚠ Duplicate email addresses detected</p>}
-        </div>
-      </div>
+        <button
+          type="submit"
+          onClick={(e) => {
+            e.currentTarget.dataset.recommendation = 'major_revision';
+            handleSubmit(e as any);
+          }}
+          disabled={!canSubmit || loading}
+          className="flex-1 bg-red-700 hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 px-4 rounded transition flex items-center justify-center gap-2"
+        >
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          Major Revision
+        </button>
 
-      {/* Submit Button */}
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition"
-      >
-        {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-        {loading ? 'Submitting...' : 'Submit Evaluation & Reviewer Suggestions'}
-      </button>
+        <button
+          type="submit"
+          onClick={(e) => {
+            e.currentTarget.dataset.recommendation = 'accept';
+            handleSubmit(e as any);
+          }}
+          disabled={!canSubmit || loading}
+          className="flex-1 bg-green-700 hover:bg-green-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 px-4 rounded transition flex items-center justify-center gap-2"
+        >
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          Accept Submission
+        </button>
+      </div>
     </form>
   );
 }

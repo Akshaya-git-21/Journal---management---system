@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, ZoomIn, ZoomOut, Download, FileText, ChevronLeft, ChevronRight, 
   RotateCw, RefreshCw, Folder, File, FolderOpen, Table, Image as ImageIcon, 
@@ -326,7 +326,7 @@ export default function FilePreviewModal({
               {isDocx && publicUrl && (
                 <div className="w-full flex flex-col gap-2">
                   <iframe
-                    src={`${publicUrl}`}
+                    src={`https://view.officeapps.live.com/op/embed.aspx?src=${publicUrl}`}
                     className="w-full rounded-lg shadow-xl border border-slate-200"
                     style={{ minHeight: '900px' }}
                     title="Word Document Preview"

@@ -13,6 +13,7 @@ import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity } from 'lucide-react';
+import { AssignmentConfirmationDialog } from './AssignmentConfirmationDialog';
 
 interface CoordinatorWorkspaceProps {
   manuscripts?: any[];
@@ -56,7 +57,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [reviewerAssignmentCounts, setReviewerAssignmentCounts] = useState<Record<string, { invited: number; accepted: number; completed: number }>>({});
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('ALL');
-  const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS'>('MANUSCRIPT_QUEUE');
+  const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS'>('DASHBOARD');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedManuscriptForRevision, setSelectedManuscriptForRevision] = useState<ManuscriptRow | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -138,7 +139,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
 
     try {
       setLoading(true);
-      await createEditorAccount(normalizedEmail, password, normalizedName, specialization, inviteRole);
+      const result = await createEditorAccount(normalizedEmail, password, normalizedName, specialization, inviteRole);
 
       let profile: { id: string; email: string; status: string } | null = null;
       for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -158,7 +159,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
         }
       }
 
-      setGeneratedInviteCredentials({ email: normalizedEmail, password });
+      setGeneratedInviteCredentials({ email: normalizedEmail, password: result.temporaryPassword });
       setShowInviteModal(false);
       resetInviteForm();
       await load();
@@ -204,7 +205,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
 
     try {
       setLoading(true);
-      await createReviewerAccount(normalizedEmail, password, normalizedName, specialization);
+      const result = await createReviewerAccount(normalizedEmail, password, normalizedName, specialization);
 
       let profile: { id: string; email: string; status: string } | null = null;
       for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -224,7 +225,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
         }
       }
 
-      setGeneratedReviewerCredentials({ email: normalizedEmail, password });
+      setGeneratedReviewerCredentials({ email: normalizedEmail, password: result.temporaryPassword });
       setShowReviewerInviteModal(false);
       setReviewerInviteName('');
       setReviewerInviteEmail('');
@@ -262,6 +263,20 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
     return unsubscribe;
   }, []);
 
+  // Keep the Editorial Board / Reviewers rosters live -- new accounts (e.g.
+  // created from an accepted reviewer suggestion) or role/status changes
+  // don't touch the manuscripts table, so they need their own subscription.
+  useEffect(() => {
+    const channel = supabase
+      .channel('coordinator-profiles-rt')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        load();
+      })
+      .subscribe();
+
+    return () => { channel.unsubscribe(); };
+  }, []);
+
   const activeTab = STAGE_TABS.find((t) => t.key === tab) || STAGE_TABS[0];
   const filteredByStage = activeTab.statuses.length === 0 ? items : items.filter((m) => activeTab.statuses.includes(m.status));
   const filtered = filteredByStage.filter((m) => (m.title + m.author_name + m.id).toLowerCase().includes(searchTerm.toLowerCase()));
@@ -270,10 +285,12 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const selected = items.find((m) => m.id === selectedId) || null;
   const totalCount = items.length;
   const stageCounts = {
+    all: items.length,
     submitted: items.filter((m) => m.status === 'SUBMITTED').length,
+    editorReview: items.filter((m) => m.status === 'EDITOR_REVIEW').length,
     underReview: items.filter((m) => m.status === 'UNDER_REVIEW').length,
-    decisionPending: items.filter((m) => m.status === 'AWAITING_DECISION').length,
-    revisionRequested: items.filter((m) => m.status === 'REVISION_REQUESTED').length,
+    awaitingDecision: items.filter((m) => m.status === 'AWAITING_DECISION').length,
+    done: items.filter((m) => ['ACCEPTED', 'PUBLISHED', 'REJECTED', 'REVISION_REQUESTED'].includes(m.status)).length,
   };
 
   const isDashboardSection = activeSection === 'DASHBOARD';
@@ -388,7 +405,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
               <DashboardOverviewScreen items={items} stageCounts={stageCounts} pendingApprovals={pendingApprovals.length} />
             ) : isManuscriptQueueSection ? (
               selected ? (
-                <CoordinatorManuscriptDetail manuscript={selected} onBack={() => setSelectedId(null)} onChanged={load} />
+                <CoordinatorManuscriptDetail manuscript={selected} showAllFiles={tab === 'ALL'} onBack={() => setSelectedId(null)} onChanged={load} />
               ) : (
                 <ManuscriptQueueScreen
                   items={items}
@@ -400,6 +417,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
                   onRefresh={load}
                   tab={tab}
                   setTab={setTab}
+                  stageCounts={stageCounts}
                 />
               )
             ) : isEditorialBoardSection ? (
@@ -537,35 +555,83 @@ function formatDate(iso: string | null) {
 }
 
 function QueueTable({ items, onOpen }: { items: ManuscriptRow[]; onOpen: (id: string) => void }) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  const totalPages = Math.ceil(items.length / itemsPerPage);
+  const startIdx = (currentPage - 1) * itemsPerPage;
+  const paginatedItems = items.slice(startIdx, startIdx + itemsPerPage);
+
   if (items.length === 0) {
     return <div className="text-center py-20 text-sm text-slate-400 bg-white border border-dashed border-slate-300 rounded-2xl">No manuscripts in this stage.</div>;
   }
+
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-      <table className="w-full text-left text-sm">
-        <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
-          <tr>
-            <th className="px-4 py-3">ID</th>
-            <th className="px-4 py-3">Title</th>
-            <th className="px-4 py-3">Author</th>
-            <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3">Submitted</th>
-            <th className="px-4 py-3"></th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {items.map((m) => (
-            <tr key={m.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(m.id)}>
-              <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.id}</td>
-              <td className="px-4 py-3 font-bold text-slate-800 max-w-xs truncate">{m.title}</td>
-              <td className="px-4 py-3 text-slate-600 text-xs">{m.author_name}</td>
-              <td className="px-4 py-3"><StatusBadge status={m.status} /></td>
-              <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(m.submitted_at)}</td>
-              <td className="px-4 py-3 text-right text-[#008751] font-bold text-xs">Open &rarr;</td>
+    <div className="space-y-4">
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
+            <tr>
+              <th className="px-4 py-3">ID</th>
+              <th className="px-4 py-3">Title</th>
+              <th className="px-4 py-3">Author</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Submitted</th>
+              <th className="px-4 py-3"></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {paginatedItems.map((m) => (
+              <tr key={m.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(m.id)}>
+                <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.id}</td>
+                <td className="px-4 py-3 font-bold text-slate-800 max-w-xs truncate">{m.title}</td>
+                <td className="px-4 py-3 text-slate-600 text-xs">{m.author_name}</td>
+                <td className="px-4 py-3"><StatusBadge status={m.status} /></td>
+                <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(m.submitted_at)}</td>
+                <td className="px-4 py-3 text-right text-[#008751] font-bold text-xs">Open &rarr;</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {totalPages > 1 && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between">
+          <div className="text-xs text-slate-600">
+            Showing {startIdx + 1} to {Math.min(startIdx + itemsPerPage, items.length)} of {items.length} manuscripts
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`w-8 h-8 rounded-lg text-xs font-semibold transition ${
+                    page === currentPage
+                      ? 'bg-[#008751] text-white'
+                      : 'border border-slate-300 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1132,7 +1198,20 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals }: { ite
   );
 }
 
-function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onOpen, onRefresh, tab, setTab }: { items: ManuscriptRow[]; filtered: ManuscriptRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onOpen: (id: string | null) => void; onRefresh: () => void; tab: string; setTab: (value: string) => void; }) {
+function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onOpen, onRefresh, tab, setTab, stageCounts }: { items: ManuscriptRow[]; filtered: ManuscriptRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onOpen: (id: string | null) => void; onRefresh: () => void; tab: string; setTab: (value: string) => void; stageCounts?: { submitted: number; underReview: number; awaitingDecision: number; done: number }; }) {
+  const getStageCount = (stageKey: string) => {
+    if (!stageCounts) return 0;
+    switch (stageKey) {
+      case 'ALL': return stageCounts.all;
+      case 'SUBMITTED': return stageCounts.submitted;
+      case 'EDITOR_REVIEW': return stageCounts.editorReview;
+      case 'UNDER_REVIEW': return stageCounts.underReview;
+      case 'AWAITING_DECISION': return stageCounts.awaitingDecision;
+      case 'DONE': return stageCounts.done;
+      default: return 0;
+    }
+  };
+
   return (
     <>
       <div className="space-y-3">
@@ -1160,6 +1239,7 @@ function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onO
             <div className="flex flex-wrap gap-2">
               {STAGE_TABS.map((stage) => {
                 const active = tab === stage.key;
+                const count = getStageCount(stage.key);
                 return (
                   <button
                     key={stage.key}
@@ -1167,6 +1247,7 @@ function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onO
                     className={`rounded-full px-4 py-2 text-[11px] font-semibold transition ${active ? 'bg-[#008751] text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                   >
                     {stage.label}
+                    {count > 0 && <span className={`ml-2 inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${active ? 'bg-white/20' : 'bg-slate-200'}`}>{count}</span>}
                   </button>
                 );
               })}
@@ -1367,6 +1448,8 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
   const [profiles, setProfiles] = useState<Record<string, ProfileRow>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [showReviewerConfirmation, setShowReviewerConfirmation] = useState(false);
+  const [pendingReviewerAssignment, setPendingReviewerAssignment] = useState<{ r1: string; r2: string } | null>(null);
 
   const load = async () => {
     const [h, ea, ra, sr] = await Promise.all([
@@ -1387,6 +1470,18 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
     const channel = supabase
       .channel(`reviewer_assignments:${manuscript.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reviewer_assignments', filter: `manuscript_id=eq.${manuscript.id}` }, () => {
+        load();
+      })
+      .subscribe();
+
+    return () => { channel.unsubscribe(); };
+  }, [manuscript.id]);
+
+  // Realtime subscription to suggested reviewers (from Author or Editor)
+  useEffect(() => {
+    const channel = supabase
+      .channel(`suggested_reviewers:${manuscript.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_suggested_reviewers', filter: `manuscript_id=eq.${manuscript.id}` }, () => {
         load();
       })
       .subscribe();
@@ -1471,29 +1566,62 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
             </div>
           ))}
 
-          {suggested.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-slate-100">
-              <p className="text-xs font-bold text-slate-600 mb-2">Suggested Reviewers</p>
-              <ul className="space-y-1">
-                {suggested.map((s) => (
-                  <li key={s.id} className="text-xs text-slate-600">
-                    <span className="font-bold">{s.name}</span> ({s.email}) &mdash; suggested by {s.suggested_by.toLowerCase()}{s.note ? `: ${s.note}` : ''}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {suggested.length > 0 && (() => {
+            const merged = new Map<string, { id: string; name: string; email: string; note: string | null; sources: Set<'AUTHOR' | 'EDITOR'> }>();
+            for (const s of suggested) {
+              const key = s.email.trim().toLowerCase();
+              const existing = merged.get(key);
+              if (existing) {
+                existing.sources.add(s.suggested_by);
+                if (!existing.note && s.note) existing.note = s.note;
+              } else {
+                merged.set(key, { id: s.id, name: s.name, email: s.email, note: s.note, sources: new Set([s.suggested_by]) });
+              }
+            }
+            const uniqueReviewers = Array.from(merged.values());
+            return (
+              <div className="mt-3 pt-3 border-t border-slate-100">
+                <p className="text-xs font-bold text-slate-600 mb-2">Suggested Reviewers ({uniqueReviewers.length})</p>
+                <div className="space-y-2">
+                  {uniqueReviewers.map((s) => {
+                    const hasAuthor = s.sources.has('AUTHOR');
+                    const hasEditor = s.sources.has('EDITOR');
+                    const badgeLabel = hasAuthor && hasEditor
+                      ? 'Suggested by Author & Editor'
+                      : hasAuthor
+                      ? 'Suggested by Author'
+                      : 'Suggested by Editor';
+                    const badgeStyle = hasAuthor && hasEditor
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : hasAuthor
+                      ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                      : 'bg-teal-50 text-teal-700 border border-teal-200';
+                    return (
+                      <div key={s.id} className="border border-slate-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-slate-900">{s.name}</p>
+                          <p className="text-xs text-slate-600">{s.email}</p>
+                          {s.note && <p className="text-xs text-slate-500 mt-0.5">{s.note}</p>}
+                        </div>
+                        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${badgeStyle}`}>
+                          {badgeLabel}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
       {manuscript.status === 'EDITOR_REVIEW' && activeEditorAssignment?.assessment_status === 'SUBMITTED' && (
         <AssignReviewersPanel
           busy={busy}
-          onAssign={async (r1, r2) => {
-            setBusy(true); setError('');
-            try { await assignReviewers(manuscript.id, [r1, r2]); await load(); onChanged(); }
-            catch (e: any) { setError(e.message); }
-            finally { setBusy(false); }
+          onAssign={(r1, r2) => {
+            setPendingReviewerAssignment({ r1, r2 });
+            setShowReviewerConfirmation(true);
           }}
         />
       )}
@@ -1669,6 +1797,38 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
           ))}
         </div>
       </div>
+
+      <AssignmentConfirmationDialog
+        isOpen={showReviewerConfirmation}
+        title="Confirm Reviewer Assignment"
+        message="Do you confirm the assignment of these 2 peer reviewers to this manuscript?"
+        details={pendingReviewerAssignment ?
+          `Reviewer 1: ${profiles[pendingReviewerAssignment.r1]?.name || 'Unknown'}\nReviewer 2: ${profiles[pendingReviewerAssignment.r2]?.name || 'Unknown'}`
+          : ''}
+        confirmText="Confirm Assign"
+        cancelText="Cancel"
+        isLoading={busy}
+        onConfirm={async () => {
+          if (!pendingReviewerAssignment) return;
+          setBusy(true);
+          setError('');
+          try {
+            await assignReviewers(manuscript.id, [pendingReviewerAssignment.r1, pendingReviewerAssignment.r2]);
+            await load();
+            onChanged();
+            setShowReviewerConfirmation(false);
+            setPendingReviewerAssignment(null);
+          } catch (e: any) {
+            setError(e.message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onCancel={() => {
+          setShowReviewerConfirmation(false);
+          setPendingReviewerAssignment(null);
+        }}
+      />
     </div>
   );
 }

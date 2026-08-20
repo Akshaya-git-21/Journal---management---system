@@ -21,17 +21,18 @@ interface Props {
   onWorkflowChange: () => void;
   currentUserId?: string;
   isEditor?: boolean;
+  showAllFiles?: boolean;
 }
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: '📋' },
   { id: 'manuscript', label: 'Manuscript', icon: '📄' },
-  { id: 'files', label: 'Files', icon: '📁' },
-  { id: 'evaluation', label: 'Editor Evaluation', icon: '✍️' },
-  { id: 'review-board', label: 'Review Board', icon: '👥' },
-  { id: 'reviewers', label: 'Reviewers', icon: '🔍' },
-  { id: 'reviews', label: 'Reviews', icon: '📝' },
-  { id: 'decision', label: 'Decision', icon: '⚖️' },
+  { id: 'files', label: 'Files for Review (1)', icon: '📁' },
+  { id: 'evaluation', label: 'Editor Evaluation (2)', icon: '✍️' },
+  { id: 'review-board', label: 'Review Board (3)', icon: '👥' },
+  { id: 'reviewers', label: 'Reviewers (4)', icon: '🔍' },
+  { id: 'reviews', label: 'Reviews (5)', icon: '📝' },
+  { id: 'decision', label: 'Decision (6)', icon: '⚖️' },
   { id: 'timeline', label: 'Timeline', icon: '⏱️' },
   { id: 'history', label: 'History', icon: '📜' },
   { id: 'notes', label: 'Notes', icon: '📌' },
@@ -45,8 +46,10 @@ export default function ManuscriptDetailTabs({
   onDataChange,
   onWorkflowChange,
   currentUserId,
-  isEditor
+  isEditor,
+  showAllFiles = false
 }: Props) {
+  // Step numbering for editor workflow guidance
   const editorAssignment = data.editorAssignments?.[0];
   const canEditEvaluation = isEditor &&
     editorAssignment?.status === 'ACCEPTED' &&
@@ -92,7 +95,7 @@ export default function ManuscriptDetailTabs({
           />
         )}
         {activeTab === 'files' && (
-          <FilesTab manuscriptId={manuscript.id} />
+          <FilesTab manuscriptId={manuscript.id} showAllFiles={showAllFiles} />
         )}
         {activeTab === 'evaluation' && (
           canEditEvaluation && editorAssignment ? (
@@ -122,6 +125,7 @@ export default function ManuscriptDetailTabs({
         {activeTab === 'reviewers' && (
           <ReviewersTab
             reviewerAssignments={data.reviewerAssignments}
+            suggestedReviewers={data.suggestedReviewers}
             profiles={data.profiles}
           />
         )}

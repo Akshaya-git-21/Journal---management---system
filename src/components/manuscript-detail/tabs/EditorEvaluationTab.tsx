@@ -41,8 +41,8 @@ export function EditorEvaluationTab({
           {CRITERIA.map((c) => {
             const value = (assessment as any)[c.key];
             return (
-              <div key={c.key} className="border border-slate-200 rounded-lg p-3">
-                <div className="flex items-center justify-between mb-2">
+              <div key={c.key} className="border border-slate-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
                   <p className="text-xs font-bold text-slate-700">{c.label}</p>
                   <p className="text-lg font-bold text-emerald-700">{value}/10</p>
                 </div>
@@ -53,7 +53,10 @@ export function EditorEvaluationTab({
                   ></div>
                 </div>
                 {(assessment.criteria_reasons as any)?.[c.reasonKey] && (
-                  <p className="text-xs text-slate-500 italic mt-2">"{(assessment.criteria_reasons as any)[c.reasonKey]}"</p>
+                  <div className="mt-3 bg-slate-50 p-3 rounded border-l-2 border-emerald-600">
+                    <p className="text-xs font-semibold text-slate-600 mb-1">REASONING:</p>
+                    <p className="text-sm text-slate-700">{(assessment.criteria_reasons as any)[c.reasonKey]}</p>
+                  </div>
                 )}
               </div>
             );

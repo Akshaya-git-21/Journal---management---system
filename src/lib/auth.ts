@@ -130,6 +130,29 @@ export async function logoutAccount(): Promise<void> {
   await supabase.auth.signOut();
 }
 
+/**
+ * Returns a definitely-not-expired access token, proactively refreshing the
+ * session first if the cached one is already expired or about to be.
+ * supabase-js only auto-refreshes on a background timer, which can lag (or
+ * pause entirely while the tab is backgrounded) -- a stale token grabbed
+ * straight from getSession() after the page has been open a while is exactly
+ * what produces "Unauthorized: session invalid or expired" from the server,
+ * even though the user never actually signed out.
+ */
+async function getFreshAccessToken(): Promise<string | null> {
+  const { data } = await supabase.auth.getSession();
+  let session = data.session;
+  const expiresInMs = session ? session.expires_at! * 1000 - Date.now() : -Infinity;
+
+  if (!session || expiresInMs < 30_000) {
+    const { data: refreshed, error } = await supabase.auth.refreshSession();
+    if (error || !refreshed.session) return null;
+    session = refreshed.session;
+  }
+
+  return session.access_token;
+}
+
 export async function createUserAccount(
   email: string,
   password: string,
@@ -137,7 +160,7 @@ export async function createUserAccount(
   role: 'EDITOR' | 'REVIEWER',
   metadata: Record<string, any> = {}
 ): Promise<void> {
-  const token = (await supabase.auth.getSession()).data.session?.access_token;
+  const token = await getFreshAccessToken();
   if (!token) {
     throw new Error('Your session has expired. Please sign in again before creating an account.');
   }
@@ -163,21 +186,35 @@ export async function createUserAccount(
   }
 }
 
-export async function createEditorAccount(email: string, password: string, fullName: string, specialization: string, editorialRole: string): Promise<void> {
-  return createUserAccount(email, password, fullName, 'EDITOR', {
+export async function createEditorAccount(email: string, password: string, fullName: string, specialization: string, editorialRole: string): Promise<{ temporaryPassword: string }> {
+  if (!password || password.length < 8) {
+    throw new Error('Password must be at least 8 characters');
+  }
+
+  await createUserAccount(email, password, fullName, 'EDITOR', {
     specialization,
     editorial_role: editorialRole,
     invited_by: 'coordinator',
-    created_without_email: true
+    created_without_email: true,
+    password_set_by_coordinator: true
   });
+
+  return { temporaryPassword: password };
 }
 
-export async function createReviewerAccount(email: string, password: string, fullName: string, specialization: string): Promise<void> {
-  return createUserAccount(email, password, fullName, 'REVIEWER', {
+export async function createReviewerAccount(email: string, password: string, fullName: string, specialization: string): Promise<{ temporaryPassword: string }> {
+  if (!password || password.length < 8) {
+    throw new Error('Password must be at least 8 characters');
+  }
+
+  await createUserAccount(email, password, fullName, 'REVIEWER', {
     specialization,
     invited_by: 'coordinator',
-    created_without_email: true
+    created_without_email: true,
+    password_set_by_coordinator: true
   });
+
+  return { temporaryPassword: password };
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {
@@ -222,11 +259,11 @@ export async function verifyResetToken(): Promise<boolean> {
  * Returns the new password that was set.
  */
 export async function resetUserPassword(userId: string, newPassword: string, authToken?: string): Promise<void> {
-  // Always use a freshly-read session token rather than one captured earlier
-  // in a component's lifetime -- Supabase silently rotates access_token on
-  // refresh, and a token grabbed once on mount can go stale for a Coordinator
-  // who has had the page open for a while.
-  const token = authToken || (await supabase.auth.getSession()).data.session?.access_token;
+  // Always use a freshly-read (and refreshed if necessary) session token
+  // rather than one captured earlier in a component's lifetime -- Supabase
+  // silently rotates access_token on refresh, and a token grabbed once on
+  // mount can go stale for a Coordinator who has had the page open a while.
+  const token = authToken || (await getFreshAccessToken());
   if (!token) {
     throw new Error('Your session has expired. Please sign in again before changing a password.');
   }
