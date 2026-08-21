@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, listActiveProfilesByRole, assignEditor } from '../../../lib/workflow';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, listActiveProfilesByRole, assignEditor, coordinatorSendRevisionToEditor } from '../../../lib/workflow';
+import { getWorkflowStageLabel, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 import { CheckCircle2, Circle, AlertCircle, FileText, Loader2 } from 'lucide-react';
 import { AssignmentConfirmationDialog } from '../../AssignmentConfirmationDialog';
 
@@ -9,6 +10,7 @@ interface Props {
   reviewerAssignments: ReviewerAssignmentRow[];
   suggestedReviewers: SuggestedReviewerRow[];
   profiles: Record<string, ProfileRow>;
+  revisions?: RevisionRow[];
   onWorkflowChange?: () => void;
 }
 
@@ -18,6 +20,7 @@ export function OverviewTab({
   reviewerAssignments,
   suggestedReviewers,
   profiles,
+  revisions = [],
   onWorkflowChange
 }: Props) {
   const activeEditor = editorAssignments.find(a => a.status === 'ACCEPTED') || editorAssignments[0];
@@ -60,10 +63,48 @@ export function OverviewTab({
     }
   };
 
-  // Fixed status description - account for evaluation submission
+  const latestRevision = getLatestRevision(revisions);
+  const revisionN = latestRevision?.revision_number;
+
+  const [sendingToEditor, setSendingToEditor] = useState(false);
+  const [sendToEditorError, setSendToEditorError] = useState('');
+  const readyToSendToEditor = manuscript.status === 'REVISION_REQUESTED' && latestRevision?.status === 'REVISION_SUBMITTED';
+
+  const handleSendRevisionToEditor = async () => {
+    setSendingToEditor(true);
+    setSendToEditorError('');
+    try {
+      await coordinatorSendRevisionToEditor(manuscript.id);
+      onWorkflowChange?.();
+    } catch (e: any) {
+      setSendToEditorError(e.message || 'Failed to send revision to editor');
+    } finally {
+      setSendingToEditor(false);
+    }
+  };
+
+  // Fixed status description - account for evaluation submission and any
+  // active revision cycle (re-review reuses the same EDITOR_REVIEW/
+  // UNDER_REVIEW statuses as the original round, so the description needs
+  // to say which one this is).
   const getStatusDescription = (): string => {
     if (manuscript.status === 'EDITOR_REVIEW' && evaluationSubmitted) {
-      return 'Editor evaluation complete. Ready for peer review assignment.';
+      return revisionN
+        ? `Revision ${revisionN} editor evaluation complete. Ready for peer review assignment.`
+        : 'Editor evaluation complete. Ready for peer review assignment.';
+    }
+    if (revisionN && manuscript.status === 'REVISION_REQUESTED') {
+      if (latestRevision!.status === 'AWAITING_AUTHOR_UPLOAD') return `Waiting for the author to submit Revision ${revisionN}`;
+      if (latestRevision!.status === 'REVISION_SUBMITTED') return `Revision ${revisionN} submitted -- ready to send to the editor`;
+    }
+    if (revisionN && manuscript.status === 'EDITOR_REVIEW') {
+      return `Editor is reviewing the Revision ${revisionN} submission`;
+    }
+    if (revisionN && manuscript.status === 'UNDER_REVIEW') {
+      return `Peer reviewers are evaluating Revision ${revisionN}`;
+    }
+    if (revisionN && manuscript.status === 'AWAITING_DECISION') {
+      return `All Revision ${revisionN} reviews received, awaiting coordinator decision`;
     }
     return {
       SUBMITTED: 'Waiting for editor assignment',
@@ -114,9 +155,27 @@ export function OverviewTab({
         <div className="space-y-4">
           <div>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Status</p>
-            <p className="text-lg font-bold text-slate-900">{manuscript.status.replace(/_/g, ' ')}</p>
+            <p className="text-lg font-bold text-slate-900">{getWorkflowStageLabel(manuscript.status, latestRevision)}</p>
             <p className="text-sm text-slate-600 mt-1">{getStatusDescription()}</p>
           </div>
+
+          {readyToSendToEditor && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <p className="text-sm font-bold text-amber-900 mb-1">Revision {revisionN} is ready for editor review</p>
+              <p className="text-xs text-amber-800 mb-3">The author has submitted their revised files. Send it to the assigned editor to continue the review.</p>
+              {sendToEditorError && (
+                <p className="text-xs text-red-700 mb-2">{sendToEditorError}</p>
+              )}
+              <button
+                onClick={handleSendRevisionToEditor}
+                disabled={sendingToEditor}
+                className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+              >
+                {sendingToEditor && <Loader2 className="w-4 h-4 animate-spin" />}
+                Send to Editor for Revision Review
+              </button>
+            </div>
+          )}
 
           {reviewsTotal > 0 && (
             <div>

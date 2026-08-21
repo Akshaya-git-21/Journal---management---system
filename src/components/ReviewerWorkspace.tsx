@@ -6,6 +6,7 @@ import {
   respondToReviewInvite, submitReview
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
+import { getManuscriptStatusLabel } from '../lib/manuscriptStatusLabel';
 import { Loader2, Check, X as XIcon, ChevronDown } from 'lucide-react';
 
 interface ReviewerWorkspaceProps {
@@ -369,7 +370,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
             <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
               <div>
                 <p className="text-xs text-slate-500 font-semibold">Manuscript Status</p>
-                <p className="text-sm font-bold text-slate-900">{manuscript.status.replace(/_/g, ' ')}</p>
+                <p className="text-sm font-bold text-slate-900">{getManuscriptStatusLabel(manuscript.status)}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500 font-semibold">Double-Blind</p>

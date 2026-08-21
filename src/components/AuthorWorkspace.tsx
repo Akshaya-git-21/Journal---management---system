@@ -9,6 +9,7 @@ import {
   submitManuscript
 } from '../lib/workflow';
 import { supabase, upsertManuscriptToDb, ensureAuthorProfile } from '../lib/supabase';
+import { getManuscriptStatusLabel } from '../lib/manuscriptStatusLabel';
 import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
@@ -628,7 +629,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                             <td className="px-6 py-4 text-slate-600 text-sm whitespace-nowrap">{formatDate(m.submitted_at)}</td>
                             <td className="px-6 py-4">
                               <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase ${STATUS_STYLES[m.status]}`}>
-                                {m.status.replace(/_/g, ' ')}
+                                {getManuscriptStatusLabel(m.status)}
                               </span>
                             </td>
                             <td className="px-6 py-4">

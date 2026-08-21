@@ -179,6 +179,12 @@ export const coordinatorAssignReviewerDirectly = (manuscriptId: string, reviewer
 export const finalizeReviewerBoard = (manuscriptId: string) =>
   rpcOrThrow(supabase.rpc('finalize_reviewer_board', { p_manuscript_id: manuscriptId }));
 
+/** Coordinator-only: forwards a submitted revision (manuscript_revisions.status
+ * = 'REVISION_SUBMITTED') to the assigned editor for re-review. See
+ * coordinator_send_revision_to_editor() in 0018_coordinator_revision_gate.sql. */
+export const coordinatorSendRevisionToEditor = (manuscriptId: string) =>
+  rpcOrThrow(supabase.rpc('coordinator_send_revision_to_editor', { p_manuscript_id: manuscriptId }));
+
 export const respondToReviewInvite = (assignmentId: string, accept: boolean) =>
   rpcOrThrow(supabase.rpc('respond_to_review_invite', { p_assignment_id: assignmentId, p_accept: accept }));
 
@@ -358,6 +364,7 @@ export interface DiscussionRow {
   file_name: string | null;
   file_size: string | null;
   created_at: string;
+  channel: 'GENERAL' | 'COORDINATOR_AUTHOR';
 }
 
 export interface ProfileRow {
@@ -421,8 +428,8 @@ export async function getDiscussions(manuscriptId: string): Promise<DiscussionRo
   return data ?? [];
 }
 
-export async function postDiscussionMessage(manuscriptId: string, senderId: string, message: string): Promise<void> {
-  const { error } = await supabase.from('manuscript_discussions').insert({ manuscript_id: manuscriptId, sender_id: senderId, message });
+export async function postDiscussionMessage(manuscriptId: string, senderId: string, message: string, channel: 'GENERAL' | 'COORDINATOR_AUTHOR' = 'GENERAL'): Promise<void> {
+  const { error } = await supabase.from('manuscript_discussions').insert({ manuscript_id: manuscriptId, sender_id: senderId, message, channel });
   if (error) throw new Error(error.message);
 }
 
@@ -430,6 +437,25 @@ export async function getRevisions(manuscriptId: string): Promise<RevisionRow[]>
   const { data, error } = await supabase.from('manuscript_revisions').select('*').eq('manuscript_id', manuscriptId).order('revision_number', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+/** Batched latest-revision-per-manuscript lookup for list/table views (e.g.
+ * the Coordinator's manuscript queue), so status labels can show
+ * "REVISION N -- MINOR/MAJOR REVISION" without an N+1 query per row. */
+export async function getLatestRevisionsByManuscriptIds(manuscriptIds: string[]): Promise<Record<string, RevisionRow>> {
+  if (manuscriptIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('manuscript_revisions')
+    .select('*')
+    .in('manuscript_id', manuscriptIds)
+    .order('revision_number', { ascending: true });
+  if (error) throw new Error(error.message);
+
+  const latest: Record<string, RevisionRow> = {};
+  (data ?? []).forEach((row: RevisionRow) => {
+    latest[row.manuscript_id] = row; // ascending order -> last write wins = highest revision_number
+  });
+  return latest;
 }
 
 export async function getRevisionById(revisionId: string): Promise<RevisionRow | null> {
@@ -457,21 +483,31 @@ export async function getRevisionFiles(revisionId: string): Promise<ManuscriptFi
   return data ?? [];
 }
 
-export async function uploadRevisionFile(revisionId: string, file: File, fileType: string): Promise<ManuscriptFileRow> {
-  const fileName = `${revisionId}/${Date.now()}_${file.name}`;
-  const { error: uploadError } = await supabase.storage.from('manuscripts').upload(fileName, file);
+export async function uploadRevisionFile(revisionId: string, manuscriptId: string, file: File, fileType: string): Promise<ManuscriptFileRow> {
+  const { data: userData } = await supabase.auth.getUser();
+  const path = `${manuscriptId}/revisions/${revisionId}/${Date.now()}_${file.name}`;
+  const { error: uploadError } = await supabase.storage.from('manuscript-files').upload(path, file);
   if (uploadError) throw new Error(uploadError.message);
+  const { data: urlData } = supabase.storage.from('manuscript-files').getPublicUrl(path);
 
   const { data: fileRecord, error: dbError } = await supabase.from('manuscript_files').insert({
+    manuscript_id: manuscriptId,
     revision_id: revisionId,
     file_name: file.name,
     file_type: fileType,
     file_size: (file.size / 1024).toFixed(2) + ' KB',
-    storage_path: fileName
+    storage_path: path,
+    public_url: urlData.publicUrl,
+    uploaded_by: userData.user?.id ?? null
   }).select().single();
 
   if (dbError) throw new Error(dbError.message);
   return fileRecord as ManuscriptFileRow;
+}
+
+export async function deleteManuscriptFile(fileId: string): Promise<void> {
+  const { error } = await supabase.from('manuscript_files').delete().eq('id', fileId);
+  if (error) throw new Error(error.message);
 }
 
 export async function updateRevisionStatus(revisionId: string, status: 'AWAITING_AUTHOR_UPLOAD' | 'REVISION_SUBMITTED' | 'UNDER_REVIEW' | 'COMPLETED'): Promise<RevisionRow> {

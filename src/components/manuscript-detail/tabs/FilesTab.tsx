@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { RevisionRow } from '../../../lib/workflow';
 import { Download, Eye, FileText, Loader2 } from 'lucide-react';
 import FilePreviewModal from '../../FilePreviewModal';
 
 interface Props {
   manuscriptId: string;
   showAllFiles?: boolean;
+  revisions?: RevisionRow[];
 }
 
 interface ManuscriptFile {
@@ -16,9 +18,74 @@ interface ManuscriptFile {
   public_url: string | null;
   uploaded_at: string;
   uploaded_by: string | null;
+  revision_id: string | null;
 }
 
-export function FilesTab({ manuscriptId, showAllFiles = false }: Props) {
+function FilesTable({ files, onPreview }: { files: ManuscriptFile[]; onPreview: (f: ManuscriptFile) => void }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="text-left px-4 py-3 text-xs font-bold text-slate-600 uppercase">Filename</th>
+              <th className="text-left px-4 py-3 text-xs font-bold text-slate-600 uppercase">Type</th>
+              <th className="text-left px-4 py-3 text-xs font-bold text-slate-600 uppercase">Size</th>
+              <th className="text-left px-4 py-3 text-xs font-bold text-slate-600 uppercase">Uploaded</th>
+              <th className="text-right px-4 py-3 text-xs font-bold text-slate-600 uppercase">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {files.map((file) => (
+              <tr key={file.id} className="hover:bg-slate-50 transition">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-slate-400" />
+                    <span className="text-sm font-semibold text-slate-900">{file.file_name}</span>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-sm text-slate-600">{file.file_type}</td>
+                <td className="px-4 py-3 text-sm text-slate-600">{file.file_size}</td>
+                <td className="px-4 py-3 text-sm text-slate-600">
+                  {new Date(file.uploaded_at).toLocaleDateString()}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    {file.public_url && (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onPreview(file);
+                          }}
+                          className="p-1.5 hover:bg-slate-200 rounded transition"
+                          title="View"
+                        >
+                          <Eye className="w-4 h-4 text-slate-600" />
+                        </button>
+                        <a
+                          href={file.public_url}
+                          download={file.file_name}
+                          className="p-1.5 hover:bg-slate-200 rounded transition"
+                          title="Download"
+                        >
+                          <Download className="w-4 h-4 text-slate-600" />
+                        </a>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export function FilesTab({ manuscriptId, revisions = [] }: Props) {
   const [files, setFiles] = useState<ManuscriptFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -72,66 +139,41 @@ export function FilesTab({ manuscriptId, showAllFiles = false }: Props) {
     );
   }
 
+  // Original submission files (revision_id null) vs. this manuscript's
+  // revision cycle(s) -- shown as separate sections so it's clear which
+  // files belong to the original submission versus a revision re-upload.
+  const originalFiles = files.filter((f) => !f.revision_id);
+  const sortedRevisions = [...revisions].sort((a, b) => a.revision_number - b.revision_number);
+
   return (
     <>
-      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                <th className="text-left px-4 py-3 text-xs font-bold text-slate-600 uppercase">Filename</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-slate-600 uppercase">Type</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-slate-600 uppercase">Size</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-slate-600 uppercase">Uploaded</th>
-                <th className="text-right px-4 py-3 text-xs font-bold text-slate-600 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200">
-              {files.map((file) => (
-                <tr key={file.id} className="hover:bg-slate-50 transition">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-slate-400" />
-                      <span className="text-sm font-semibold text-slate-900">{file.file_name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-600">{file.file_type}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600">{file.file_size}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600">
-                    {new Date(file.uploaded_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      {file.public_url && (
-                        <>
-                          <button
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setPreviewFile(file);
-                            }}
-                            className="p-1.5 hover:bg-slate-200 rounded transition"
-                            title="View"
-                          >
-                            <Eye className="w-4 h-4 text-slate-600" />
-                          </button>
-                          <a
-                            href={file.public_url}
-                            download={file.file_name}
-                            className="p-1.5 hover:bg-slate-200 rounded transition"
-                            title="Download"
-                          >
-                            <Download className="w-4 h-4 text-slate-600" />
-                          </a>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="space-y-6">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900 mb-3">Original Submission Files</h3>
+          {originalFiles.length > 0 ? (
+            <FilesTable files={originalFiles} onPreview={setPreviewFile} />
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-slate-500">
+              No original submission files.
+            </div>
+          )}
         </div>
+
+        {sortedRevisions.map((rev) => {
+          const revFiles = files.filter((f) => f.revision_id === rev.id);
+          return (
+            <div key={rev.id}>
+              <h3 className="text-sm font-bold text-slate-900 mb-3">Revision {rev.revision_number} — Uploaded Files</h3>
+              {revFiles.length > 0 ? (
+                <FilesTable files={revFiles} onPreview={setPreviewFile} />
+              ) : (
+                <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-slate-500">
+                  No files uploaded for this revision yet.
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {previewFile && (

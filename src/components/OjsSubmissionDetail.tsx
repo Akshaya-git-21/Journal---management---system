@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getManuscriptStatusLabel, getManuscriptStatusMeta, getLatestRevision, getWorkflowStageLabel } from '../lib/manuscriptStatusLabel';
 import FilePreviewModal from './FilePreviewModal';
 import SubmissionSidebar from './SubmissionSidebar';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
@@ -22,7 +23,8 @@ import {
   getEditorAssignments,
   getReviewerAssignments,
   getStatusHistory,
-  postDiscussionMessage
+  postDiscussionMessage,
+  getRevisionFiles
 } from '../lib/workflow';
 import {
   ChevronLeft,
@@ -123,6 +125,7 @@ export default function OjsSubmissionDetail({
   const [loadingDetails, setLoadingDetails] = useState(true);
   const [detailsError, setDetailsError] = useState<string>('');
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
+  const [revisionUploadedFiles, setRevisionUploadedFiles] = useState<any[]>([]);
 
   // File Preview States
   const [previewModalOpen, setPreviewModalOpen] = useState<boolean>(false);
@@ -176,8 +179,9 @@ export default function OjsSubmissionDetail({
         return;
       }
 
-      // Post message to Supabase
-      await postDiscussionMessage(paper.id, user.id, whatsappInput.trim());
+      // Post message to Supabase -- this panel is the private Coordinator <->
+      // Author channel, enforced server-side by RLS (see 0016 migration).
+      await postDiscussionMessage(paper.id, user.id, whatsappInput.trim(), 'COORDINATOR_AUTHOR');
 
       // Clear input - the real-time subscription will update the messages
       setWhatsappInput("");
@@ -398,20 +402,26 @@ export default function OjsSubmissionDetail({
           console.log('[FILE_DEBUG] Formatted files:', formattedFiles.map(f => ({ name: f.name, type: f.type, publicUrl: f.publicUrl })));
           setUploadedFiles(formattedFiles);
 
-          // Convert discussions to message format
-          const messageList = details.discussions.map((d) => ({
-            id: d.id,
-            sender: details.profiles.get(d.sender_id)?.name || 'Unknown',
-            senderEmail: details.profiles.get(d.sender_id)?.email || '',
-            senderRole: details.profiles.get(d.sender_id)?.role || 'User',
-            avatar: (details.profiles.get(d.sender_id)?.name || 'U').substring(0, 2).toUpperCase(),
-            avatarBg: 'bg-slate-500',
-            text: d.message,
-            timestamp: formatDateTime(d.created_at),
-            isMe: currentUser?.email === details.profiles.get(d.sender_id)?.email,
-            fileName: d.file_name,
-            fileSize: d.file_size
-          }));
+          // Convert discussions to message format -- the Coordinator Discussion
+          // panel is a private channel, so only COORDINATOR_AUTHOR-channel
+          // messages belong there (RLS also enforces this server-side: an
+          // Editor/Reviewer querying this table directly never receives these
+          // rows at all, so this filter is a display concern, not the only guard).
+          const messageList = details.discussions
+            .filter((d) => d.channel === 'COORDINATOR_AUTHOR')
+            .map((d) => ({
+              id: d.id,
+              sender: details.profiles.get(d.sender_id)?.name || 'Unknown',
+              senderEmail: details.profiles.get(d.sender_id)?.email || '',
+              senderRole: details.profiles.get(d.sender_id)?.role || 'User',
+              avatar: (details.profiles.get(d.sender_id)?.name || 'U').substring(0, 2).toUpperCase(),
+              avatarBg: 'bg-slate-500',
+              text: d.message,
+              timestamp: formatDateTime(d.created_at),
+              isMe: currentUser?.email === details.profiles.get(d.sender_id)?.email,
+              fileName: d.file_name,
+              fileSize: d.file_size
+            }));
           setAllMessages(messageList);
           setWhatsappMessages(messageList);
         }
@@ -437,19 +447,21 @@ export default function OjsSubmissionDetail({
         setManuscriptDetails((prev) => prev ? { ...prev, manuscript: updates.manuscript } : null);
       }
       if (updates.discussions) {
-        const messageList = updates.discussions.map((d) => ({
-          id: d.id,
-          sender: userProfiles.get(d.sender_id)?.name || 'Unknown',
-          senderEmail: userProfiles.get(d.sender_id)?.email || '',
-          senderRole: userProfiles.get(d.sender_id)?.role || 'User',
-          avatar: (userProfiles.get(d.sender_id)?.name || 'U').substring(0, 2).toUpperCase(),
-          avatarBg: 'bg-slate-500',
-          text: d.message,
-          timestamp: formatDateTime(d.created_at),
-          isMe: currentUser?.email === userProfiles.get(d.sender_id)?.email,
-          fileName: d.file_name,
-          fileSize: d.file_size
-        }));
+        const messageList = updates.discussions
+          .filter((d) => d.channel === 'COORDINATOR_AUTHOR')
+          .map((d) => ({
+            id: d.id,
+            sender: userProfiles.get(d.sender_id)?.name || 'Unknown',
+            senderEmail: userProfiles.get(d.sender_id)?.email || '',
+            senderRole: userProfiles.get(d.sender_id)?.role || 'User',
+            avatar: (userProfiles.get(d.sender_id)?.name || 'U').substring(0, 2).toUpperCase(),
+            avatarBg: 'bg-slate-500',
+            text: d.message,
+            timestamp: formatDateTime(d.created_at),
+            isMe: currentUser?.email === userProfiles.get(d.sender_id)?.email,
+            fileName: d.file_name,
+            fileSize: d.file_size
+          }));
         setAllMessages(messageList);
         setWhatsappMessages(messageList);
       }
@@ -474,6 +486,54 @@ export default function OjsSubmissionDetail({
       unsubscribe();
     };
   }, [paper?.id, currentUser?.email]);
+
+  // Files uploaded against the current revision cycle (author's revised
+  // manuscript / response to reviewers), shown as their own section below
+  // the original submission's Uploaded Files. Re-fetches and re-subscribes
+  // whenever the latest revision changes (e.g. a new revision cycle starts).
+  const latestRevisionForFiles = getLatestRevision(manuscriptDetails?.revisions);
+  const latestRevisionId = latestRevisionForFiles?.id || null;
+
+  useEffect(() => {
+    if (!latestRevisionId) {
+      setRevisionUploadedFiles([]);
+      return;
+    }
+
+    let isMounted = true;
+    const formatRevisionFiles = (files: ManuscriptFileRow[]) => files.map((f) => ({
+      id: f.id,
+      name: f.file_name,
+      type: f.file_type,
+      size: f.file_size,
+      date: formatDate(f.uploaded_at),
+      uploadedAt: f.uploaded_at,
+      uploadedBy: f.uploaded_by,
+      storagePath: f.storage_path,
+      publicUrl: f.public_url
+    }));
+
+    getRevisionFiles(latestRevisionId).then((files) => {
+      if (isMounted) setRevisionUploadedFiles(formatRevisionFiles(files));
+    }).catch((err) => console.error('Failed to load revision files:', err));
+
+    const revisionFilesChannel = supabase
+      .channel(`revision_files:${latestRevisionId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'manuscript_files', filter: `revision_id=eq.${latestRevisionId}` },
+        async () => {
+          const files = await getRevisionFiles(latestRevisionId);
+          if (isMounted) setRevisionUploadedFiles(formatRevisionFiles(files));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      revisionFilesChannel.unsubscribe();
+    };
+  }, [latestRevisionId]);
 
   // Keep uploaded files in sync with the latest selected paper
   useEffect(() => {
@@ -711,16 +771,72 @@ export default function OjsSubmissionDetail({
   // has one -- never today's date, never a fabricated placeholder.
   const getRealSubmissionTimeline = (details: AuthorManuscriptDetails | null): { label: string; sub: string; status: 'completed' | 'active' | 'pending' }[] => {
     if (!details) return [];
-    const { manuscript, editorAssignments, reviewerAssignments, statusHistory } = details;
+    const { manuscript, editorAssignments, reviewerAssignments, statusHistory, revisions } = details;
     const editorAssignment = editorAssignments[0] || null;
     const reviewersInvited = reviewerAssignments.length > 0;
     const reviewersAccepted = reviewerAssignments.filter((r) => r.status === 'ACCEPTED' || r.status === 'SUBMITTED');
     const reviewsSubmitted = reviewerAssignments.filter((r) => r.status === 'SUBMITTED');
     const allReviewsIn = reviewersInvited && reviewsSubmitted.length === reviewerAssignments.length;
-    const decisionEntry = statusHistory.find((h) => ['ACCEPTED', 'REJECTED'].includes(h.to_status));
+    // A "decision" is any transition off the original review cycle -- either
+    // a terminal ACCEPTED/REJECTED, or a REVISION_REQUESTED that kicked off
+    // revision #1. Only used for the base (pre-revision) timeline entry.
+    const decisionEntry = statusHistory.find((h) => ['ACCEPTED', 'REJECTED', 'REVISION_REQUESTED'].includes(h.to_status));
     const isPublished = manuscript.status === 'PUBLISHED';
 
     const fmt = (iso: string | null) => (iso ? formatDateTime(iso) : '');
+
+    const revisionSteps: { label: string; sub: string; status: 'completed' | 'active' | 'pending' }[] = [];
+    const sortedRevisions = [...(revisions || [])].sort((a, b) => a.revision_number - b.revision_number);
+    sortedRevisions.forEach((rev, idx) => {
+      const isLatestRevision = idx === sortedRevisions.length - 1;
+      const kind = rev.decision_type === 'MAJOR_REVISION' ? 'Major' : 'Minor';
+      const authorSubmitted = rev.status !== 'AWAITING_AUTHOR_UPLOAD';
+      const withCoordinator = isLatestRevision && rev.status === 'REVISION_SUBMITTED';
+      const sentToEditor = !isLatestRevision || rev.status === 'UNDER_REVIEW' || rev.status === 'COMPLETED';
+      // Once a newer revision cycle exists, everything about this one is
+      // necessarily finished -- only the latest cycle's stages can still be
+      // active/pending.
+      const cycleStatus = manuscript.status; // only meaningful for the latest revision
+      const editorReviewInProgress = isLatestRevision && cycleStatus === 'EDITOR_REVIEW';
+      const editorReviewDone = !isLatestRevision || ['UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(cycleStatus);
+      const reviewerReviewDone = !isLatestRevision || ['AWAITING_DECISION', 'ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(cycleStatus);
+      const decided = !isLatestRevision || ['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(cycleStatus);
+      // Find this cycle's outcome, if decided (or if a newer revision exists,
+      // that newer revision's requested_at note IS this cycle's decision).
+      const nextRevision = sortedRevisions[idx + 1];
+      const cycleDecisionLabel = !isLatestRevision
+        ? `Revision ${nextRevision.revision_number} requested`
+        : manuscript.status === 'ACCEPTED' ? 'Accepted'
+        : manuscript.status === 'REJECTED' ? 'Rejected'
+        : manuscript.status === 'PUBLISHED' ? 'Accepted'
+        : '';
+
+      revisionSteps.push({
+        label: `Revision ${rev.revision_number} Requested (${kind})`,
+        sub: fmt(rev.requested_at),
+        status: 'completed',
+      });
+      revisionSteps.push({
+        label: `Revision ${rev.revision_number} Submitted`,
+        sub: !authorSubmitted ? 'Awaiting author upload' : withCoordinator ? 'Awaiting coordinator review' : fmt(rev.submitted_at),
+        status: !authorSubmitted ? 'pending' : withCoordinator ? 'active' : 'completed',
+      });
+      revisionSteps.push({
+        label: `Revision ${rev.revision_number} — Editor Review`,
+        sub: !sentToEditor ? 'Not Started' : editorReviewDone ? 'Completed' : 'In Progress',
+        status: !sentToEditor ? 'pending' : editorReviewDone ? 'completed' : (editorReviewInProgress ? 'active' : 'pending'),
+      });
+      revisionSteps.push({
+        label: `Revision ${rev.revision_number} — Reviewer Review`,
+        sub: !editorReviewDone ? 'Not Started' : reviewerReviewDone ? 'Completed' : (isLatestRevision && cycleStatus === 'UNDER_REVIEW' ? 'In Progress' : 'Not Started'),
+        status: !editorReviewDone ? 'pending' : reviewerReviewDone ? 'completed' : (isLatestRevision && cycleStatus === 'UNDER_REVIEW' ? 'active' : 'pending'),
+      });
+      revisionSteps.push({
+        label: `Revision ${rev.revision_number} Decision`,
+        sub: decided ? cycleDecisionLabel : (isLatestRevision && cycleStatus === 'AWAITING_DECISION' ? 'Pending' : 'Not Started'),
+        status: decided ? 'completed' : (isLatestRevision && cycleStatus === 'AWAITING_DECISION' ? 'active' : 'pending'),
+      });
+    });
 
     return [
       {
@@ -762,14 +878,70 @@ export default function OjsSubmissionDetail({
       },
       {
         label: 'Decision',
-        sub: decisionEntry ? `${decisionEntry.to_status.replace(/_/g, ' ')} – ${fmt(decisionEntry.created_at)}` : 'Pending',
+        sub: decisionEntry ? `${getManuscriptStatusLabel(decisionEntry.to_status, getLatestRevision(revisions))} – ${fmt(decisionEntry.created_at)}` : 'Pending',
         status: decisionEntry ? 'completed' : 'pending',
       },
+      ...revisionSteps,
       {
         label: 'Published',
         sub: isPublished && manuscript.published_at ? fmt(manuscript.published_at) : 'Not Started',
         status: isPublished ? 'completed' : 'pending',
       },
+    ];
+  };
+
+  // Six-slot horizontal stepper. Kept at a fixed slot count so the layout
+  // never reflows -- when a revision cycle is active, the first four slots
+  // are relabeled to describe that cycle (Requested/Submitted/Editor
+  // Review/Reviewer Review) instead of the original Submitted/Editor
+  // Assigned/Reviewer Invited/Under Review sequence; Decision and Production
+  // always occupy the last two slots.
+  const getWorkflowStepperSlots = (details: AuthorManuscriptDetails | null): { label: string; sub: string; status: 'completed' | 'active' | 'pending' }[] => {
+    if (!details) return [];
+    const { manuscript, editorAssignments, reviewerAssignments, revisions } = details;
+    const editorAssignment = editorAssignments[0] || null;
+    const reviewersInvited = reviewerAssignments.length > 0;
+    const reviewsSubmitted = reviewerAssignments.filter((r) => r.status === 'SUBMITTED');
+    const allReviewsIn = reviewersInvited && reviewsSubmitted.length === reviewerAssignments.length;
+    const isTerminal = ['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
+    const isProduction = manuscript.status === 'ACCEPTED' || manuscript.status === 'PUBLISHED';
+
+    const latestRevision = getLatestRevision(revisions);
+    const fmtShort = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '');
+
+    if (!latestRevision) {
+      return [
+        { label: 'Submitted', sub: manuscript.submitted_at ? fmtShort(manuscript.submitted_at) : 'Pending', status: manuscript.submitted_at ? 'completed' : 'pending' },
+        { label: 'Editor Assigned', sub: editorAssignment ? 'Assigned' : 'Pending', status: editorAssignment ? 'completed' : 'pending' },
+        { label: 'Reviewer Invited', sub: reviewersInvited ? 'Invited' : 'Pending', status: reviewersInvited ? 'completed' : (editorAssignment?.status === 'ACCEPTED' ? 'active' : 'pending') },
+        { label: 'Under Review', sub: allReviewsIn ? 'Completed' : reviewersInvited ? 'In Progress' : 'Pending', status: allReviewsIn ? 'completed' : reviewersInvited ? 'active' : 'pending' },
+        { label: 'Decision', sub: isTerminal || manuscript.status === 'REVISION_REQUESTED' ? getManuscriptStatusLabel(manuscript.status) : manuscript.status === 'AWAITING_DECISION' ? 'In Progress' : 'Pending', status: isTerminal || manuscript.status === 'REVISION_REQUESTED' ? 'completed' : manuscript.status === 'AWAITING_DECISION' ? 'active' : 'pending' },
+        { label: 'Production', sub: isProduction ? 'In Production' : 'Pending', status: isProduction ? 'completed' : 'pending' },
+      ];
+    }
+
+    const n = latestRevision.revision_number;
+    // manuscript_revisions.status carries the fine-grained sub-stage while
+    // manuscripts.status stays REVISION_REQUESTED for both "with author" and
+    // "with coordinator" -- see 0018_coordinator_revision_gate.sql.
+    const authorSubmitted = latestRevision.status !== 'AWAITING_AUTHOR_UPLOAD';
+    const withCoordinator = latestRevision.status === 'REVISION_SUBMITTED';
+    const sentToEditor = latestRevision.status === 'UNDER_REVIEW' || latestRevision.status === 'COMPLETED';
+    const editorReviewInProgress = manuscript.status === 'EDITOR_REVIEW';
+    const editorReviewDone = ['UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
+    const reviewerReviewDone = ['AWAITING_DECISION', 'ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
+
+    return [
+      { label: `Revision ${n} Requested`, sub: fmtShort(latestRevision.requested_at), status: 'completed' },
+      {
+        label: `Revision ${n} Submitted`,
+        sub: !authorSubmitted ? 'Awaiting Upload' : withCoordinator ? 'Awaiting Coordinator' : fmtShort(latestRevision.submitted_at),
+        status: !authorSubmitted ? 'pending' : withCoordinator ? 'active' : 'completed',
+      },
+      { label: `Revision ${n} — Editor Review`, sub: !sentToEditor ? 'Pending' : editorReviewDone ? 'Completed' : 'In Progress', status: !sentToEditor ? 'pending' : editorReviewDone ? 'completed' : (editorReviewInProgress ? 'active' : 'pending') },
+      { label: `Revision ${n} — Reviewer Review`, sub: !editorReviewDone ? 'Pending' : reviewerReviewDone ? 'Completed' : (manuscript.status === 'UNDER_REVIEW' ? 'In Progress' : 'Pending'), status: !editorReviewDone ? 'pending' : reviewerReviewDone ? 'completed' : (manuscript.status === 'UNDER_REVIEW' ? 'active' : 'pending') },
+      { label: 'Decision', sub: isTerminal ? getManuscriptStatusLabel(manuscript.status) : manuscript.status === 'AWAITING_DECISION' ? 'In Progress' : 'Pending', status: isTerminal ? 'completed' : manuscript.status === 'AWAITING_DECISION' ? 'active' : 'pending' },
+      { label: 'Production', sub: isProduction ? 'In Production' : 'Pending', status: isProduction ? 'completed' : 'pending' },
     ];
   };
 
@@ -857,7 +1029,9 @@ export default function OjsSubmissionDetail({
                       <span className="text-slate-800 text-[10px] font-semibold uppercase tracking-wider block">Status</span>
                       <span className="bg-[#e6f7ef] text-[#008751] border border-emerald-500/30 px-3 py-1 rounded-full text-[12px] font-bold inline-flex items-center gap-1 shadow-3xs">
                         <span className="w-2 h-2 rounded-full bg-[#008751]" />
-                        {(manuscriptDetails?.manuscript.status || paper.raw?.status || 'SUBMITTED').replace(/_/g, ' ')}
+                        {manuscriptDetails?.manuscript.status
+                          ? getWorkflowStageLabel(manuscriptDetails.manuscript.status, getLatestRevision(manuscriptDetails.revisions))
+                          : (paper.raw?.status || 'SUBMITTED').replace(/_/g, ' ')}
                       </span>
                     </div>
 
@@ -873,6 +1047,32 @@ export default function OjsSubmissionDetail({
                   </div>
                 </div>
 
+                {/* Final decision banner -- shown once the Coordinator has decided */}
+                {manuscriptDetails?.manuscript.status && ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED'].includes(manuscriptDetails.manuscript.status) && (() => {
+                  const status = manuscriptDetails.manuscript.status;
+                  const latestRevision = getLatestRevision(manuscriptDetails.revisions);
+                  const meta = getManuscriptStatusMeta(status, latestRevision);
+                  const decisionLetterEntry = manuscriptDetails.statusHistory?.find(h => h.to_status === status && h.note);
+                  const isAccepted = status === 'ACCEPTED';
+                  const isRejected = status === 'REJECTED';
+                  return (
+                    <div className={`rounded-2xl p-5 border-2 ${
+                      isRejected ? 'bg-red-50 border-red-200' :
+                      isAccepted ? 'bg-emerald-50 border-emerald-200' :
+                      'bg-amber-50 border-amber-200'
+                    }`}>
+                      <p className={`text-base font-black ${isRejected ? 'text-red-800' : isAccepted ? 'text-emerald-800' : 'text-amber-800'}`}>
+                        {isAccepted ? 'Paper Submission Accepted' : isRejected ? 'Manuscript Rejected' : `Revision Required — ${meta.label}`}
+                      </p>
+                      <p className="text-sm font-semibold text-slate-700 mt-1">Status: {meta.label}</p>
+                      {meta.nextStep && <p className="text-sm text-slate-600 mt-1">Next step: {meta.nextStep}</p>}
+                      {decisionLetterEntry?.note && (
+                        <p className="text-sm text-slate-700 mt-3 whitespace-pre-wrap border-t border-black/10 pt-3">{decisionLetterEntry.note}</p>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* 4-Metric Grid - Compact, Equal Height */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Card 1: Files */}
@@ -883,8 +1083,12 @@ export default function OjsSubmissionDetail({
                       </div>
                       <div className="text-left flex-1 min-w-0">
                         <span className="text-slate-600 text-[11px] font-semibold uppercase tracking-wider block">Files</span>
-                        <div className="text-xl font-bold text-black mt-0.5">{uploadedFiles.length}</div>
-                        <span className="text-slate-700 text-[10px] block font-medium">Uploaded</span>
+                        <div className="text-xl font-bold text-black mt-0.5">{uploadedFiles.length + revisionUploadedFiles.length}</div>
+                        <span className="text-slate-700 text-[10px] block font-medium">
+                          {latestRevisionForFiles && revisionUploadedFiles.length > 0
+                            ? `Includes Revised File ${latestRevisionForFiles.revision_number}`
+                            : 'Uploaded'}
+                        </span>
                       </div>
                     </div>
                     <button
@@ -985,17 +1189,15 @@ export default function OjsSubmissionDetail({
                     {/* Background connecting line */}
                     <div className="absolute top-3 left-3 right-3 h-0.5 bg-emerald-200 z-0">
                       {/* Completed progress fill */}
-                      <div className="absolute top-0 left-0 w-[20%] h-full bg-[#008751]" />
+                      {(() => {
+                        const slots = getWorkflowStepperSlots(manuscriptDetails);
+                        const completedCount = slots.filter((s) => s.status === 'completed').length;
+                        const pct = slots.length > 0 ? Math.round((completedCount / (slots.length - 1)) * 100) : 0;
+                        return <div className="absolute top-0 left-0 h-full bg-[#008751] transition-all duration-300" style={{ width: `${Math.min(100, pct)}%` }} />;
+                      })()}
                     </div>
 
-                    {[
-                      { label: "Submitted", sub: "08 Jun 2026", status: "completed" },
-                      { label: "Editor Assigned", sub: "In Progress", status: "active" },
-                      { label: "Reviewer Invited", sub: "Pending", status: "pending" },
-                      { label: "Under Review", sub: "Pending", status: "pending" },
-                      { label: "Decision", sub: "Pending", status: "pending" },
-                      { label: "Production", sub: "Pending", status: "pending" }
-                    ].map((step, idx) => {
+                    {getWorkflowStepperSlots(manuscriptDetails).map((step, idx) => {
                       let circleStyle = "bg-white border-emerald-200 text-[#004d2e]";
                       let labelStyle = "text-slate-800 font-medium";
                       let subStyle = "text-slate-700 font-normal";
@@ -1150,7 +1352,86 @@ export default function OjsSubmissionDetail({
                         </table>
                       </div>
                     </div>
- 
+
+                    {latestRevisionForFiles && (
+                      <div className="mt-4 pt-3 border-t border-emerald-100">
+                        <h4 className="text-black text-[13px] font-semibold tracking-tight mb-2">
+                          Revision {latestRevisionForFiles.revision_number} — Uploaded Files
+                        </h4>
+                        {revisionUploadedFiles.length === 0 ? (
+                          <p className="text-[11px] text-slate-500">No files uploaded for this revision yet.</p>
+                        ) : (
+                          <div className="overflow-x-auto rounded-lg border border-emerald-100">
+                            <table className="w-full text-left text-xs border-collapse">
+                              <thead>
+                                <tr className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 border-b border-emerald-100 bg-slate-50">
+                                  <th className="px-3 py-2 font-bold">Name</th>
+                                  <th className="px-3 py-2 font-bold">Type</th>
+                                  <th className="px-3 py-2 font-bold">Size</th>
+                                  <th className="px-3 py-2 font-bold">Date</th>
+                                  <th className="px-3 py-2 text-center font-bold">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-emerald-50 bg-white">
+                                {revisionUploadedFiles.map((file, i) => {
+                                  let fileIconColor = "text-rose-600";
+                                  if (file.name.endsWith(".docx")) fileIconColor = "text-blue-600";
+                                  else if (file.name.endsWith(".zip")) fileIconColor = "text-amber-600";
+                                  return (
+                                    <tr key={file.id || i} className="hover:bg-emerald-50/50 transition">
+                                      <td className="px-3 py-2">
+                                        <button
+                                          onClick={() => {
+                                            setPreviewFileName(file.name);
+                                            setPreviewFileType(file.type || 'Document');
+                                            setPreviewFileSize(file.size || '1.2 MB');
+                                            setPreviewPublicUrl(file.publicUrl || '');
+                                            setPreviewModalOpen(true);
+                                          }}
+                                          className="flex items-center gap-2 max-w-[150px] sm:max-w-none text-left hover:underline cursor-pointer group"
+                                        >
+                                          <FileText className={`w-4 h-4 ${fileIconColor} shrink-0 stroke-[2]`} />
+                                          <span className="text-[12px] font-semibold text-black truncate group-hover:text-[#008751]" title={file.name}>{file.name}</span>
+                                        </button>
+                                      </td>
+                                      <td className="px-3 py-2 text-[12px] font-medium text-slate-700">{file.type}</td>
+                                      <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.size}</td>
+                                      <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.date}</td>
+                                      <td className="px-3 py-2">
+                                        <div className="flex items-center justify-center gap-1">
+                                          <button
+                                            onClick={() => {
+                                              setPreviewFileName(file.name);
+                                              setPreviewFileType(file.type || 'Document');
+                                              setPreviewFileSize(file.size || '1.2 MB');
+                                              setPreviewPublicUrl(file.publicUrl || '');
+                                              setPreviewModalOpen(true);
+                                            }}
+                                            className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
+                                            title="View"
+                                          >
+                                            <Eye className="w-3.5 h-3.5" />
+                                          </button>
+                                          <a
+                                            href={file.publicUrl || '#'}
+                                            download={file.name}
+                                            className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
+                                            title="Download"
+                                          >
+                                            <Download className="w-3.5 h-3.5" />
+                                          </a>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="border-t pt-3 border-emerald-100 mt-3">
                       <button
                         onClick={() => alert("Downloading all matching document publication files recursively as a single zip file.")}
@@ -1183,8 +1464,9 @@ export default function OjsSubmissionDetail({
                           </div>
 
                           <button
-                            onClick={() => setActiveThreadId('coordinator-chat')}
+                            onClick={() => setActiveThreadId('thread-editorial-inquiry')}
                             className="bg-[#eefcf4] border border-[#008751]/30 text-[#004d2e] hover:bg-[#e1f9eb] px-3 py-1.5 rounded-lg text-[12px] font-bold flex items-center gap-1 cursor-pointer transition shadow-2xs"
+                            title="Message the Coordinator privately"
                           >
                             <Plus className="w-3.5 h-3.5 text-[#008751] stroke-[3]" />
                             <span className="hidden sm:inline">New</span>
@@ -1267,8 +1549,12 @@ export default function OjsSubmissionDetail({
 
                         {/* Thread Cards Stack - Real Data from Supabase */}
                         <div className="flex-grow overflow-y-auto mt-4 space-y-3 min-h-0 pr-1">
-                          {manuscriptDetails && manuscriptDetails.discussions && manuscriptDetails.discussions.length > 0 ? (
+                          {manuscriptDetails && manuscriptDetails.discussions && manuscriptDetails.discussions.filter(d => d.channel === 'COORDINATOR_AUTHOR').length > 0 ? (
                             manuscriptDetails.discussions
+                              // Only the private Coordinator <-> Author channel shows here --
+                              // this Discussions view is exclusively for talking to the
+                              // Coordinator, not a general editor/reviewer forum.
+                              .filter(d => d.channel === 'COORDINATOR_AUTHOR')
                               .filter(d => d.message.toLowerCase().includes(searchQuery.toLowerCase()))
                               .map((discussion, idx) => {
                                 const senderProfile = userProfiles.get(discussion.sender_id);
@@ -1290,12 +1576,10 @@ export default function OjsSubmissionDetail({
                                   <div
                                     key={discussion.id}
                                     onClick={() => {
-                                      // If it's a coordinator chat message, open coordinator chat
-                                      if (discussion.message.includes('[Coordinator Chat]')) {
-                                        setActiveThreadId('coordinator-chat');
-                                      } else {
-                                        setActiveThreadId(discussion.id);
-                                      }
+                                      // This list only ever shows COORDINATOR_AUTHOR-channel
+                                      // messages now, so every card opens the same private
+                                      // Coordinator Discussion panel.
+                                      setActiveThreadId('thread-editorial-inquiry');
                                     }}
                                     className={`border rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left ${
                                       isOfficial
@@ -1364,15 +1648,15 @@ export default function OjsSubmissionDetail({
                             
                             {/* Group Icon Avatar */}
                             <div className="w-9 h-9 rounded-full bg-[#d1f2e1] text-[#004d2e] font-bold text-xs flex items-center justify-center border-2 border-white shadow-xs">
-                              FI
+                              CD
                             </div>
                             <div>
                               <h4 className="font-semibold text-[14px] text-white tracking-tight flex items-center gap-1.5">
-                                Editorial Inquiry Forum
+                                Coordinator Discussion
                                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
                               </h4>
-                              <p className="text-[11.5px] text-emerald-100/90 font-medium">
-                                Editorial Board Panel • Active Conversation
+                              <p className="text-[11.5px] text-emerald-100/90 font-medium flex items-center gap-1">
+                                <Lock className="w-3 h-3" /> Private • Only you and the Coordinator can see this
                               </p>
                             </div>
                           </div>
@@ -1391,7 +1675,7 @@ export default function OjsSubmissionDetail({
                         {/* Academic Message Scroll Pane */}
                         <div className="flex-grow p-4 overflow-y-auto space-y-4 flex flex-col justify-start bg-[#f3faf5] relative min-h-0">
                           <div className="mx-auto bg-emerald-100 border-2 border-[#b8deb3] text-[#004d2e] text-[11px] font-bold px-3 py-1.5 rounded-lg uppercase tracking-wider text-center select-none shadow-3xs z-10 font-mono">
-                            OFFICIAL PEER COMMUNICATION STREAM
+                            PRIVATE COORDINATOR-AUTHOR CHANNEL — NOT VISIBLE TO EDITOR OR REVIEWERS
                           </div>
 
                           {/* Real messages loaded from Supabase (manuscript_discussions) */}
@@ -1434,7 +1718,7 @@ export default function OjsSubmissionDetail({
                         <div className="bg-[#eefcf4] px-4 py-3.5 border-t border-emerald-100 flex items-center gap-2 shrink-0 z-10">
                           <button
                             onClick={() => {
-                              alert("This is a secure peer-to-peer discussion workspace for certified author-editor communication.");
+                              alert("This is a private, one-on-one channel between you and the Coordinator. Editors and reviewers cannot see these messages.");
                             }}
                             className="text-slate-900 hover:text-emerald-700 transition cursor-pointer p-1.5 rounded-lg hover:bg-emerald-100"
                             title="Discussion Information"
@@ -1457,7 +1741,7 @@ export default function OjsSubmissionDetail({
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') handleSendWhatsappMessage();
                             }}
-                            placeholder="Type an official response..."
+                            placeholder="Message the Coordinator..."
                             className="flex-grow bg-white border-2 border-emerald-200 rounded-xl px-4 py-2 text-[13px] outline-none focus:ring-2 focus:ring-[#008751]/20 text-black font-medium placeholder-slate-500 shadow-3xs"
                           />
 
@@ -1967,42 +2251,83 @@ export default function OjsSubmissionDetail({
                   <h3 className="text-black text-[18px] font-semibold tracking-tight border-b pb-3 border-emerald-100">Recent Activity</h3>
 
                   <div className="space-y-3.5 text-xs">
-                    {manuscriptDetails && manuscriptDetails.statusHistory && manuscriptDetails.statusHistory.length > 0 ? (
-                      manuscriptDetails.statusHistory.slice(-5).reverse().map((entry, i) => {
-                        const getActivityDetails = (status: string) => {
-                          const statusMap: { [key: string]: { label: string; icon: any; color: string } } = {
-                            SUBMITTED: { label: 'Manuscript submitted', icon: FileText, color: 'bg-[#eefcf4] text-[#008751] border border-emerald-100' },
-                            EDITOR_REVIEW: { label: 'Editor review started', icon: User, color: 'bg-[#eefcf4] text-[#008751] border border-emerald-100' },
-                            UNDER_REVIEW: { label: 'Sent to reviewers', icon: Mail, color: 'bg-blue-50 text-blue-700 border border-blue-100' },
-                            REVISION_REQUESTED: { label: 'Revision requested', icon: AlertCircle, color: 'bg-orange-50 text-orange-700 border border-orange-100' },
-                            AWAITING_DECISION: { label: 'Awaiting editor decision', icon: Clock, color: 'bg-purple-50 text-purple-700 border border-purple-100' },
-                            ACCEPTED: { label: 'Manuscript accepted', icon: Check, color: 'bg-emerald-50 text-emerald-700 border border-emerald-100' },
-                            PUBLISHED: { label: 'Published', icon: BookOpen, color: 'bg-[#eefcf4] text-[#008751] border border-emerald-100' },
-                            REJECTED: { label: 'Rejected', icon: X, color: 'bg-red-50 text-red-700 border border-red-100' }
-                          };
-                          return statusMap[status] || { label: status, icon: FileText, color: 'bg-slate-50 text-slate-700 border border-slate-100' };
+                    {(() => {
+                      if (!manuscriptDetails) return <div className="text-slate-500 text-sm">No activity yet</div>;
+
+                      const revisions = manuscriptDetails.revisions || [];
+                      // Revision cycle active as of a given timestamp: the highest-numbered
+                      // revision whose requested_at is at or before that time.
+                      const revisionAt = (iso: string): number => {
+                        const t = new Date(iso).getTime();
+                        return revisions
+                          .filter(r => new Date(r.requested_at).getTime() <= t)
+                          .reduce((max, r) => Math.max(max, r.revision_number), 0);
+                      };
+
+                      const getActivityDetails = (status: string, createdAt: string) => {
+                        const n = revisionAt(createdAt);
+                        const statusMap: { [key: string]: { label: string; icon: any; color: string } } = {
+                          SUBMITTED: { label: 'Manuscript submitted', icon: FileText, color: 'bg-[#eefcf4] text-[#008751] border border-emerald-100' },
+                          EDITOR_REVIEW: { label: n > 0 ? `Revision ${n} — editor review started` : 'Editor review started', icon: User, color: 'bg-[#eefcf4] text-[#008751] border border-emerald-100' },
+                          UNDER_REVIEW: { label: n > 0 ? `Revision ${n} — sent to reviewers` : 'Sent to reviewers', icon: Mail, color: 'bg-blue-50 text-blue-700 border border-blue-100' },
+                          REVISION_REQUESTED: { label: `Revision ${n || 1} requested`, icon: AlertCircle, color: 'bg-orange-50 text-orange-700 border border-orange-100' },
+                          AWAITING_DECISION: { label: n > 0 ? `Revision ${n} — awaiting editor decision` : 'Awaiting editor decision', icon: Clock, color: 'bg-purple-50 text-purple-700 border border-purple-100' },
+                          ACCEPTED: { label: 'Paper Submission Accepted', icon: Check, color: 'bg-emerald-50 text-emerald-700 border border-emerald-100' },
+                          PUBLISHED: { label: 'Published', icon: BookOpen, color: 'bg-[#eefcf4] text-[#008751] border border-emerald-100' },
+                          REJECTED: { label: 'Rejected', icon: X, color: 'bg-red-50 text-red-700 border border-red-100' }
                         };
+                        return statusMap[status] || { label: status, icon: FileText, color: 'bg-slate-50 text-slate-700 border border-slate-100' };
+                      };
 
-                        const details = getActivityDetails(entry.to_status);
-                        const Icon = details.icon;
-                        const date = new Date(entry.created_at);
-                        const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                      type ActivityEntry = { created_at: string; label: string; icon: any; color: string };
 
+                      const statusEntries: ActivityEntry[] = (manuscriptDetails.statusHistory || [])
+                        // Same-status entries (e.g. submit_revision()'s REVISION_REQUESTED ->
+                        // REVISION_REQUESTED note when the author submits) aren't real
+                        // transitions -- the submissionEntries below already surface that
+                        // moment properly labeled.
+                        .filter((entry) => entry.from_status !== entry.to_status)
+                        .map((entry) => {
+                          const d = getActivityDetails(entry.to_status, entry.created_at);
+                          return { created_at: entry.created_at, label: d.label, icon: d.icon, color: d.color };
+                        });
+
+                      // submit_revision() no longer flips manuscripts.status at all (it stays
+                      // REVISION_REQUESTED until the Coordinator forwards it), so "revision
+                      // submitted" never appears as its own status_history row -- surface it
+                      // as a synthetic activity entry
+                      // sourced from manuscript_revisions.submitted_at instead.
+                      const submissionEntries: ActivityEntry[] = revisions
+                        .filter(r => r.submitted_at)
+                        .map(r => ({
+                          created_at: r.submitted_at as string,
+                          label: `Revision ${r.revision_number} submitted`,
+                          icon: FileText,
+                          color: 'bg-teal-50 text-teal-700 border border-teal-100'
+                        }));
+
+                      const combined = [...statusEntries, ...submissionEntries]
+                        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                        .slice(0, 5);
+
+                      if (combined.length === 0) return <div className="text-slate-500 text-sm">No activity yet</div>;
+
+                      return combined.map((item, i) => {
+                        const Icon = item.icon;
+                        const time = new Date(item.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
                         return (
                           <div key={i} className="flex items-center justify-between gap-3 hover:bg-emerald-50/40 p-1.5 rounded-lg transition">
                             <div className="flex items-center gap-2.5 overflow-hidden">
-                              <div className={`w-7 h-7 rounded-lg ${details.color} flex items-center justify-center shrink-0`}>
+                              <div className={`w-7 h-7 rounded-lg ${item.color} flex items-center justify-center shrink-0`}>
                                 <Icon className="w-3.5 h-3.5" />
                               </div>
-                              <span className="font-semibold text-black truncate">{details.label}</span>
+                              <span className="font-semibold text-black truncate">{item.label}</span>
                             </div>
                             <span className="text-[11px] text-black font-mono shrink-0 font-extrabold">{time}</span>
                           </div>
                         );
-                      })
-                    ) : (
-                      <div className="text-slate-500 text-sm">No activity yet</div>
-                    )}
+                      });
+                    })()}
                   </div>
                 </div>
 
@@ -2933,6 +3258,8 @@ export default function OjsSubmissionDetail({
                 activeTab={activeTab}
                 manuscriptDetails={manuscriptDetails}
                 currentUserId={currentUser?.email}
+                revisionFiles={revisionUploadedFiles}
+                latestRevisionNumber={latestRevisionForFiles?.revision_number}
                 onRefreshData={() => {
                   if (manuscriptDetails) {
                     fetchAuthorManuscriptDetails(manuscriptDetails.manuscript.id)

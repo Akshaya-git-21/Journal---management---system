@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Plus, Trash2, Loader2, AlertCircle, CheckCircle, Send } from 'lucide-react';
-import { EditorAssignmentRow, SuggestedReviewerRow, submitEditorAssessment } from '../../../lib/workflow';
+import { EditorAssignmentRow, SuggestedReviewerRow, RevisionRow, submitEditorAssessment, submitEditorRecommendation } from '../../../lib/workflow';
+import { getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 import { supabase } from '../../../lib/supabase';
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
   manuscriptId: string;
   assignment: EditorAssignmentRow;
   suggestedReviewers: SuggestedReviewerRow[];
+  revisions?: RevisionRow[];
   onSubmitSuccess: () => void;
 }
 
@@ -32,8 +34,18 @@ export function EditorEvaluationFormTab({
   manuscriptId,
   assignment,
   suggestedReviewers,
+  revisions = [],
   onSubmitSuccess,
 }: Props) {
+  // When the latest revision cycle is UNDER_REVIEW, the Coordinator has
+  // forwarded it and this recommendation is deciding that resubmission, not
+  // the original submission -- the backend (submit_editor_recommendation,
+  // 0018 migration) auto-advances the manuscript in that case: ACCEPT sends
+  // it straight to the Coordinator's Decision tab, MINOR/MAJOR_REVISION
+  // opens the next revision cycle. Reflected here purely as button labels/copy.
+  const latestRevision = getLatestRevision(revisions);
+  const isRevisionReview = latestRevision?.status === 'UNDER_REVIEW';
+  const nextRevisionNumber = (latestRevision?.revision_number || 0) + 1;
   // Evaluation scores
   const [scores, setScores] = useState({
     scientificMerit: 5,
@@ -70,6 +82,7 @@ export function EditorEvaluationFormTab({
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submittedRecommendation, setSubmittedRecommendation] = useState<'minor_revision' | 'major_revision' | 'accept' | null>(null);
+  const [selectedRecommendation, setSelectedRecommendation] = useState<'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION' | null>(null);
 
   // Reviewer suggestions are entirely optional (0, 1, or more) -- only
   // duplicate emails among whatever was entered are blocked.
@@ -92,6 +105,20 @@ export function EditorEvaluationFormTab({
     setSuggestions(suggestions.map((s, i) =>
       i === index ? { ...s, [field]: value } : s
     ));
+  };
+
+  const confirmRecommendation = async () => {
+    if (!selectedRecommendation) return;
+    setError('');
+    setLoading(true);
+    try {
+      await submitEditorRecommendation(manuscriptId, selectedRecommendation);
+      onSubmitSuccess();
+    } catch (err: any) {
+      setError(err.message || 'Failed to record recommendation');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -141,6 +168,17 @@ export function EditorEvaluationFormTab({
         suggestedReviewers: validSuggestions,
       });
 
+      // The button only captured the recommendation into a local UI label --
+      // it was never actually persisted, so editor_assignments.recommendation
+      // stayed null and the Coordinator's Decision tab always showed
+      // "Pending" no matter what the editor picked here. Persist it for real.
+      const recommendationMap: Record<string, 'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION'> = {
+        accept: 'ACCEPT',
+        minor_revision: 'MINOR_REVISION',
+        major_revision: 'MAJOR_REVISION',
+      };
+      await submitEditorRecommendation(manuscriptId, recommendationMap[recommendation]);
+
       setSubmittedRecommendation(recommendation);
       setSuccess('Evaluation submitted successfully! The coordinator will now review your reviewer suggestions.');
       setTimeout(() => {
@@ -154,27 +192,129 @@ export function EditorEvaluationFormTab({
   };
 
   if (assignment.assessment_status === 'SUBMITTED') {
-    const getRecommendationDisplay = () => {
-      const recommendations: Record<string, { label: string; color: string; bgColor: string }> = {
-        minor_revision: { label: 'Minor Revision', color: 'text-yellow-900', bgColor: 'bg-yellow-50 border-yellow-200' },
-        major_revision: { label: 'Major Revision', color: 'text-red-900', bgColor: 'bg-red-50 border-red-200' },
-        accept: { label: 'Accept Submission', color: 'text-green-900', bgColor: 'bg-green-50 border-green-200' }
-      };
-      return recommendations[submittedRecommendation || 'minor_revision'];
+    const recommendations: Record<string, { label: string; color: string; bgColor: string }> = {
+      MINOR_REVISION: { label: 'Minor Revision', color: 'text-yellow-900', bgColor: 'bg-yellow-50 border-yellow-200' },
+      MAJOR_REVISION: { label: 'Major Revision', color: 'text-red-900', bgColor: 'bg-red-50 border-red-200' },
+      ACCEPT: { label: 'Accept Submission', color: 'text-green-900', bgColor: 'bg-green-50 border-green-200' }
     };
 
-    const recommendation = getRecommendationDisplay();
+    // assignment.recommendation is the real, persisted value -- prefer it
+    // over the local submittedRecommendation state, which only reflects
+    // whatever button was clicked in this browser tab and is lost on reload.
+    // It's only treated as "decided" if it was submitted after the current
+    // revision cycle started -- recommendation isn't reset per-cycle (only
+    // assessment_status is), so a value from a prior cycle would otherwise
+    // wrongly block the editor from deciding on a new revision.
+    const recommendationIsCurrent = !latestRevision || !assignment.recommendation_submitted_at
+      ? true
+      : new Date(assignment.recommendation_submitted_at) > new Date(latestRevision.requested_at);
 
+    if (assignment.recommendation && recommendationIsCurrent && recommendations[assignment.recommendation]) {
+      const recommendation = recommendations[assignment.recommendation];
+      return (
+        <div className="space-y-6 pt-4">
+          <div className={`border rounded-2xl p-8 text-center ${recommendation.bgColor}`}>
+            <CheckCircle className={`w-12 h-12 mx-auto mb-4 ${recommendation.color}`} />
+            <p className={`${recommendation.color} font-semibold mb-2`}>Evaluation Submitted</p>
+            <p className={`text-sm ${recommendation.color}`}>Your evaluation and reviewer suggestions have been submitted to the coordinator.</p>
+            <div className="mt-4 pt-4 border-t border-current border-opacity-20">
+              <p className={`text-xs font-semibold uppercase tracking-wide ${recommendation.color} mb-2`}>Decision Made</p>
+              <p className={`text-lg font-black ${recommendation.color}`}>{recommendation.label}</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Evaluation was submitted but no recommendation was ever persisted
+    // (e.g. submitted before this fix landed) -- let the editor record one
+    // now without re-doing the whole evaluation.
     return (
       <div className="space-y-6 pt-4">
-        <div className={`border rounded-2xl p-8 text-center ${recommendation.bgColor}`}>
-          <CheckCircle className={`w-12 h-12 mx-auto mb-4 ${recommendation.color}`} />
-          <p className={`${recommendation.color} font-semibold mb-2`}>Evaluation Submitted</p>
-          <p className={`text-sm ${recommendation.color}`}>Your evaluation and reviewer suggestions have been submitted to the coordinator.</p>
-          <div className="mt-4 pt-4 border-t border-current border-opacity-20">
-            <p className={`text-xs font-semibold uppercase tracking-wide ${recommendation.color} mb-2`}>Decision Made</p>
-            <p className={`text-lg font-black ${recommendation.color}`}>{recommendation.label}</p>
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-8 text-center">
+          <CheckCircle className="w-12 h-12 mx-auto mb-4 text-blue-700" />
+          <p className="text-blue-900 font-semibold mb-2">Evaluation Submitted</p>
+          <p className="text-sm text-blue-800">Your evaluation and reviewer suggestions have been submitted to the coordinator.</p>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+          <h3 className="text-sm font-black text-slate-900">Recommendation</h3>
+          <p className="text-xs text-slate-600">
+            {isRevisionReview
+              ? `You're deciding on the Revision ${latestRevision!.revision_number} resubmission. Accept sends it straight to the Coordinator's decision; requesting a revision opens Revision ${nextRevisionNumber}.`
+              : "You haven't recorded a recommendation for this manuscript yet. Choose one below, then confirm."}
+          </p>
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-red-800 text-sm">{error}</div>
+          )}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => setSelectedRecommendation('MINOR_REVISION')}
+              className={`flex-1 disabled:opacity-50 font-semibold py-2.5 px-4 rounded transition flex items-center justify-center gap-2 ${
+                selectedRecommendation === 'MINOR_REVISION'
+                  ? 'bg-yellow-800 text-white ring-2 ring-offset-2 ring-yellow-700'
+                  : 'bg-yellow-700 hover:bg-yellow-800 text-white'
+              }`}
+            >
+              {selectedRecommendation === 'MINOR_REVISION' && <CheckCircle className="w-4 h-4" />}
+              {isRevisionReview ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision'}
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => setSelectedRecommendation('MAJOR_REVISION')}
+              className={`flex-1 disabled:opacity-50 font-semibold py-2.5 px-4 rounded transition flex items-center justify-center gap-2 ${
+                selectedRecommendation === 'MAJOR_REVISION'
+                  ? 'bg-red-800 text-white ring-2 ring-offset-2 ring-red-700'
+                  : 'bg-red-700 hover:bg-red-800 text-white'
+              }`}
+            >
+              {selectedRecommendation === 'MAJOR_REVISION' && <CheckCircle className="w-4 h-4" />}
+              {isRevisionReview ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision'}
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => setSelectedRecommendation('ACCEPT')}
+              className={`flex-1 disabled:opacity-50 font-semibold py-2.5 px-4 rounded transition flex items-center justify-center gap-2 ${
+                selectedRecommendation === 'ACCEPT'
+                  ? 'bg-green-800 text-white ring-2 ring-offset-2 ring-green-700'
+                  : 'bg-green-700 hover:bg-green-800 text-white'
+              }`}
+            >
+              {selectedRecommendation === 'ACCEPT' && <CheckCircle className="w-4 h-4" />}
+              {isRevisionReview ? 'Accept & Send to Decision' : 'Accept Submission'}
+            </button>
           </div>
+
+          {selectedRecommendation && (
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+              <p className="text-xs text-slate-600">
+                Confirm <span className="font-bold">{recommendations[selectedRecommendation].label}</span> as your recommendation?
+              </p>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => setSelectedRecommendation(null)}
+                  className="px-3 py-2 border border-slate-300 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-50 disabled:opacity-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={confirmRecommendation}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition flex items-center gap-2"
+                >
+                  {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Confirm
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -318,7 +458,7 @@ export function EditorEvaluationFormTab({
           className="flex-1 bg-yellow-700 hover:bg-yellow-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 px-4 rounded transition flex items-center justify-center gap-2"
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          Minor Revision
+          {isRevisionReview ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision'}
         </button>
 
         <button
@@ -331,7 +471,7 @@ export function EditorEvaluationFormTab({
           className="flex-1 bg-red-700 hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 px-4 rounded transition flex items-center justify-center gap-2"
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          Major Revision
+          {isRevisionReview ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision'}
         </button>
 
         <button
@@ -344,7 +484,7 @@ export function EditorEvaluationFormTab({
           className="flex-1 bg-green-700 hover:bg-green-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 px-4 rounded transition flex items-center justify-center gap-2"
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          Accept Submission
+          {isRevisionReview ? 'Accept & Send to Decision' : 'Accept Submission'}
         </button>
       </div>
     </form>

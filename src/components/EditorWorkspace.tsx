@@ -7,6 +7,7 @@ import {
   getManuscript, getContributors, getDiscussions
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
+import { getManuscriptStatusLabel, getLatestRevision } from '../lib/manuscriptStatusLabel';
 import {
   getEditorAssignedManuscripts,
   subscribeToEditorAssignments,
@@ -40,6 +41,7 @@ import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
 import EditorEvaluationSidebar from './EditorEvaluationSidebar';
 import FilePreviewModal from './FilePreviewModal';
+import EditorRevisionReview from './EditorRevisionReview';
 
 interface EditorWorkspaceProps {
   manuscripts?: any[];
@@ -60,10 +62,18 @@ const STATUS_STYLES: Record<ManuscriptStatus, string> = {
   REJECTED: 'bg-red-50 text-red-700 border-red-200',
 };
 
-function StatusBadge({ status }: { status: ManuscriptStatus }) {
+function StatusBadge({ status, latestRevision }: { status: ManuscriptStatus; latestRevision?: RevisionRow | null }) {
+  // A distinct "Revision Submitted" state -- the Coordinator has forwarded a
+  // resubmitted revision and it's sitting with the Editor (latestRevision
+  // .status = 'UNDER_REVIEW'). Called out separately from the generic
+  // EDITOR REVIEW badge so it's obvious at a glance which rows open the
+  // dedicated EditorRevisionReview page when clicked.
+  const isRevisionSubmitted = latestRevision?.status === 'UNDER_REVIEW';
+  const label = isRevisionSubmitted ? `REVISION ${latestRevision!.revision_number} SUBMITTED` : getManuscriptStatusLabel(status, latestRevision);
+  const style = isRevisionSubmitted ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : STATUS_STYLES[status];
   return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${STATUS_STYLES[status]}`}>
-      {status.replace(/_/g, ' ')}
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${style}`}>
+      {label}
     </span>
   );
 }
@@ -431,14 +441,20 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {paginatedRows.map((details) => (
-            <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id)}>
-              <td className="px-4 py-3 font-bold text-slate-800">{details.manuscript.title}</td>
-              <td className="px-4 py-3"><StatusBadge status={details.manuscript.status} /></td>
-              <td className="px-4 py-3 text-xs font-bold text-slate-600">{details.assignment.status}</td>
-              <td className="px-4 py-3 text-right text-[#008751] font-bold text-xs">Open &rarr;</td>
-            </tr>
-          ))}
+          {paginatedRows.map((details) => {
+            const latestRevision = getLatestRevision(details.revisions);
+            const isRevisionSubmitted = latestRevision?.status === 'UNDER_REVIEW';
+            return (
+              <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id)}>
+                <td className="px-4 py-3 font-bold text-slate-800">{details.manuscript.title}</td>
+                <td className="px-4 py-3"><StatusBadge status={details.manuscript.status} latestRevision={latestRevision} /></td>
+                <td className="px-4 py-3 text-xs font-bold text-slate-600">{details.assignment.status}</td>
+                <td className={`px-4 py-3 text-right font-bold text-xs ${isRevisionSubmitted ? 'text-indigo-600' : 'text-[#008751]'}`}>
+                  {isRevisionSubmitted ? 'Review Revision →' : 'Open →'}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
 
@@ -516,6 +532,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   // Editor Evaluation Workflow
   const [assignmentAccepted] = useState(assignment.status === 'ACCEPTED');
   const evaluationSubmitted = assignment.assessment_status === 'SUBMITTED';
+
+  // Once the Coordinator forwards a resubmitted revision (manuscript_revisions
+  // .status = 'UNDER_REVIEW'), show the dedicated revision-review page instead
+  // of the regular tabbed manuscript view -- see EditorRevisionReview.tsx.
+  const latestRevisionForReview = getLatestRevision(details.revisions);
+  const isRevisionReviewPage = latestRevisionForReview?.status === 'UNDER_REVIEW';
 
   const [previewFile, setPreviewFile] = useState<any>(null);
 
@@ -701,6 +723,33 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
     { id: 'comments', label: 'Collaboration' }
   ];
 
+  if (isRevisionReviewPage) {
+    return (
+      <div className="w-full h-full flex flex-col bg-white overflow-hidden">
+        <div className="shrink-0 sticky top-0 z-10 bg-white border-b border-slate-200 px-8 py-4">
+          <button
+            onClick={onBack}
+            className="text-slate-600 hover:text-slate-900 flex items-center gap-1 text-xs font-bold"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <EditorRevisionReview
+            manuscriptTitle={manuscript.title || 'Manuscript'}
+            manuscriptId={manuscript.id}
+            assignmentId={assignment.id}
+            assignment={assignment}
+            revisions={details.revisions || []}
+            suggestedReviewers={details.suggestedReviewers}
+            onSubmitSuccess={onChanged}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-full flex bg-white overflow-hidden">
       {/* Phase 4: Notification Toast */}
@@ -824,42 +873,63 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4 mb-6">{error}</div>}
 
               {/* DASHBOARD TABS CONTENT - Only show when on dashboard */}
-              {sidebarSection === 'dashboard' && activeTab === 'files' && (
-                <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                  <h3 className="text-sm font-black text-slate-900 mb-4">FILES FOR REVIEW ({details.files?.length || 0})</h3>
-                  {details.files && details.files.length > 0 ? (
-                    <div className="space-y-3">
-                      {details.files.map((file) => (
-                        <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 transition">
-                          <div className="flex items-center gap-3 flex-1">
-                            <span className="text-lg">📄</span>
-                            <div className="flex-1">
-                              <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
-                              <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            {file.public_url && (
-                              <>
-                                <button
-                                  onClick={() => setPreviewFile(file)}
-                                  className="text-slate-600 hover:text-slate-900 p-2"
-                                  title="View"
-                                >
-                                  👁️
-                                </button>
-                                <a href={file.public_url} download={file.file_name} className="text-slate-600 hover:text-slate-900 p-2" title="Download">📥</a>
-                              </>
-                            )}
+              {sidebarSection === 'dashboard' && activeTab === 'files' && (() => {
+                const allFiles = details.files || [];
+                const originalFiles = allFiles.filter(f => !f.revision_id);
+                const sortedRevisions = [...(details.revisions || [])].sort((a, b) => a.revision_number - b.revision_number);
+
+                const renderFileList = (files: typeof allFiles) => (
+                  <div className="space-y-3">
+                    {files.map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 transition">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📄</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
                           </div>
                         </div>
-                      ))}
+                        <div className="flex gap-2">
+                          {file.public_url && (
+                            <>
+                              <button
+                                onClick={() => setPreviewFile(file)}
+                                className="text-slate-600 hover:text-slate-900 p-2"
+                                title="View"
+                              >
+                                👁️
+                              </button>
+                              <a href={file.public_url} download={file.file_name} className="text-slate-600 hover:text-slate-900 p-2" title="Download">📥</a>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+
+                return (
+                  <div className="space-y-6">
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                      <h3 className="text-sm font-black text-slate-900 mb-4">ORIGINAL SUBMISSION FILES ({originalFiles.length})</h3>
+                      {originalFiles.length > 0 ? renderFileList(originalFiles) : (
+                        <div className="text-center py-8 text-slate-400 text-sm">No original submission files.</div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="text-center py-8 text-slate-400 text-sm">No files available.</div>
-                  )}
-                </div>
-              )}
+                    {sortedRevisions.map((rev) => {
+                      const revFiles = allFiles.filter(f => f.revision_id === rev.id);
+                      return (
+                        <div key={rev.id} className="bg-white border border-slate-200 rounded-2xl p-6">
+                          <h3 className="text-sm font-black text-slate-900 mb-4">REVISION {rev.revision_number} — UPLOADED FILES ({revFiles.length})</h3>
+                          {revFiles.length > 0 ? renderFileList(revFiles) : (
+                            <div className="text-center py-8 text-slate-400 text-sm">No files uploaded for this revision yet.</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
             {previewFile && (
               <FilePreviewModal
@@ -878,56 +948,91 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                 manuscriptId={manuscript.id}
                 assignment={assignment}
                 suggestedReviewers={details.suggestedReviewers}
+                revisions={details.revisions || []}
                 onSubmitSuccess={onChanged}
               />
             )}
 
             {sidebarSection === 'dashboard' && activeTab === 'decision' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
-                <h3 className="text-sm font-black text-slate-900">Editor Recommendation</h3>
+                {(() => {
+                  const latestRevision = getLatestRevision(details.revisions);
+                  const isRevisionDecision = latestRevision?.status === 'UNDER_REVIEW';
+                  const nextRevisionNumber = (latestRevision?.revision_number || 0) + 1;
+                  // A recommendation only counts as "already decided" if it was
+                  // submitted after the current revision cycle started -- otherwise
+                  // it's a stale leftover from a prior cycle (recommendation isn't
+                  // reset per-cycle, only assessment_status is) and the editor still
+                  // needs to decide on *this* revision.
+                  const recommendationIsCurrent = !!assignment.recommendation && (
+                    !latestRevision || !assignment.recommendation_submitted_at
+                      ? true
+                      : new Date(assignment.recommendation_submitted_at) > new Date(latestRevision.requested_at)
+                  );
 
-                {!evaluationSubmitted ? (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
-                    You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
-                  </div>
-                ) : assignment.recommendation ? (
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
-                    <p className="text-sm font-bold text-emerald-900">
-                      Recommendation submitted: {assignment.recommendation.replace(/_/g, ' ')}
-                    </p>
-                    {assignment.recommendation_submitted_at && (
-                      <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
-                    )}
-                    <p className="text-xs text-slate-500 mt-3">Your recommendation is with the Coordinator for review.</p>
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-xs text-slate-600">
-                      Select one decision based on your evaluation and (if applicable) the reviewers' recommendations.
-                    </p>
-                    {decisionError && (
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
-                    )}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {[
-                        { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
-                        { value: 'MINOR_REVISION' as ReviewerRecommendation, label: 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
-                        { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
-                        { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
-                      ].map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          disabled={decisionBusy}
-                          onClick={() => handleSubmitRecommendation(opt.value)}
-                          className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
+                  return (
+                    <>
+                      <h3 className="text-sm font-black text-slate-900">
+                        {isRevisionDecision ? `Editor Decision — Revision ${latestRevision!.revision_number}` : 'Editor Recommendation'}
+                      </h3>
+
+                      {(assignment.strengths || assignment.weaknesses || assignment.mandatory_revisions || assignment.comments_to_coordinator) && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-xs">
+                          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Your Evaluation Comments</p>
+                          {assignment.strengths && <p><span className="font-bold text-slate-700">Strengths:</span> <span className="text-slate-600">{assignment.strengths}</span></p>}
+                          {assignment.weaknesses && <p><span className="font-bold text-slate-700">Weaknesses:</span> <span className="text-slate-600">{assignment.weaknesses}</span></p>}
+                          {assignment.mandatory_revisions && <p><span className="font-bold text-slate-700">Mandatory Revisions:</span> <span className="text-slate-600">{assignment.mandatory_revisions}</span></p>}
+                          {assignment.comments_to_coordinator && <p><span className="font-bold text-slate-700">Comments to Coordinator:</span> <span className="text-slate-600">{assignment.comments_to_coordinator}</span></p>}
+                        </div>
+                      )}
+
+                      {!evaluationSubmitted ? (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
+                          You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
+                        </div>
+                      ) : recommendationIsCurrent ? (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
+                          <p className="text-sm font-bold text-emerald-900">
+                            Recommendation submitted: {assignment.recommendation!.replace(/_/g, ' ')}
+                          </p>
+                          {assignment.recommendation_submitted_at && (
+                            <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
+                          )}
+                          <p className="text-xs text-slate-500 mt-3">Your recommendation is with the Coordinator for review.</p>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-xs text-slate-600">
+                            {isRevisionDecision
+                              ? `Accept sends Revision ${latestRevision!.revision_number} straight to the Coordinator's decision. Requesting a revision opens Revision ${nextRevisionNumber}.`
+                              : "Select one decision based on your evaluation and (if applicable) the reviewers' recommendations."}
+                          </p>
+                          {decisionError && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                          )}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {[
+                              { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                              { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
+                              { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
+                              { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                            ].map((opt) => (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                disabled={decisionBusy}
+                                onClick={() => handleSubmitRecommendation(opt.value)}
+                                className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
 
@@ -1423,6 +1528,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                 manuscriptId={manuscript.id}
                 assignment={assignment}
                 suggestedReviewers={details.suggestedReviewers}
+                revisions={details.revisions || []}
                 onSubmitSuccess={onChanged}
               />
             )}
@@ -1480,50 +1586,84 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
 
             {sidebarSection === 'decision' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
-                <h3 className="text-sm font-black text-slate-900">Editor Recommendation</h3>
+                {(() => {
+                  const latestRevision = getLatestRevision(details.revisions);
+                  const isRevisionDecision = latestRevision?.status === 'UNDER_REVIEW';
+                  const nextRevisionNumber = (latestRevision?.revision_number || 0) + 1;
+                  // A recommendation only counts as "already decided" if it was
+                  // submitted after the current revision cycle started -- otherwise
+                  // it's a stale leftover from a prior cycle (recommendation isn't
+                  // reset per-cycle, only assessment_status is) and the editor still
+                  // needs to decide on *this* revision.
+                  const recommendationIsCurrent = !!assignment.recommendation && (
+                    !latestRevision || !assignment.recommendation_submitted_at
+                      ? true
+                      : new Date(assignment.recommendation_submitted_at) > new Date(latestRevision.requested_at)
+                  );
 
-                {!evaluationSubmitted ? (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
-                    You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
-                  </div>
-                ) : assignment.recommendation ? (
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
-                    <p className="text-sm font-bold text-emerald-900">
-                      Recommendation submitted: {assignment.recommendation.replace(/_/g, ' ')}
-                    </p>
-                    {assignment.recommendation_submitted_at && (
-                      <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
-                    )}
-                    <p className="text-xs text-slate-500 mt-3">Your recommendation is with the Coordinator for review.</p>
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-xs text-slate-600">
-                      Select one decision based on your evaluation and (if applicable) the reviewers' recommendations.
-                    </p>
-                    {decisionError && (
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
-                    )}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {[
-                        { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
-                        { value: 'MINOR_REVISION' as ReviewerRecommendation, label: 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
-                        { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
-                        { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
-                      ].map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          disabled={decisionBusy}
-                          onClick={() => handleSubmitRecommendation(opt.value)}
-                          className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
+                  return (
+                    <>
+                      <h3 className="text-sm font-black text-slate-900">
+                        {isRevisionDecision ? `Editor Decision — Revision ${latestRevision!.revision_number}` : 'Editor Recommendation'}
+                      </h3>
+
+                      {(assignment.strengths || assignment.weaknesses || assignment.mandatory_revisions || assignment.comments_to_coordinator) && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-xs">
+                          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Your Evaluation Comments</p>
+                          {assignment.strengths && <p><span className="font-bold text-slate-700">Strengths:</span> <span className="text-slate-600">{assignment.strengths}</span></p>}
+                          {assignment.weaknesses && <p><span className="font-bold text-slate-700">Weaknesses:</span> <span className="text-slate-600">{assignment.weaknesses}</span></p>}
+                          {assignment.mandatory_revisions && <p><span className="font-bold text-slate-700">Mandatory Revisions:</span> <span className="text-slate-600">{assignment.mandatory_revisions}</span></p>}
+                          {assignment.comments_to_coordinator && <p><span className="font-bold text-slate-700">Comments to Coordinator:</span> <span className="text-slate-600">{assignment.comments_to_coordinator}</span></p>}
+                        </div>
+                      )}
+
+                      {!evaluationSubmitted ? (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
+                          You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
+                        </div>
+                      ) : recommendationIsCurrent ? (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
+                          <p className="text-sm font-bold text-emerald-900">
+                            Recommendation submitted: {assignment.recommendation!.replace(/_/g, ' ')}
+                          </p>
+                          {assignment.recommendation_submitted_at && (
+                            <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
+                          )}
+                          <p className="text-xs text-slate-500 mt-3">Your recommendation is with the Coordinator for review.</p>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-xs text-slate-600">
+                            {isRevisionDecision
+                              ? `Accept sends Revision ${latestRevision!.revision_number} straight to the Coordinator's decision. Requesting a revision opens Revision ${nextRevisionNumber}.`
+                              : "Select one decision based on your evaluation and (if applicable) the reviewers' recommendations."}
+                          </p>
+                          {decisionError && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                          )}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {[
+                              { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                              { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
+                              { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
+                              { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                            ].map((opt) => (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                disabled={decisionBusy}
+                                onClick={() => handleSubmitRecommendation(opt.value)}
+                                className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
 

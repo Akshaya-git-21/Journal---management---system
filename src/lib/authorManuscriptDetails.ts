@@ -248,6 +248,28 @@ export function subscribeToManuscriptDetails(
 
   unsubscribers.push(() => reviewerAssignmentsChannel.unsubscribe());
 
+  // Subscribe to revision cycles (requested/submitted/re-reviewed) -- the
+  // Author's Submission Workflow stepper and timeline both derive their
+  // revision-cycle steps from this table.
+  const revisionsChannel = supabase
+    .channel(`revisions:${manuscriptId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'manuscript_revisions',
+        filter: `manuscript_id=eq.${manuscriptId}`
+      },
+      async () => {
+        const revisions = await getRevisions(manuscriptId);
+        onUpdate({ revisions });
+      }
+    )
+    .subscribe();
+
+  unsubscribers.push(() => revisionsChannel.unsubscribe());
+
   // Subscribe to manuscript files
   const filesChannel = supabase
     .channel(`files:${manuscriptId}`)

@@ -4,18 +4,31 @@ import { FileText, Users, Layers, AlertCircle, Eye, Download } from 'lucide-reac
 import DiscussionsTab from './DiscussionsTab';
 import FilePreviewModal from './FilePreviewModal';
 
+interface RevisionFileEntry {
+  id: string;
+  name: string;
+  type: string;
+  size: string;
+  date: string;
+  publicUrl?: string | null;
+}
+
 interface ViewSubmissionContentProps {
   activeTab: string;
   manuscriptDetails: AuthorManuscriptDetails | null;
   currentUserId?: string;
   onRefreshData?: () => void;
+  revisionFiles?: RevisionFileEntry[];
+  latestRevisionNumber?: number;
 }
 
 export default function ViewSubmissionContent({
   activeTab,
   manuscriptDetails,
   currentUserId,
-  onRefreshData
+  onRefreshData,
+  revisionFiles = [],
+  latestRevisionNumber
 }: ViewSubmissionContentProps) {
   const [previewFile, setPreviewFile] = useState<any>(null);
 
@@ -123,6 +136,52 @@ export default function ViewSubmissionContent({
         </div>
       ) : (
         <EmptyState message="No manuscript file uploaded" />
+      )}
+
+      {latestRevisionNumber !== undefined && (
+        <div className="mt-6 pt-6 border-t border-slate-200">
+          <h3 className="text-sm font-bold text-slate-900 mb-4 uppercase tracking-wide">
+            Revision {latestRevisionNumber} File
+          </h3>
+          {revisionFiles.length > 0 ? (
+            <div className="space-y-3">
+              {revisionFiles.map((f) => (
+                <div key={f.id} className="border border-emerald-200 bg-emerald-50/40 rounded-lg p-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{f.name}</p>
+                      <p className="text-xs text-slate-600 mt-1">{f.type} • {f.size}</p>
+                      <p className="text-xs text-slate-500 mt-1">Uploaded: {f.date}</p>
+                    </div>
+                    {f.publicUrl && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setPreviewFile({ file_name: f.name, public_url: f.publicUrl })}
+                          className="flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-800 transition"
+                          title="Preview file"
+                        >
+                          <Eye className="w-4 h-4" />
+                          Preview
+                        </button>
+                        <a
+                          href={f.publicUrl}
+                          download={f.name}
+                          className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-slate-800 transition"
+                          title="Download file"
+                        >
+                          <Download className="w-4 h-4" />
+                          Download
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState message="No file uploaded for this revision yet" />
+          )}
+        </div>
       )}
     </div>
   );

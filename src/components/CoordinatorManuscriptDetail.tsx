@@ -215,6 +215,7 @@ export default function CoordinatorManuscriptDetail({ manuscript, showAllFiles =
         editorAssignments={data.editorAssignments}
         reviewerAssignments={data.reviewerAssignments}
         statusHistory={data.statusHistory}
+        revisions={data.revisions}
       />
 
       {/* Tabs */}

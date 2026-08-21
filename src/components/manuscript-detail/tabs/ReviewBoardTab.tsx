@@ -284,7 +284,7 @@ export function ReviewBoardTab({
       return;
     }
 
-    if (!window.confirm('Confirm finalizing the reviewer board? This will transition the manuscript to Peer Review.')) {
+    if (!window.confirm('Confirm finalizing the reviewer board? This will move the manuscript forward (to Peer Review, or straight to Awaiting Decision if both reviews are already in).')) {
       return;
     }
 
@@ -293,7 +293,7 @@ export function ReviewBoardTab({
 
     try {
       await finalizeReviewerBoard(manuscript.id);
-      setSuccess('✓ Reviewer board finalized. Manuscript transitioned to Peer Review.');
+      setSuccess('✓ Reviewer board finalized.');
       setTimeout(() => {
         onDataChange();
         setSuccess('');
@@ -568,6 +568,34 @@ export function ReviewBoardTab({
             </div>
           )}
         </div>
+      )}
+
+      {/* Finalize Button -- required to move the manuscript out of EDITOR_REVIEW;
+          also the recovery path if reviews were already submitted before this
+          was clicked (fixed server-side to skip straight to Awaiting Decision
+          in that case instead of leaving the manuscript stuck). */}
+      {manuscript.status === 'EDITOR_REVIEW' && (
+        <button
+          onClick={handleFinalize}
+          disabled={!canFinalize || finalizing}
+          className={`w-full px-6 py-3 rounded-lg font-bold text-sm transition flex items-center justify-center gap-2 ${
+            canFinalize
+              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+              : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+          }`}
+        >
+          {finalizing ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Finalizing...
+            </>
+          ) : (
+            <>
+              <CheckCircle className="w-4 h-4" />
+              Confirm Reviewer Assignments & Continue
+            </>
+          )}
+        </button>
       )}
 
       {/* Already Finalized Message */}

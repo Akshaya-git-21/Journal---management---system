@@ -6,8 +6,9 @@ import {
   ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, SuggestedReviewerRow, ProfileRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getStatusHistory, getSuggestedReviewers,
   listActiveProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished, sendToPublisher,
-  subscribeToManuscripts, PublishDecision, getRevisions, getReviewerAssignmentCounts
+  subscribeToManuscripts, PublishDecision, getRevisions, RevisionRow, getReviewerAssignmentCounts
 } from '../lib/workflow';
+import { getManuscriptStatusLabel, getLatestRevision } from '../lib/manuscriptStatusLabel';
 import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
@@ -41,10 +42,10 @@ const STAGE_TABS: { key: string; label: string; statuses: ManuscriptStatus[] }[]
   { key: 'DONE', label: 'Resolved', statuses: ['ACCEPTED', 'PUBLISHED', 'REJECTED', 'REVISION_REQUESTED'] },
 ];
 
-function StatusBadge({ status }: { status: ManuscriptStatus }) {
+function StatusBadge({ status, latestRevision }: { status: ManuscriptStatus; latestRevision?: RevisionRow | null }) {
   return (
     <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-bold uppercase tracking-wide ${STATUS_STYLES[status]}`}>
-      {status.replace(/_/g, ' ')}
+      {getManuscriptStatusLabel(status, latestRevision)}
     </span>
   );
 }
@@ -1446,19 +1447,21 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
   const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>([]);
   const [suggested, setSuggested] = useState<SuggestedReviewerRow[]>([]);
   const [profiles, setProfiles] = useState<Record<string, ProfileRow>>({});
+  const [revisions, setRevisions] = useState<RevisionRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [showReviewerConfirmation, setShowReviewerConfirmation] = useState(false);
   const [pendingReviewerAssignment, setPendingReviewerAssignment] = useState<{ r1: string; r2: string } | null>(null);
 
   const load = async () => {
-    const [h, ea, ra, sr] = await Promise.all([
-      getStatusHistory(manuscript.id), getEditorAssignments(manuscript.id), getReviewerAssignments(manuscript.id), getSuggestedReviewers(manuscript.id)
+    const [h, ea, ra, sr, rev] = await Promise.all([
+      getStatusHistory(manuscript.id), getEditorAssignments(manuscript.id), getReviewerAssignments(manuscript.id), getSuggestedReviewers(manuscript.id), getRevisions(manuscript.id)
     ]);
     setHistory(h);
     setEditorAssignments(ea);
     setReviewerAssignments(ra);
     setSuggested(sr);
+    setRevisions(rev);
     const ids = [manuscript.author_id, manuscript.assigned_editor_id, ...ea.map((a) => a.editor_id), ...ra.map((a) => a.reviewer_id)].filter(Boolean) as string[];
     setProfiles(await getProfilesByIds(ids));
   };
@@ -1505,7 +1508,7 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
             <h2 className="text-lg font-black text-slate-900 mt-1">{manuscript.title}</h2>
             <p className="text-xs text-slate-500 mt-1">by {manuscript.author_name} &middot; {manuscript.author_email}</p>
           </div>
-          <StatusBadge status={manuscript.status} />
+          <StatusBadge status={manuscript.status} latestRevision={getLatestRevision(revisions)} />
         </div>
         <p className="text-sm text-slate-600 mt-3 leading-relaxed">{manuscript.abstract}</p>
       </div>
@@ -1742,7 +1745,8 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
 
       {manuscript.status === 'ACCEPTED' && !manuscript.production_stage && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-2">Move to Publisher</h3>
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 mb-1">Status: Production</p>
+          <h3 className="text-sm font-black text-slate-900 mb-2">Move to Publish</h3>
           <p className="text-xs text-slate-600 mb-4">
             Send this accepted manuscript to the Publisher for production and galley preparation.
           </p>
@@ -1762,7 +1766,7 @@ function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: Manus
             }}
             className="w-full bg-[#008751] hover:bg-[#007043] disabled:bg-slate-300 text-white font-bold py-2.5 rounded-lg transition"
           >
-            {busy ? 'Moving...' : 'Move to Publisher'}
+            {busy ? 'Moving...' : 'Move to Publish'}
           </button>
         </div>
       )}

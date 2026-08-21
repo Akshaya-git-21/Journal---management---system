@@ -1,4 +1,5 @@
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow } from '../../lib/workflow';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, RevisionRow } from '../../lib/workflow';
+import { getLatestRevision } from '../../lib/manuscriptStatusLabel';
 import { CheckCircle2, Circle, AlertCircle } from 'lucide-react';
 
 interface Props {
@@ -6,6 +7,7 @@ interface Props {
   editorAssignments: EditorAssignmentRow[];
   reviewerAssignments: ReviewerAssignmentRow[];
   statusHistory: StatusHistoryRow[];
+  revisions?: RevisionRow[];
 }
 
 interface WorkflowStage {
@@ -19,10 +21,18 @@ export default function WorkflowStatusTracker({
   manuscript,
   editorAssignments,
   reviewerAssignments,
-  statusHistory
+  statusHistory,
+  revisions = []
 }: Props) {
   const getStages = (): WorkflowStage[] => {
     const stages: WorkflowStage[] = [];
+    const latestRevision = getLatestRevision(revisions);
+    const n = latestRevision?.revision_number;
+    // Once a revision cycle is active, re-review reuses the same
+    // EDITOR_REVIEW/UNDER_REVIEW/AWAITING_DECISION statuses as the original
+    // round -- relabel those stages so it's clear this is a revision pass,
+    // not the first one.
+    const prefix = n ? `Revision ${n} — ` : '';
 
     // 1. Submitted
     stages.push({
@@ -50,11 +60,23 @@ export default function WorkflowStatusTracker({
       timestamp: editorAssignments.find(a => a.status === 'ACCEPTED')?.responded_at
     });
 
+    // 3.5 Revision Requested/Submitted -- only shown once a revision exists,
+    // sits between the original review round and the re-review stages.
+    if (latestRevision) {
+      const authorSubmitted = latestRevision.status !== 'AWAITING_AUTHOR_UPLOAD';
+      stages.push({
+        id: 'revision-cycle',
+        label: `Revision ${n} ${authorSubmitted ? 'Submitted' : 'Requested'}`,
+        status: authorSubmitted ? 'completed' : 'current',
+        timestamp: authorSubmitted ? (latestRevision.submitted_at || undefined) : latestRevision.requested_at
+      });
+    }
+
     // 4. Editor Evaluation
     const evaluationSubmitted = editorAssignments.some(a => a.assessment_status === 'SUBMITTED');
     stages.push({
       id: 'editor-evaluation',
-      label: 'Editor Evaluation',
+      label: `${prefix}Editor Evaluation`,
       status: evaluationSubmitted ? 'completed' : editorAccepted ? 'pending' : 'pending',
       timestamp: editorAssignments.find(a => a.assessment_status === 'SUBMITTED')?.assessment_submitted_at
     });
@@ -65,29 +87,20 @@ export default function WorkflowStatusTracker({
 
     stages.push({
       id: 'peer-review',
-      label: 'Peer Review',
+      label: `${prefix}Peer Review`,
       status: allReviewsSubmitted ? 'completed' : reviewersAssigned ? 'current' : 'pending',
       timestamp: reviewerAssignments.find(r => r.status === 'SUBMITTED')?.submitted_at
     });
 
     // 6. Decision
-    const hasRecommendation = editorAssignments.some(a => a.recommendation);
     stages.push({
       id: 'decision',
-      label: 'Decision',
+      label: `${prefix}Decision`,
       status: manuscript.status === 'ACCEPTED' || manuscript.status === 'REJECTED' || manuscript.status === 'REVISION_REQUESTED' ? 'completed' : allReviewsSubmitted ? 'current' : 'pending',
       timestamp: statusHistory.find(h => h.to_status === 'AWAITING_DECISION')?.created_at
     });
 
-    // 7. Revision
-    const revisionRequested = manuscript.status === 'REVISION_REQUESTED';
-    stages.push({
-      id: 'revision',
-      label: 'Revision',
-      status: revisionRequested ? 'current' : manuscript.status === 'ACCEPTED' || manuscript.status === 'PUBLISHED' ? 'completed' : 'pending'
-    });
-
-    // 8. Completed
+    // 7. Completed
     const isPublished = manuscript.status === 'PUBLISHED' || manuscript.status === 'ACCEPTED';
     stages.push({
       id: 'completed',

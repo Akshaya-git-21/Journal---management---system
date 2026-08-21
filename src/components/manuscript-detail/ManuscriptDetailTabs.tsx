@@ -85,6 +85,7 @@ export default function ManuscriptDetailTabs({
             reviewerAssignments={data.reviewerAssignments}
             suggestedReviewers={data.suggestedReviewers}
             profiles={data.profiles}
+            revisions={data.revisions || []}
             onWorkflowChange={() => { onDataChange(); onWorkflowChange(); }}
           />
         )}
@@ -95,7 +96,7 @@ export default function ManuscriptDetailTabs({
           />
         )}
         {activeTab === 'files' && (
-          <FilesTab manuscriptId={manuscript.id} showAllFiles={showAllFiles} />
+          <FilesTab manuscriptId={manuscript.id} showAllFiles={showAllFiles} revisions={data.revisions || []} />
         )}
         {activeTab === 'evaluation' && (
           canEditEvaluation && editorAssignment ? (
@@ -104,6 +105,7 @@ export default function ManuscriptDetailTabs({
               manuscriptId={manuscript.id}
               assignment={editorAssignment}
               suggestedReviewers={data.suggestedReviewers}
+              revisions={data.revisions || []}
               onSubmitSuccess={onDataChange}
             />
           ) : (
@@ -140,7 +142,10 @@ export default function ManuscriptDetailTabs({
             manuscript={manuscript}
             editorAssignments={data.editorAssignments}
             reviewerAssignments={data.reviewerAssignments}
-            onWorkflowChange={onWorkflowChange}
+            revisions={data.revisions || []}
+            statusHistory={data.statusHistory || []}
+            profiles={data.profiles || {}}
+            onWorkflowChange={() => { onDataChange(); onWorkflowChange(); }}
           />
         )}
         {activeTab === 'timeline' && (

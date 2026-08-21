@@ -187,6 +187,7 @@ export default function EditorManuscriptDetail({ manuscript, onBack, onChanged, 
         editorAssignments={data.editorAssignments}
         reviewerAssignments={data.reviewerAssignments}
         statusHistory={data.statusHistory}
+        revisions={data.revisions}
       />
 
       <ManuscriptDetailTabs
