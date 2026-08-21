@@ -19,7 +19,16 @@ export function EditorEvaluationTab({
   editorAssignments,
   profiles
 }: Props) {
-  const assessment = editorAssignments.find(a => a.assessment_status === 'SUBMITTED');
+  // A revision cycle resets assessment_status back to NOT_STARTED (and
+  // clears assessment_submitted_at) on the same editor_assignments row --
+  // see coordinator_send_revision_to_editor() in
+  // 0018_coordinator_revision_gate.sql -- but leaves the actual scores/
+  // strengths/weaknesses/recommendation from the original evaluation
+  // untouched. Fall back to any assignment that actually has score data so
+  // the original evaluation still displays here instead of appearing empty.
+  const assessment =
+    editorAssignments.find(a => a.assessment_status === 'SUBMITTED') ||
+    editorAssignments.find(a => a.scientific_merit != null);
 
   if (!assessment) {
     return (

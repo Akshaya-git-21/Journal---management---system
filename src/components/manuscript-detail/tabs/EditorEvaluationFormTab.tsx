@@ -191,7 +191,17 @@ export function EditorEvaluationFormTab({
     }
   };
 
-  if (assignment.assessment_status === 'SUBMITTED') {
+  // A revision cycle resets assessment_status back to NOT_STARTED on this
+  // same editor_assignments row (see coordinator_send_revision_to_editor()
+  // in 0018_coordinator_revision_gate.sql), but the scores/strengths/
+  // weaknesses from whenever the editor actually submitted are left in
+  // place. The evaluation only ever happens once -- fall back to the
+  // presence of real score data so it stays locked/read-only permanently
+  // after that first submission instead of re-rendering a blank editable
+  // form (with misleading default-5 scores) on every later revision cycle.
+  const hasSubmittedEvaluation = assignment.assessment_status === 'SUBMITTED' || assignment.scientific_merit != null;
+
+  if (hasSubmittedEvaluation) {
     const recommendations: Record<string, { label: string; color: string; bgColor: string }> = {
       MINOR_REVISION: { label: 'Minor Revision', color: 'text-yellow-900', bgColor: 'bg-yellow-50 border-yellow-200' },
       MAJOR_REVISION: { label: 'Major Revision', color: 'text-red-900', bgColor: 'bg-red-50 border-red-200' },

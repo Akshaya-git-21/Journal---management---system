@@ -739,10 +739,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
           <EditorRevisionReview
             manuscriptTitle={manuscript.title || 'Manuscript'}
             manuscriptId={manuscript.id}
-            assignmentId={assignment.id}
-            assignment={assignment}
             revisions={details.revisions || []}
-            suggestedReviewers={details.suggestedReviewers}
             onSubmitSuccess={onChanged}
           />
         </div>
@@ -1809,14 +1806,39 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                     const reviewersAssignedDone = !!(reviewerAssignments && reviewerAssignments.length > 0);
                     const reviewsCompletedCount = reviewerAssignments?.filter(r => r.status === 'SUBMITTED').length || 0;
                     const peerReviewDone = reviewersAssignedDone && reviewsCompletedCount === reviewerAssignments!.length;
-                    const coordinatorActionDone = manuscript.status && !['DRAFT', 'SUBMITTED', 'EDITOR_REVIEW'].includes(manuscript.status);
+                    // A revision cycle resets assessment_status back to
+                    // NOT_STARTED on this same assignment row without
+                    // clearing the actual submitted scores -- see
+                    // hasSubmittedEvaluation in EditorEvaluationFormTab.tsx.
+                    // Use the same signal here so this step doesn't flip back
+                    // to "in progress" once a revision cycle starts.
+                    const evaluationDone = evaluationSubmitted || (assignment as any).scientific_merit != null;
+                    const sortedRevisions = [...(details.revisions || [])].sort((a, b) => a.revision_number - b.revision_number);
+                    // The Coordinator has acted on the original round the
+                    // moment a revision cycle exists or the manuscript has
+                    // otherwise moved past awaiting a decision.
+                    const coordinatorActionDone = sortedRevisions.length > 0 ||
+                      (manuscript.status && !['DRAFT', 'SUBMITTED', 'EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION'].includes(manuscript.status));
                     const finalDecisionDone = manuscript.status && ['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
+
+                    // Base pipeline for the original review round, followed
+                    // by one Editor Decision / Coordinator Decision pair per
+                    // revision cycle that has actually happened so far (real
+                    // data from details.revisions, updated live via the
+                    // existing realtime subscription) -- so the timeline
+                    // keeps growing across Revision 1, 2, 3... instead of a
+                    // fixed 6-step pipeline that can't represent more than
+                    // one cycle.
                     const steps = [
-                      { label: 'Assignment accepted', done: assignment.status === 'ACCEPTED' || evaluationSubmitted },
-                      { label: 'Editor evaluation', done: evaluationSubmitted },
-                      { label: 'Coordinator action', done: !!coordinatorActionDone },
+                      { label: 'Assignment accepted', done: assignment.status === 'ACCEPTED' || evaluationDone },
+                      { label: 'Editor evaluation', done: evaluationDone },
                       { label: 'Reviewer assignment', done: reviewersAssignedDone },
                       { label: 'Peer review', done: peerReviewDone },
+                      { label: 'Coordinator action', done: !!coordinatorActionDone },
+                      ...sortedRevisions.flatMap((rev) => [
+                        { label: `Revision ${rev.revision_number} — Editor Decision`, done: !!rev.editor_decision },
+                        { label: `Revision ${rev.revision_number} — Coordinator Decision`, done: !!rev.coordinator_decision },
+                      ]),
                       { label: 'Final decision', done: !!finalDecisionDone },
                     ];
                     const currentIdx = steps.findIndex(s => !s.done);

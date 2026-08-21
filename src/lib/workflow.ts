@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { ManuscriptStatus, ReviewerRecommendation } from '../types';
+export type { ReviewerRecommendation };
 
 /**
  * Typed client wrapper around the Module 2 RPCs (see
@@ -218,8 +219,18 @@ export const submitReview = (assignmentId: string, input: ReviewSubmissionInput)
     p_criteria_reasons: input.criteriaReasons ?? {}
   }));
 
-export const submitEditorRecommendation = (manuscriptId: string, recommendation: ReviewerRecommendation) =>
-  rpcOrThrow(supabase.rpc('submit_editor_recommendation', { p_manuscript_id: manuscriptId, p_recommendation: recommendation }));
+export const submitEditorRecommendation = (
+  manuscriptId: string,
+  recommendation: ReviewerRecommendation,
+  comments?: string,
+  checklist?: ChecklistItem[]
+) =>
+  rpcOrThrow(supabase.rpc('submit_editor_recommendation', {
+    p_manuscript_id: manuscriptId,
+    p_recommendation: recommendation,
+    p_comments: comments ?? null,
+    p_checklist: checklist ?? []
+  }));
 
 export type PublishDecision = 'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION' | 'REJECT';
 
@@ -377,6 +388,12 @@ export interface ProfileRow {
   created_at?: string | null;
 }
 
+export interface ChecklistItem {
+  id: string;
+  label: string;
+  checked: boolean;
+}
+
 export interface RevisionRow {
   id: string;
   manuscript_id: string;
@@ -387,6 +404,13 @@ export interface RevisionRow {
   status: string;
   requested_at: string;
   submitted_at: string | null;
+  editor_comments: string | null;
+  editor_checklist: ChecklistItem[];
+  editor_decision: ReviewerRecommendation | null;
+  editor_decision_at: string | null;
+  coordinator_decision: ReviewerRecommendation | null;
+  coordinator_decision_at: string | null;
+  coordinator_note: string | null;
 }
 
 /** RLS scopes this to whatever the caller is allowed to see: their own

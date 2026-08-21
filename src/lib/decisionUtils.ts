@@ -29,6 +29,22 @@ export function computeMajorityDecision(reviewerAssignments: ReviewerAssignmentR
   return tie ? 'SPLIT' : winner;
 }
 
+/**
+ * Dynamic decision-button labels: "Accept Submission N" / "Minor Revision
+ * N+1" / "Major Revision N+1", computed purely from the current revision
+ * number -- never hardcoded, so the same logic works for Revision 1, 2, 3,
+ * and every subsequent cycle.
+ */
+export function getRevisionDecisionLabel(recommendation: ReviewerRecommendation, currentRevisionNumber: number): string {
+  switch (recommendation) {
+    case 'ACCEPT': return `Accept Submission ${currentRevisionNumber}`;
+    case 'MINOR_REVISION': return `Minor Revision ${currentRevisionNumber + 1}`;
+    case 'MAJOR_REVISION': return `Major Revision ${currentRevisionNumber + 1}`;
+    case 'REJECT': return 'Reject';
+    default: return recommendation.replace(/_/g, ' ');
+  }
+}
+
 export type DecisionHistoryEntry = {
   id: string;
   actorRole: 'REVIEWER' | 'EDITOR' | 'COORDINATOR';
@@ -85,6 +101,28 @@ export function buildDecisionHistory(
       detail: rev.decision_letter || undefined,
       createdAt: rev.requested_at,
     });
+
+    if (rev.editor_decision && rev.editor_decision_at) {
+      entries.push({
+        id: `revision-${rev.id}-editor-decision`,
+        actorRole: 'EDITOR',
+        actorName: 'Editor',
+        decision: `Revision ${rev.revision_number} — ${getRevisionDecisionLabel(rev.editor_decision, rev.revision_number)}`,
+        detail: rev.editor_comments || undefined,
+        createdAt: rev.editor_decision_at,
+      });
+    }
+
+    if (rev.coordinator_decision && rev.coordinator_decision_at) {
+      entries.push({
+        id: `revision-${rev.id}-coordinator-decision`,
+        actorRole: 'COORDINATOR',
+        actorName: 'Coordinator',
+        decision: `Revision ${rev.revision_number} — Final: ${getRevisionDecisionLabel(rev.coordinator_decision, rev.revision_number)}`,
+        detail: rev.coordinator_note || undefined,
+        createdAt: rev.coordinator_decision_at,
+      });
+    }
   });
 
   statusHistory

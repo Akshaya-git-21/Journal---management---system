@@ -13,13 +13,19 @@ interface RevisionFileEntry {
   publicUrl?: string | null;
 }
 
+interface RevisionFilesEntry {
+  revisionNumber: number;
+  files: RevisionFileEntry[];
+}
+
 interface ViewSubmissionContentProps {
   activeTab: string;
   manuscriptDetails: AuthorManuscriptDetails | null;
   currentUserId?: string;
   onRefreshData?: () => void;
-  revisionFiles?: RevisionFileEntry[];
-  latestRevisionNumber?: number;
+  /** Files for every revision cycle so far, sorted ascending -- shown as its
+   * own "Revision N File" section (not just the latest cycle). */
+  allRevisionFiles?: RevisionFilesEntry[];
 }
 
 export default function ViewSubmissionContent({
@@ -27,8 +33,7 @@ export default function ViewSubmissionContent({
   manuscriptDetails,
   currentUserId,
   onRefreshData,
-  revisionFiles = [],
-  latestRevisionNumber
+  allRevisionFiles = []
 }: ViewSubmissionContentProps) {
   const [previewFile, setPreviewFile] = useState<any>(null);
 
@@ -138,14 +143,14 @@ export default function ViewSubmissionContent({
         <EmptyState message="No manuscript file uploaded" />
       )}
 
-      {latestRevisionNumber !== undefined && (
-        <div className="mt-6 pt-6 border-t border-slate-200">
+      {allRevisionFiles.map((rev) => (
+        <div key={rev.revisionNumber} className="mt-6 pt-6 border-t border-slate-200">
           <h3 className="text-sm font-bold text-slate-900 mb-4 uppercase tracking-wide">
-            Revision {latestRevisionNumber} File
+            Revision {rev.revisionNumber} File
           </h3>
-          {revisionFiles.length > 0 ? (
+          {rev.files.length > 0 ? (
             <div className="space-y-3">
-              {revisionFiles.map((f) => (
+              {rev.files.map((f) => (
                 <div key={f.id} className="border border-emerald-200 bg-emerald-50/40 rounded-lg p-3">
                   <div className="flex items-start justify-between">
                     <div>
@@ -182,7 +187,7 @@ export default function ViewSubmissionContent({
             <EmptyState message="No file uploaded for this revision yet" />
           )}
         </div>
-      )}
+      ))}
     </div>
   );
 

@@ -8,6 +8,7 @@ import { ReviewBoardTab } from './tabs/ReviewBoardTab';
 import { ReviewersTab } from './tabs/ReviewersTab';
 import { ReviewsTab } from './tabs/ReviewsTab';
 import { DecisionTab } from './tabs/DecisionTab';
+import { DecisionHistoryTab } from './tabs/DecisionHistoryTab';
 import { TimelineTab } from './tabs/TimelineTab';
 import { HistoryTab } from './tabs/HistoryTab';
 import { NotesTab } from './tabs/NotesTab';
@@ -33,6 +34,7 @@ const TABS = [
   { id: 'reviewers', label: 'Reviewers (4)', icon: '🔍' },
   { id: 'reviews', label: 'Reviews (5)', icon: '📝' },
   { id: 'decision', label: 'Decision (6)', icon: '⚖️' },
+  { id: 'decision-history', label: 'Decision History', icon: '🕘' },
   { id: 'timeline', label: 'Timeline', icon: '⏱️' },
   { id: 'history', label: 'History', icon: '📜' },
   { id: 'notes', label: 'Notes', icon: '📌' },
@@ -146,6 +148,15 @@ export default function ManuscriptDetailTabs({
             statusHistory={data.statusHistory || []}
             profiles={data.profiles || {}}
             onWorkflowChange={() => { onDataChange(); onWorkflowChange(); }}
+          />
+        )}
+        {activeTab === 'decision-history' && (
+          <DecisionHistoryTab
+            editorAssignments={data.editorAssignments}
+            reviewerAssignments={data.reviewerAssignments}
+            revisions={data.revisions || []}
+            statusHistory={data.statusHistory || []}
+            profiles={data.profiles || {}}
           />
         )}
         {activeTab === 'timeline' && (

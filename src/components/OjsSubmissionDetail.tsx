@@ -126,6 +126,11 @@ export default function OjsSubmissionDetail({
   const [detailsError, setDetailsError] = useState<string>('');
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
   const [revisionUploadedFiles, setRevisionUploadedFiles] = useState<any[]>([]);
+  // Files for EVERY revision cycle (not just the latest), keyed by revision
+  // id, so the Overview page can show "Revision 1 -- Uploaded Files",
+  // "Revision 2 -- Uploaded Files", etc. as their own sections instead of
+  // only ever showing the most recent cycle's files.
+  const [allRevisionFilesById, setAllRevisionFilesById] = useState<Record<string, any[]>>({});
 
   // File Preview States
   const [previewModalOpen, setPreviewModalOpen] = useState<boolean>(false);
@@ -447,6 +452,15 @@ export default function OjsSubmissionDetail({
         setManuscriptDetails((prev) => prev ? { ...prev, manuscript: updates.manuscript } : null);
       }
       if (updates.discussions) {
+        // manuscriptDetails.discussions itself was never updated here before
+        // -- only the WhatsApp-style panel's separate allMessages/
+        // whatsappMessages state was, via the map below. Everything else
+        // that reads manuscriptDetails.discussions directly (the Discussions
+        // count badge, the Pre-Review discussions panel) was staying frozen
+        // at whatever loaded on first mount and never reflecting new
+        // messages in real time.
+        setManuscriptDetails((prev) => prev ? { ...prev, discussions: updates.discussions! } : null);
+
         const messageList = updates.discussions
           .filter((d) => d.channel === 'COORDINATOR_AUTHOR')
           .map((d) => ({
@@ -534,6 +548,53 @@ export default function OjsSubmissionDetail({
       revisionFilesChannel.unsubscribe();
     };
   }, [latestRevisionId]);
+
+  // Files for every revision cycle so far, each shown as its own "Revision N
+  // -- Uploaded Files" section on the Overview page (not just the latest
+  // cycle -- see allRevisionFilesById above).
+  const allRevisions = manuscriptDetails?.revisions || [];
+  const allRevisionIdsKey = allRevisions.map((r) => r.id).join(',');
+
+  useEffect(() => {
+    if (allRevisions.length === 0) {
+      setAllRevisionFilesById({});
+      return;
+    }
+
+    let isMounted = true;
+    const formatRevisionFiles = (files: ManuscriptFileRow[]) => files.map((f) => ({
+      id: f.id,
+      name: f.file_name,
+      type: f.file_type,
+      size: f.file_size,
+      date: formatDate(f.uploaded_at),
+      uploadedAt: f.uploaded_at,
+      uploadedBy: f.uploaded_by,
+      storagePath: f.storage_path,
+      publicUrl: f.public_url
+    }));
+
+    const loadAll = () =>
+      Promise.all(allRevisions.map((r) => getRevisionFiles(r.id).then((files) => [r.id, formatRevisionFiles(files)] as const)))
+        .then((entries) => { if (isMounted) setAllRevisionFilesById(Object.fromEntries(entries)); })
+        .catch((err) => console.error('Failed to load revision files:', err));
+
+    loadAll();
+
+    const channel = supabase
+      .channel(`all_revision_files:${paper?.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'manuscript_files', filter: `manuscript_id=eq.${paper?.id}` },
+        () => { loadAll(); }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      channel.unsubscribe();
+    };
+  }, [allRevisionIdsKey, paper?.id]);
 
   // Keep uploaded files in sync with the latest selected paper
   useEffect(() => {
@@ -1353,52 +1414,35 @@ export default function OjsSubmissionDetail({
                       </div>
                     </div>
 
-                    {latestRevisionForFiles && (
-                      <div className="mt-4 pt-3 border-t border-emerald-100">
-                        <h4 className="text-black text-[13px] font-semibold tracking-tight mb-2">
-                          Revision {latestRevisionForFiles.revision_number} — Uploaded Files
-                        </h4>
-                        {revisionUploadedFiles.length === 0 ? (
-                          <p className="text-[11px] text-slate-500">No files uploaded for this revision yet.</p>
-                        ) : (
-                          <div className="overflow-x-auto rounded-lg border border-emerald-100">
-                            <table className="w-full text-left text-xs border-collapse">
-                              <thead>
-                                <tr className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 border-b border-emerald-100 bg-slate-50">
-                                  <th className="px-3 py-2 font-bold">Name</th>
-                                  <th className="px-3 py-2 font-bold">Type</th>
-                                  <th className="px-3 py-2 font-bold">Size</th>
-                                  <th className="px-3 py-2 font-bold">Date</th>
-                                  <th className="px-3 py-2 text-center font-bold">Actions</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-emerald-50 bg-white">
-                                {revisionUploadedFiles.map((file, i) => {
-                                  let fileIconColor = "text-rose-600";
-                                  if (file.name.endsWith(".docx")) fileIconColor = "text-blue-600";
-                                  else if (file.name.endsWith(".zip")) fileIconColor = "text-amber-600";
-                                  return (
-                                    <tr key={file.id || i} className="hover:bg-emerald-50/50 transition">
-                                      <td className="px-3 py-2">
-                                        <button
-                                          onClick={() => {
-                                            setPreviewFileName(file.name);
-                                            setPreviewFileType(file.type || 'Document');
-                                            setPreviewFileSize(file.size || '1.2 MB');
-                                            setPreviewPublicUrl(file.publicUrl || '');
-                                            setPreviewModalOpen(true);
-                                          }}
-                                          className="flex items-center gap-2 max-w-[150px] sm:max-w-none text-left hover:underline cursor-pointer group"
-                                        >
-                                          <FileText className={`w-4 h-4 ${fileIconColor} shrink-0 stroke-[2]`} />
-                                          <span className="text-[12px] font-semibold text-black truncate group-hover:text-[#008751]" title={file.name}>{file.name}</span>
-                                        </button>
-                                      </td>
-                                      <td className="px-3 py-2 text-[12px] font-medium text-slate-700">{file.type}</td>
-                                      <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.size}</td>
-                                      <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.date}</td>
-                                      <td className="px-3 py-2">
-                                        <div className="flex items-center justify-center gap-1">
+                    {[...allRevisions].sort((a, b) => a.revision_number - b.revision_number).map((rev) => {
+                      const files = allRevisionFilesById[rev.id] || [];
+                      return (
+                        <div key={rev.id} className="mt-4 pt-3 border-t border-emerald-100">
+                          <h4 className="text-black text-[13px] font-semibold tracking-tight mb-2">
+                            Revision {rev.revision_number} — Uploaded Files
+                          </h4>
+                          {files.length === 0 ? (
+                            <p className="text-[11px] text-slate-500">No files uploaded for this revision yet.</p>
+                          ) : (
+                            <div className="overflow-x-auto rounded-lg border border-emerald-100">
+                              <table className="w-full text-left text-xs border-collapse">
+                                <thead>
+                                  <tr className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 border-b border-emerald-100 bg-slate-50">
+                                    <th className="px-3 py-2 font-bold">Name</th>
+                                    <th className="px-3 py-2 font-bold">Type</th>
+                                    <th className="px-3 py-2 font-bold">Size</th>
+                                    <th className="px-3 py-2 font-bold">Date</th>
+                                    <th className="px-3 py-2 text-center font-bold">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-emerald-50 bg-white">
+                                  {files.map((file, i) => {
+                                    let fileIconColor = "text-rose-600";
+                                    if (file.name.endsWith(".docx")) fileIconColor = "text-blue-600";
+                                    else if (file.name.endsWith(".zip")) fileIconColor = "text-amber-600";
+                                    return (
+                                      <tr key={file.id || i} className="hover:bg-emerald-50/50 transition">
+                                        <td className="px-3 py-2">
                                           <button
                                             onClick={() => {
                                               setPreviewFileName(file.name);
@@ -1407,30 +1451,50 @@ export default function OjsSubmissionDetail({
                                               setPreviewPublicUrl(file.publicUrl || '');
                                               setPreviewModalOpen(true);
                                             }}
-                                            className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
-                                            title="View"
+                                            className="flex items-center gap-2 max-w-[150px] sm:max-w-none text-left hover:underline cursor-pointer group"
                                           >
-                                            <Eye className="w-3.5 h-3.5" />
+                                            <FileText className={`w-4 h-4 ${fileIconColor} shrink-0 stroke-[2]`} />
+                                            <span className="text-[12px] font-semibold text-black truncate group-hover:text-[#008751]" title={file.name}>{file.name}</span>
                                           </button>
-                                          <a
-                                            href={file.publicUrl || '#'}
-                                            download={file.name}
-                                            className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
-                                            title="Download"
-                                          >
-                                            <Download className="w-3.5 h-3.5" />
-                                          </a>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                                        </td>
+                                        <td className="px-3 py-2 text-[12px] font-medium text-slate-700">{file.type}</td>
+                                        <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.size}</td>
+                                        <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.date}</td>
+                                        <td className="px-3 py-2">
+                                          <div className="flex items-center justify-center gap-1">
+                                            <button
+                                              onClick={() => {
+                                                setPreviewFileName(file.name);
+                                                setPreviewFileType(file.type || 'Document');
+                                                setPreviewFileSize(file.size || '1.2 MB');
+                                                setPreviewPublicUrl(file.publicUrl || '');
+                                                setPreviewModalOpen(true);
+                                              }}
+                                              className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
+                                              title="View"
+                                            >
+                                              <Eye className="w-3.5 h-3.5" />
+                                            </button>
+                                            <a
+                                              href={file.publicUrl || '#'}
+                                              download={file.name}
+                                              className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
+                                              title="Download"
+                                            >
+                                              <Download className="w-3.5 h-3.5" />
+                                            </a>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
 
                     <div className="border-t pt-3 border-emerald-100 mt-3">
                       <button
@@ -3258,8 +3322,9 @@ export default function OjsSubmissionDetail({
                 activeTab={activeTab}
                 manuscriptDetails={manuscriptDetails}
                 currentUserId={currentUser?.email}
-                revisionFiles={revisionUploadedFiles}
-                latestRevisionNumber={latestRevisionForFiles?.revision_number}
+                allRevisionFiles={[...allRevisions]
+                  .sort((a, b) => a.revision_number - b.revision_number)
+                  .map((r) => ({ revisionNumber: r.revision_number, files: allRevisionFilesById[r.id] || [] }))}
                 onRefreshData={() => {
                   if (manuscriptDetails) {
                     fetchAuthorManuscriptDetails(manuscriptDetails.manuscript.id)
