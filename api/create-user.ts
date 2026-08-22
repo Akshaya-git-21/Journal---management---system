@@ -9,7 +9,7 @@
  * this and the Express route in server.ts both call one shared
  * implementation instead of duplicating it.
  */
-import { handleCreateUserRequest } from '../src/lib/createUserHandler';
+import { handleCreateUserRequest } from '../src/lib/createUserHandler.js';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
