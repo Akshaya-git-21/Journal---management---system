@@ -246,11 +246,11 @@ export const markPublished = (manuscriptId: string, doi: string, volume: string,
     p_published_pdf_url: publishedPdfUrl ?? null
   }));
 
-/** Coordinator-only: hand an ACCEPTED manuscript to Publishers. Publishers
- * cannot see a manuscript until this has been called (see manuscripts_select
- * RLS -- production_stage must be non-null). */
-export const sendToPublisher = (manuscriptId: string) =>
-  rpcOrThrow(supabase.rpc('send_to_publisher', { p_manuscript_id: manuscriptId }));
+/** Coordinator-only: hand an ACCEPTED manuscript to one specific Publisher
+ * account. That Publisher cannot see the manuscript until this has been
+ * called (see manuscripts_select RLS -- assigned_publisher_id must match). */
+export const sendToPublisher = (manuscriptId: string, publisherId: string) =>
+  rpcOrThrow(supabase.rpc('send_to_publisher', { p_manuscript_id: manuscriptId, p_publisher_id: publisherId }));
 
 export async function uploadPublishedGalley(manuscriptId: string, file: File): Promise<string> {
   const path = `${manuscriptId}/published/${Date.now()}_${file.name}`;
@@ -284,6 +284,32 @@ export async function getEditorReviewerActions(manuscriptId: string): Promise<Ed
 
 export async function getStatusHistory(manuscriptId: string): Promise<StatusHistoryRow[]> {
   const { data, error } = await supabase.from('manuscript_status_history').select('*').eq('manuscript_id', manuscriptId).order('created_at', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getRecentStatusHistory(limit: number = 8): Promise<StatusHistoryRow[]> {
+  const { data, error } = await supabase.from('manuscript_status_history').select('*').order('created_at', { ascending: false }).limit(limit);
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export interface OverdueReviewRow {
+  id: string;
+  manuscript_id: string;
+  reviewer_id: string;
+  status: 'INVITED' | 'ACCEPTED' | 'DECLINED' | 'SUBMITTED';
+  due_date: string;
+}
+
+export async function getOverdueReviewerAssignments(): Promise<OverdueReviewRow[]> {
+  const { data, error } = await supabase
+    .from('reviewer_assignments')
+    .select('id, manuscript_id, reviewer_id, status, due_date')
+    .in('status', ['INVITED', 'ACCEPTED'])
+    .not('due_date', 'is', null)
+    .lt('due_date', new Date().toISOString())
+    .order('due_date', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
 }
@@ -326,6 +352,7 @@ export interface ManuscriptRow {
   author_name: string;
   author_email: string;
   assigned_editor_id: string | null;
+  assigned_publisher_id?: string | null;
   submission_step: number;
   editors_notes: string;
   doi: string | null;
@@ -547,7 +574,7 @@ export async function assignRevisedManuscriptToEditor(manuscriptId: string, edit
 }
 
 /** Active accounts for a given role -- used by Coordinator's editor/reviewer pickers. */
-export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER'): Promise<ProfileRow[]> {
+export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER' | 'PUBLISHER'): Promise<ProfileRow[]> {
   const { data, error } = await supabase.from('profiles').select('id, name, email, role, status, created_at').eq('role', role).eq('status', 'ACTIVE').order('name', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];

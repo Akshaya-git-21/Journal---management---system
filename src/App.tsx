@@ -384,7 +384,7 @@ export default function App() {
                 )}
 
                 {loggedInUser?.role === 'PUBLISHER' && (
-                  <PublisherWorkspace manuscripts={[]} onUpdateManuscript={() => {}} currentUser={loggedInUser} />
+                  <PublisherWorkspace currentUser={loggedInUser} />
                 )}
 
                 {loggedInUser?.role === 'COORDINATOR' && (

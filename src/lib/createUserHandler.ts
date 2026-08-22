@@ -15,7 +15,7 @@ export interface CreateUserResult {
   body: { error: string } | { user: unknown };
 }
 
-const ALLOWED_ROLES = ['EDITOR', 'REVIEWER'];
+const ALLOWED_ROLES = ['EDITOR', 'REVIEWER', 'PUBLISHER'];
 
 export async function handleCreateUserRequest(
   authHeader: string | undefined,
@@ -56,7 +56,7 @@ export async function handleCreateUserRequest(
     return { status: 403, body: { error: 'Forbidden: Unable to verify your authorization.' } };
   }
   if (callerProfile.role !== 'COORDINATOR' || callerProfile.status !== 'ACTIVE') {
-    return { status: 403, body: { error: 'Forbidden: Only an active Coordinator can create Editor/Reviewer accounts.' } };
+    return { status: 403, body: { error: 'Forbidden: Only an active Coordinator can create Editor/Reviewer/Publisher accounts.' } };
   }
 
   try {

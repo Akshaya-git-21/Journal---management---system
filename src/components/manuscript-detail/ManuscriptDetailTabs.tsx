@@ -147,6 +147,7 @@ export default function ManuscriptDetailTabs({
             revisions={data.revisions || []}
             statusHistory={data.statusHistory || []}
             profiles={data.profiles || {}}
+            isEditor={isEditor}
             onWorkflowChange={() => { onDataChange(); onWorkflowChange(); }}
           />
         )}

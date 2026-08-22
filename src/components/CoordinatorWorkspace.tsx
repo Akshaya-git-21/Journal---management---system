@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react';
 import { ManuscriptStatus } from '../types';
 import { supabase } from '../lib/supabase';
-import { createEditorAccount, createReviewerAccount } from '../lib/auth';
+import { createEditorAccount, createReviewerAccount, createAndActivatePublisherAccount } from '../lib/auth';
 import {
   ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, SuggestedReviewerRow, ProfileRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getStatusHistory, getSuggestedReviewers,
   listActiveProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished, sendToPublisher,
-  subscribeToManuscripts, PublishDecision, getRevisions, RevisionRow, getReviewerAssignmentCounts
+  subscribeToManuscripts, PublishDecision, getRevisions, RevisionRow, getReviewerAssignmentCounts,
+  getRecentStatusHistory, getOverdueReviewerAssignments, OverdueReviewRow
 } from '../lib/workflow';
 import { getManuscriptStatusLabel, getLatestRevision } from '../lib/manuscriptStatusLabel';
 import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
-import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity } from 'lucide-react';
+import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2 } from 'lucide-react';
 import { AssignmentConfirmationDialog } from './AssignmentConfirmationDialog';
 
 interface CoordinatorWorkspaceProps {
@@ -55,15 +56,20 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [pendingApprovals, setPendingApprovals] = useState<ProfileRow[]>([]);
   const [editorialBoardProfiles, setEditorialBoardProfiles] = useState<ProfileRow[]>([]);
   const [reviewerProfiles, setReviewerProfiles] = useState<ProfileRow[]>([]);
+  const [publisherProfiles, setPublisherProfiles] = useState<ProfileRow[]>([]);
   const [reviewerAssignmentCounts, setReviewerAssignmentCounts] = useState<Record<string, { invited: number; accepted: number; completed: number }>>({});
+  const [recentActivity, setRecentActivity] = useState<StatusHistoryRow[]>([]);
+  const [overdueReviews, setOverdueReviews] = useState<OverdueReviewRow[]>([]);
+  const [activityProfiles, setActivityProfiles] = useState<Record<string, ProfileRow>>({});
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('ALL');
-  const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS'>('DASHBOARD');
+  const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'PUBLISHERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS'>('DASHBOARD');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedManuscriptForRevision, setSelectedManuscriptForRevision] = useState<ManuscriptRow | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [editorSearch, setEditorSearch] = useState('');
   const [reviewerSearch, setReviewerSearch] = useState('');
+  const [publisherSearch, setPublisherSearch] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
@@ -77,6 +83,12 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [reviewerInviteSpecialty, setReviewerInviteSpecialty] = useState('');
   const [reviewerInvitePassword, setReviewerInvitePassword] = useState('');
   const [generatedReviewerCredentials, setGeneratedReviewerCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [showPublisherInviteModal, setShowPublisherInviteModal] = useState(false);
+  const [publisherInviteName, setPublisherInviteName] = useState('');
+  const [publisherInviteEmail, setPublisherInviteEmail] = useState('');
+  const [publisherInviteOrganization, setPublisherInviteOrganization] = useState('');
+  const [publisherInvitePassword, setPublisherInvitePassword] = useState('');
+  const [generatedPublisherCredentials, setGeneratedPublisherCredentials] = useState<{ email: string; password: string } | null>(null);
   const [selectedEditorForDetails, setSelectedEditorForDetails] = useState<ProfileRow | null>(null);
   const [currentUserToken, setCurrentUserToken] = useState<string>('');
 
@@ -240,19 +252,86 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
     }
   };
 
+  const handleOpenPublisherInvite = () => {
+    setPublisherInviteName('');
+    setPublisherInviteEmail('');
+    setPublisherInviteOrganization('');
+    setPublisherInvitePassword(generateTempPassword());
+    setShowPublisherInviteModal(true);
+  };
+
+  const handleSendPublisherInvite = async () => {
+    const normalizedName = publisherInviteName.trim();
+    if (!normalizedName) {
+      window.alert('Please enter the publisher name before creating an account.');
+      return;
+    }
+
+    const normalizedEmail = publisherInviteEmail.trim().toLowerCase();
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+      window.alert('Please enter a valid email address for the publisher.');
+      return;
+    }
+
+    const organization = publisherInviteOrganization.trim();
+    if (!organization) {
+      window.alert('Please enter the publisher organization before creating an account.');
+      return;
+    }
+
+    const password = publisherInvitePassword.trim() || generateTempPassword();
+    if (password.length < 6) {
+      window.alert('Password must be at least 6 characters long.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const profile = await createAndActivatePublisherAccount(normalizedEmail, password, normalizedName, organization);
+
+      setGeneratedPublisherCredentials({ email: normalizedEmail, password });
+      setShowPublisherInviteModal(false);
+      setPublisherInviteName('');
+      setPublisherInviteEmail('');
+      setPublisherInviteOrganization('');
+      setPublisherInvitePassword('');
+      await load();
+      return profile;
+    } catch (error: any) {
+      window.alert(error.message || 'Unable to create the publisher account.');
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const load = async () => {
     try {
-      const [rows, approvals, editors, reviewers] = await Promise.all([
+      const [rows, approvals, editors, reviewers, publishers, activity, overdue] = await Promise.all([
         listManuscripts(),
         listPendingApprovals(),
         listActiveProfilesByRole('EDITOR'),
         listActiveProfilesByRole('REVIEWER'),
+        listActiveProfilesByRole('PUBLISHER'),
+        getRecentStatusHistory(8),
+        getOverdueReviewerAssignments(),
       ]);
       setItems(rows);
       setPendingApprovals(approvals);
       setEditorialBoardProfiles(editors);
       setReviewerProfiles(reviewers);
+      setPublisherProfiles(publishers);
       setReviewerAssignmentCounts(await getReviewerAssignmentCounts(reviewers.map((r) => r.id)));
+      setRecentActivity(activity);
+      setOverdueReviews(overdue);
+      const actorIds = activity.map((a) => a.actor_id).filter((id): id is string => !!id);
+      const reviewerIds = overdue.map((o) => o.reviewer_id).filter((id): id is string => !!id);
+      const neededIds = Array.from(new Set([...actorIds, ...reviewerIds]));
+      if (neededIds.length > 0) {
+        setActivityProfiles(await getProfilesByIds(neededIds));
+      } else {
+        setActivityProfiles({});
+      }
     } finally {
       setLoading(false);
     }
@@ -283,6 +362,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const filtered = filteredByStage.filter((m) => (m.title + m.author_name + m.id).toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredEditors = editorialBoardProfiles.filter((profile) => (profile.name + profile.email + profile.role).toLowerCase().includes(editorSearch.toLowerCase()));
   const filteredReviewers = reviewerProfiles.filter((profile) => (profile.name + profile.email + profile.role).toLowerCase().includes(reviewerSearch.toLowerCase()));
+  const filteredPublishers = publisherProfiles.filter((profile) => (profile.name + profile.email + profile.role).toLowerCase().includes(publisherSearch.toLowerCase()));
   const selected = items.find((m) => m.id === selectedId) || null;
   const totalCount = items.length;
   const stageCounts = {
@@ -298,8 +378,8 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const isManuscriptQueueSection = activeSection === 'MANUSCRIPT_QUEUE';
   const isEditorialBoardSection = activeSection === 'EDITORIAL_BOARD';
   const isReviewersSection = activeSection === 'REVIEWERS';
+  const isPublishersSection = activeSection === 'PUBLISHERS';
   const isReportsSection = activeSection === 'REPORTS';
-  const isProtocolsSection = activeSection === 'PROTOCOLS';
   const isCommunicationsSection = activeSection === 'COMMUNICATIONS';
   const isSettingsSection = activeSection === 'SETTINGS';
   const isAuditTrailSection = activeSection === 'AUDIT_TRAIL';
@@ -353,6 +433,15 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
               <span>Reviewers</span>
             </button>
             <button
+              onClick={() => { setActiveSection('PUBLISHERS'); setSelectedId(null); }}
+              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
+                isPublishersSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <Building2 className="w-4 h-4" />
+              <span>Publishers</span>
+            </button>
+            <button
               onClick={() => { setActiveSection('REPORTS'); setSelectedId(null); }}
               className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
                 isReportsSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
@@ -362,13 +451,13 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
               <span>Reports & Analytics</span>
             </button>
             <button
-              onClick={() => { setActiveSection('PROTOCOLS'); setSelectedId(null); }}
+              onClick={() => { setActiveSection('PENDING_APPROVALS'); setSelectedId(null); }}
               className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
-                isProtocolsSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
+                isPendingApprovalsSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
               }`}
             >
-              <SlidersHorizontal className="w-4 h-4" />
-              <span>Protocols</span>
+              <ShieldCheck className="w-4 h-4" />
+              <span>Pending Approvals</span>
             </button>
             <button
               onClick={() => { setActiveSection('COMMUNICATIONS'); setSelectedId(null); }}
@@ -403,7 +492,15 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
         <div className="flex-1 bg-[#00170f] md:p-3 overflow-hidden flex flex-col min-h-0">
           <main className="flex-1 bg-slate-50 md:rounded-3xl border border-[#002b1d]/20 p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
             {isDashboardSection ? (
-              <DashboardOverviewScreen items={items} stageCounts={stageCounts} pendingApprovals={pendingApprovals.length} />
+              <DashboardOverviewScreen
+                items={items}
+                stageCounts={stageCounts}
+                pendingApprovals={pendingApprovals.length}
+                recentActivity={recentActivity}
+                overdueReviews={overdueReviews}
+                profiles={activityProfiles}
+                loading={loading}
+              />
             ) : isManuscriptQueueSection ? (
               selected ? (
                 <CoordinatorManuscriptDetail manuscript={selected} showAllFiles={tab === 'ALL'} onBack={() => setSelectedId(null)} onChanged={load} />
@@ -440,6 +537,15 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
                 onSearch={setReviewerSearch}
                 onInviteReviewer={handleOpenReviewerInvite}
                 onReviewerDetails={setSelectedEditorForDetails}
+              />
+            ) : isPublishersSection ? (
+              <PublishersScreen
+                profiles={filteredPublishers}
+                loading={loading}
+                search={publisherSearch}
+                onSearch={setPublisherSearch}
+                onInvitePublisher={handleOpenPublisherInvite}
+                onPublisherDetails={setSelectedEditorForDetails}
               />
             ) : isReportsSection ? (
               <ReportsAnalyticsScreen totalCount={totalCount} stageCounts={stageCounts} pendingApprovals={pendingApprovals.length} editors={editorialBoardProfiles.length} reviewers={reviewerProfiles.length} />
@@ -506,6 +612,29 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
               </div>
             </div>
           ) : null}
+          {generatedPublisherCredentials ? (
+            <div className="rounded-3xl border border-violet-100 bg-violet-50 p-5 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-slate-900">Temporary publisher login</p>
+                  <p className="mt-1 text-sm text-slate-600">Use the generated email and password to login temporarily.</p>
+                </div>
+                <button onClick={() => setGeneratedPublisherCredentials(null)} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  Dismiss
+                </button>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Email</p>
+                  <p className="mt-2 font-semibold text-slate-900 break-words">{generatedPublisherCredentials.email}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Password</p>
+                  <p className="mt-2 font-semibold text-slate-900 break-words">{generatedPublisherCredentials.password}</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
           </main>
           <InviteEditorialMemberModal
             open={showInviteModal}
@@ -536,6 +665,20 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
             onPasswordChange={setReviewerInvitePassword}
             onGeneratePassword={() => setReviewerInvitePassword(generateTempPassword())}
             onSubmit={handleSendReviewerInvite}
+          />
+          <InvitePublisherModal
+            open={showPublisherInviteModal}
+            onClose={() => setShowPublisherInviteModal(false)}
+            name={publisherInviteName}
+            email={publisherInviteEmail}
+            organization={publisherInviteOrganization}
+            password={publisherInvitePassword}
+            onNameChange={setPublisherInviteName}
+            onEmailChange={setPublisherInviteEmail}
+            onOrganizationChange={setPublisherInviteOrganization}
+            onPasswordChange={setPublisherInvitePassword}
+            onGeneratePassword={() => setPublisherInvitePassword(generateTempPassword())}
+            onSubmit={handleSendPublisherInvite}
           />
           {selectedEditorForDetails && (
             <EditorDetailsModal
@@ -1055,9 +1198,55 @@ function InviteReviewerModal({ open, onClose, name, email, specialty, password, 
   );
 }
 
-function DashboardOverviewScreen({ items, stageCounts, pendingApprovals }: { items: ManuscriptRow[]; stageCounts: { submitted: number; underReview: number; decisionPending: number; revisionRequested: number; }; pendingApprovals: number; }) {
+function useLiveClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+  return now;
+}
+
+function formatRelativeTime(iso: string) {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} min${diffMin === 1 ? '' : 's'} ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? '' : 's'} ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
+}
+
+const ACTIVITY_LABELS: Record<ManuscriptStatus, string> = {
+  DRAFT: 'moved to draft',
+  SUBMITTED: 'was submitted',
+  EDITOR_REVIEW: 'entered desk screening',
+  UNDER_REVIEW: 'entered peer review',
+  REVISION_REQUESTED: 'was sent back for revision',
+  AWAITING_DECISION: 'reached the decision gate',
+  ACCEPTED: 'was accepted',
+  PUBLISHED: 'was published',
+  REJECTED: 'was rejected',
+};
+
+function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentActivity, overdueReviews, profiles, loading }: {
+  items: ManuscriptRow[];
+  stageCounts: { submitted: number; underReview: number; awaitingDecision: number; done: number };
+  pendingApprovals: number;
+  recentActivity: StatusHistoryRow[];
+  overdueReviews: OverdueReviewRow[];
+  profiles: Record<string, ProfileRow>;
+  loading: boolean;
+}) {
+  const now = useLiveClock();
   const screeningCount = items.filter((m) => m.status === 'EDITOR_REVIEW').length;
   const productionCount = items.filter((m) => ['ACCEPTED', 'PUBLISHED'].includes(m.status)).length;
+  const SLA_SCREENING_DAYS = 7;
+  const overdueSubmissions = items.filter((m) => m.status === 'SUBMITTED' && m.submitted_at && (Date.now() - new Date(m.submitted_at).getTime()) / 86400000 > SLA_SCREENING_DAYS);
+  const manuscriptsById = Object.fromEntries(items.map((m) => [m.id, m]));
+  const hasSlaWarnings = overdueReviews.length > 0 || overdueSubmissions.length > 0;
 
   return (
     <div className="space-y-5">
@@ -1067,7 +1256,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals }: { ite
           <h1 className="mt-2 text-3xl font-black text-slate-900">Monitor editorial pipeline, decisions backlog, and active SLAs.</h1>
         </div>
         <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm">
-          <Clock className="w-3.5 h-3.5 text-slate-400" /> June 25, 2026
+          <Clock className="w-3.5 h-3.5 text-slate-400" /> {now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} · {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </div>
       </div>
 
@@ -1125,10 +1314,10 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals }: { ite
             </div>
             <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">4</span>
           </div>
-          <p className="mt-3 text-3xl font-black text-slate-900">{stageCounts.decisionPending}</p>
+          <p className="mt-3 text-3xl font-black text-slate-900">{stageCounts.awaitingDecision}</p>
           <p className="mt-2 text-sm text-violet-700">Awaiting editorial judgment.</p>
           <div className="mt-4 h-2 rounded-full bg-violet-200">
-            <div className="h-2 rounded-full bg-violet-600" style={{ width: `${Math.min(100, stageCounts.decisionPending * 8)}%` }} />
+            <div className="h-2 rounded-full bg-violet-600" style={{ width: `${Math.min(100, stageCounts.awaitingDecision * 8)}%` }} />
           </div>
         </div>
 
@@ -1155,43 +1344,61 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals }: { ite
             <span className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Review required</span>
           </div>
           <div className="mt-4 space-y-3">
-            <div className="rounded-2xl bg-rose-50 border border-rose-100 p-4">
-              <p className="text-sm font-bold text-rose-700">JMS-2026-220 — Overdue Review Round</p>
-              <p className="mt-1 text-sm text-slate-600">Assigned reviewer Dr. Elizabeth Vance is overdue on decision feedback check by 4 days.</p>
-            </div>
-            <div className="rounded-2xl bg-amber-50 border border-amber-100 p-4">
-              <p className="text-sm font-bold text-amber-700">Desk Screening Threshold Warning</p>
-              <p className="mt-1 text-sm text-slate-600">4 submissions have been in unassigned screening queue for over the SLA limit of 7 days.</p>
-            </div>
+            {loading ? (
+              <div className="flex items-center justify-center py-10 text-slate-400"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading...</div>
+            ) : !hasSlaWarnings ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No active SLA exceptions right now.</div>
+            ) : (
+              <>
+                {overdueReviews.map((review) => {
+                  const manuscript = manuscriptsById[review.manuscript_id];
+                  const reviewer = profiles[review.reviewer_id];
+                  const daysOverdue = Math.max(1, Math.floor((Date.now() - new Date(review.due_date).getTime()) / 86400000));
+                  return (
+                    <div key={review.id} className="rounded-2xl bg-rose-50 border border-rose-100 p-4">
+                      <p className="text-sm font-bold text-rose-700">{manuscript ? manuscript.title : review.manuscript_id} — Overdue Review Round</p>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Assigned reviewer {reviewer?.name || 'Unknown reviewer'} is overdue on decision feedback by {daysOverdue} day{daysOverdue === 1 ? '' : 's'}.
+                      </p>
+                    </div>
+                  );
+                })}
+                {overdueSubmissions.length > 0 && (
+                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-4">
+                    <p className="text-sm font-bold text-amber-700">Desk Screening Threshold Warning</p>
+                    <p className="mt-1 text-sm text-slate-600">{overdueSubmissions.length} submission{overdueSubmissions.length === 1 ? '' : 's'} have been in unassigned screening queue for over the SLA limit of {SLA_SCREENING_DAYS} days.</p>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
 
         <div className="rounded-3xl bg-white border border-slate-200 p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <p className="text-xs uppercase tracking-[0.24em] text-slate-400 font-bold">Recent peer-review actions</p>
-            <span className="text-[11px] uppercase tracking-[0.24em] text-slate-400">SMTP logs</span>
+            <p className="text-xs uppercase tracking-[0.24em] text-slate-400 font-bold">Recent pipeline activity</p>
+            <span className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Live</span>
           </div>
           <div className="mt-4 space-y-4 text-sm text-slate-700">
-            <div className="border-b border-slate-200 pb-3">
-              <p className="font-semibold text-slate-900">Your manuscript JMS-2026-220 is under review</p>
-              <p className="mt-1 text-xs text-slate-500">Recipient: James Carter (Author)</p>
-              <p className="mt-1 text-[11px] text-slate-400">Jun 25, 2026 10:30 AM</p>
-            </div>
-            <div className="border-b border-slate-200 pb-3">
-              <p className="font-semibold text-slate-900">Review invitation for manuscript JMS-2…</p>
-              <p className="mt-1 text-xs text-slate-500">Recipient: Dr. Michael Lee (Reviewer)</p>
-              <p className="mt-1 text-[11px] text-slate-400">Jun 25, 2026 09:15 AM</p>
-            </div>
-            <div className="border-b border-slate-200 pb-3">
-              <p className="font-semibold text-slate-900">Editorial decision for manuscript JMS-2…</p>
-              <p className="mt-1 text-xs text-slate-500">Recipient: Emily Watson (Author)</p>
-              <p className="mt-1 text-[11px] text-slate-400">Jun 24, 2026 04:20 PM</p>
-            </div>
-            <div>
-              <p className="font-semibold text-slate-900">Reminder: Review overdue for JMS-202…</p>
-              <p className="mt-1 text-xs text-slate-500">Recipient: Dr. Priya Sharma (Reviewer)</p>
-              <p className="mt-1 text-[11px] text-slate-400">Jun 24, 2026 11:10 AM</p>
-            </div>
+            {loading ? (
+              <div className="flex items-center justify-center py-10 text-slate-400"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading...</div>
+            ) : recentActivity.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No pipeline activity yet.</div>
+            ) : (
+              recentActivity.map((event, idx) => {
+                const manuscript = manuscriptsById[event.manuscript_id];
+                const actor = event.actor_id ? profiles[event.actor_id] : null;
+                return (
+                  <div key={event.id} className={idx < recentActivity.length - 1 ? 'border-b border-slate-200 pb-3' : ''}>
+                    <p className="font-semibold text-slate-900">
+                      {manuscript ? manuscript.title : event.manuscript_id} {ACTIVITY_LABELS[event.to_status] || 'was updated'}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">By: {actor?.name || 'System'}</p>
+                    <p className="mt-1 text-[11px] text-slate-400">{formatRelativeTime(event.created_at)}</p>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       </div>
@@ -1199,7 +1406,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals }: { ite
   );
 }
 
-function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onOpen, onRefresh, tab, setTab, stageCounts }: { items: ManuscriptRow[]; filtered: ManuscriptRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onOpen: (id: string | null) => void; onRefresh: () => void; tab: string; setTab: (value: string) => void; stageCounts?: { submitted: number; underReview: number; awaitingDecision: number; done: number }; }) {
+function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onOpen, onRefresh, tab, setTab, stageCounts }: { items: ManuscriptRow[]; filtered: ManuscriptRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onOpen: (id: string | null) => void; onRefresh: () => void; tab: string; setTab: (value: string) => void; stageCounts?: { all: number; submitted: number; editorReview: number; underReview: number; awaitingDecision: number; done: number }; }) {
   const getStageCount = (stageKey: string) => {
     if (!stageCounts) return 0;
     switch (stageKey) {
@@ -1384,7 +1591,174 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
   );
 }
 
-function ReportsAnalyticsScreen({ totalCount, stageCounts, pendingApprovals, editors, reviewers }: { totalCount: number; stageCounts: { submitted: number; underReview: number; decisionPending: number; revisionRequested: number; }; pendingApprovals: number; editors: number; reviewers: number; }) {
+function PublishersScreen({ profiles, loading, search, onSearch, onInvitePublisher, onPublisherDetails }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInvitePublisher: () => void; onPublisherDetails: (publisher: ProfileRow) => void; }) {
+  const totalPublishers = profiles.length;
+  const activePublishers = profiles.filter((p) => p.status === 'ACTIVE').length;
+  const pendingInvitations = profiles.filter((p) => p.status === 'PENDING_APPROVAL' || p.status === 'INVITED').length;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900">Publishers</h1>
+          <p className="text-sm text-slate-500 mt-1">Manage publisher accounts for accepted manuscripts moving into production.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button onClick={onInvitePublisher} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] transition">
+            <UserPlus className="w-4 h-4" /> Invite Publisher
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200 border-l-4 border-violet-500">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Total Publishers</p>
+          <p className="mt-3 text-3xl font-black text-slate-900">{totalPublishers}</p>
+        </div>
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200 border-l-4 border-emerald-500">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Active</p>
+          <p className="mt-3 text-3xl font-black text-slate-900">{activePublishers}</p>
+        </div>
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200 border-l-4 border-amber-500">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Pending</p>
+          <p className="mt-3 text-3xl font-black text-slate-900">{pendingInvitations}</p>
+        </div>
+      </div>
+
+      <div className="rounded-3xl bg-white border border-slate-200 p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Search publishers</p>
+            <p className="mt-1 text-sm text-slate-600">Find publishers by name, email, or status.</p>
+          </div>
+          <div className="min-w-[260px]">
+            <input
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder="Search publisher name or email"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751] focus:ring-2 focus:ring-[#008751]/20"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
+            <tr>
+              <th className="px-4 py-3">Publisher</th>
+              <th className="px-4 py-3">Email</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {loading ? (
+              <tr>
+                <td colSpan={4} className="px-4 py-10 text-center text-slate-400">Loading publisher profiles...</td>
+              </tr>
+            ) : profiles.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="px-4 py-10 text-center text-slate-400">No publishers found. Invite one to get started.</td>
+              </tr>
+            ) : (
+              profiles.map((profile) => {
+                const status = profile.status === 'ACTIVE' ? 'Active' : profile.status === 'INVITED' || profile.status === 'PENDING_APPROVAL' ? 'Pending' : profile.status === 'DECLINED' ? 'Declined' : 'Active';
+                return (
+                  <tr key={profile.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-4 font-semibold text-slate-900">{profile.name || 'Unknown Publisher'}</td>
+                    <td className="px-4 py-4 text-slate-600">{profile.email}</td>
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${status === 'Active' ? 'bg-emerald-100 text-emerald-700' : status === 'Pending' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
+                        {status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-right">
+                      <button onClick={() => onPublisherDetails(profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function InvitePublisherModal({ open, onClose, name, email, organization, password, onNameChange, onEmailChange, onOrganizationChange, onPasswordChange, onGeneratePassword, onSubmit }: { open: boolean; onClose: () => void; name: string; email: string; organization: string; password: string; onNameChange: (value: string) => void; onEmailChange: (value: string) => void; onOrganizationChange: (value: string) => void; onPasswordChange: (value: string) => void; onGeneratePassword: () => void; onSubmit: () => void; }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-[30px] overflow-hidden bg-white shadow-2xl border border-slate-200">
+        <div className="relative bg-slate-950 px-8 py-6">
+          <div className="uppercase tracking-[0.35em] text-xs text-emerald-300 font-semibold">Publisher outreach</div>
+          <h2 className="mt-3 text-2xl font-black text-white">Create publisher account</h2>
+          <button onClick={onClose} className="absolute right-5 top-5 rounded-full p-2 text-slate-400 hover:bg-white/10">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="space-y-5 px-8 py-8 bg-slate-50">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold">Publisher name</label>
+            <input
+              value={name}
+              onChange={(e) => onNameChange(e.target.value)}
+              placeholder="Jordan Lee"
+              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold">Email address</label>
+            <input
+              value={email}
+              onChange={(e) => onEmailChange(e.target.value)}
+              placeholder="publisher@example.com"
+              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold">Organization</label>
+            <input
+              value={organization}
+              onChange={(e) => onOrganizationChange(e.target.value)}
+              placeholder="Springer Nature"
+              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold">Temporary password</label>
+            <div className="flex gap-2">
+              <input
+                value={password}
+                onChange={(e) => onPasswordChange(e.target.value)}
+                placeholder="Enter or generate a password"
+                className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+              />
+              <button type="button" onClick={onGeneratePassword} className="rounded-2xl border border-slate-300 bg-white px-3 py-3 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                Generate
+              </button>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3 text-xs text-violet-800">
+            No email delivery is connected yet. The login credentials will be shown directly in the coordinator dashboard after the account is created.
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <button onClick={onClose} className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+              Cancel
+            </button>
+            <button onClick={onSubmit} className="rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043]">
+              Create Publisher Account
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReportsAnalyticsScreen({ totalCount, stageCounts, pendingApprovals, editors, reviewers }: { totalCount: number; stageCounts: { submitted: number; underReview: number; awaitingDecision: number; done: number; }; pendingApprovals: number; editors: number; reviewers: number; }) {
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -1412,7 +1786,7 @@ function ReportsAnalyticsScreen({ totalCount, stageCounts, pendingApprovals, edi
         </div>
         <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200">
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Decision Pending</p>
-          <p className="mt-3 text-3xl font-black text-slate-900">{stageCounts.decisionPending}</p>
+          <p className="mt-3 text-3xl font-black text-slate-900">{stageCounts.awaitingDecision}</p>
         </div>
         <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200">
           <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Pending Approvals</p>
@@ -1437,681 +1811,6 @@ function ReportsAnalyticsScreen({ totalCount, stageCounts, pendingApprovals, edi
           <p className="text-xs text-slate-500 mt-1">Review queue utilization</p>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ManuscriptDetail({ manuscript, onBack, onChanged }: { manuscript: ManuscriptRow; onBack: () => void; onChanged: () => void }) {
-  const [history, setHistory] = useState<StatusHistoryRow[]>([]);
-  const [editorAssignments, setEditorAssignments] = useState<EditorAssignmentRow[]>([]);
-  const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>([]);
-  const [suggested, setSuggested] = useState<SuggestedReviewerRow[]>([]);
-  const [profiles, setProfiles] = useState<Record<string, ProfileRow>>({});
-  const [revisions, setRevisions] = useState<RevisionRow[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [showReviewerConfirmation, setShowReviewerConfirmation] = useState(false);
-  const [pendingReviewerAssignment, setPendingReviewerAssignment] = useState<{ r1: string; r2: string } | null>(null);
-
-  const load = async () => {
-    const [h, ea, ra, sr, rev] = await Promise.all([
-      getStatusHistory(manuscript.id), getEditorAssignments(manuscript.id), getReviewerAssignments(manuscript.id), getSuggestedReviewers(manuscript.id), getRevisions(manuscript.id)
-    ]);
-    setHistory(h);
-    setEditorAssignments(ea);
-    setReviewerAssignments(ra);
-    setSuggested(sr);
-    setRevisions(rev);
-    const ids = [manuscript.author_id, manuscript.assigned_editor_id, ...ea.map((a) => a.editor_id), ...ra.map((a) => a.reviewer_id)].filter(Boolean) as string[];
-    setProfiles(await getProfilesByIds(ids));
-  };
-
-  useEffect(() => { load(); }, [manuscript.id]);
-
-  // Realtime subscription to reviewer_assignments for live 0/2 → 1/2 → 2/2 updates
-  useEffect(() => {
-    const channel = supabase
-      .channel(`reviewer_assignments:${manuscript.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviewer_assignments', filter: `manuscript_id=eq.${manuscript.id}` }, () => {
-        load();
-      })
-      .subscribe();
-
-    return () => { channel.unsubscribe(); };
-  }, [manuscript.id]);
-
-  // Realtime subscription to suggested reviewers (from Author or Editor)
-  useEffect(() => {
-    const channel = supabase
-      .channel(`suggested_reviewers:${manuscript.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_suggested_reviewers', filter: `manuscript_id=eq.${manuscript.id}` }, () => {
-        load();
-      })
-      .subscribe();
-
-    return () => { channel.unsubscribe(); };
-  }, [manuscript.id]);
-
-  const activeEditorAssignment = editorAssignments.find((a) => a.status === 'ACCEPTED') || editorAssignments[0];
-  const editorHasRecommended = !!activeEditorAssignment?.recommendation;
-
-  return (
-    <div className="space-y-5">
-      <button onClick={onBack} className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-700 cursor-pointer">
-        <ArrowLeft className="w-3.5 h-3.5" /> Back to queue
-      </button>
-
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="font-mono text-xs text-slate-400">{manuscript.id}</p>
-            <h2 className="text-lg font-black text-slate-900 mt-1">{manuscript.title}</h2>
-            <p className="text-xs text-slate-500 mt-1">by {manuscript.author_name} &middot; {manuscript.author_email}</p>
-          </div>
-          <StatusBadge status={manuscript.status} latestRevision={getLatestRevision(revisions)} />
-        </div>
-        <p className="text-sm text-slate-600 mt-3 leading-relaxed">{manuscript.abstract}</p>
-      </div>
-
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">{error}</div>}
-
-      {manuscript.status === 'SUBMITTED' && (
-        <AssignEditorPanel
-          busy={busy}
-          onAssign={async (editorId) => {
-            setBusy(true); setError('');
-            try { await assignEditor(manuscript.id, editorId); await load(); onChanged(); }
-            catch (e: any) { setError(e.message); }
-            finally { setBusy(false); }
-          }}
-        />
-      )}
-
-      {editorAssignments.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-1">Review Evaluation</h3>
-          <p className="text-xs text-slate-500 mb-4">The editor's complete assessment -- review this before making a decision.</p>
-          {editorAssignments.map((a) => (
-            <div key={a.id} className="mb-4 last:mb-0">
-              <div className="flex items-center justify-between text-xs mb-2">
-                <span className="font-bold text-slate-700">{profiles[a.editor_id]?.name || a.editor_id}</span>
-                <span className={`px-2 py-0.5 rounded-full font-bold uppercase text-[10px] ${a.status === 'ACCEPTED' ? 'bg-emerald-50 text-emerald-700' : a.status === 'DECLINED' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{a.status}</span>
-              </div>
-              {a.assessment_status === 'SUBMITTED' && (
-                <div className="bg-slate-50 rounded-lg p-4 text-xs space-y-3">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                    {([
-                      ['scientificMerit', 'Scientific Merit', a.scientific_merit],
-                      ['noveltyInnovation', 'Novelty', a.novelty_innovation],
-                      ['methodologyQuality', 'Methodology', a.methodology_quality],
-                      ['literatureAdequacy', 'Literature', a.literature_adequacy],
-                      ['ethicalCompliance', 'Ethics', a.ethical_compliance],
-                      ['dataReliability', 'Data Reliability', a.data_reliability],
-                      ['writingQuality', 'Writing', a.writing_quality],
-                    ] as const).map(([key, label, value]) => (
-                      <div key={key}>
-                        <Score label={label} value={value} />
-                        {a.criteria_reasons?.[key] && (
-                          <p className="text-[10px] text-slate-500 italic mt-1 px-1">"{a.criteria_reasons[key]}"</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  <p><strong>Strengths:</strong> {a.strengths}</p>
-                  <p><strong>Weaknesses:</strong> {a.weaknesses}</p>
-                  {a.mandatory_revisions && <p><strong>Mandatory Revisions:</strong> {a.mandatory_revisions}</p>}
-                  <p><strong>Comments to Coordinator:</strong> {a.comments_to_coordinator}</p>
-                </div>
-              )}
-              {a.recommendation && (
-                <p className="text-xs mt-2"><strong>Editor recommendation:</strong> <span className="font-bold text-[#008751]">{a.recommendation.replace(/_/g, ' ')}</span></p>
-              )}
-            </div>
-          ))}
-
-          {suggested.length > 0 && (() => {
-            const merged = new Map<string, { id: string; name: string; email: string; note: string | null; sources: Set<'AUTHOR' | 'EDITOR'> }>();
-            for (const s of suggested) {
-              const key = s.email.trim().toLowerCase();
-              const existing = merged.get(key);
-              if (existing) {
-                existing.sources.add(s.suggested_by);
-                if (!existing.note && s.note) existing.note = s.note;
-              } else {
-                merged.set(key, { id: s.id, name: s.name, email: s.email, note: s.note, sources: new Set([s.suggested_by]) });
-              }
-            }
-            const uniqueReviewers = Array.from(merged.values());
-            return (
-              <div className="mt-3 pt-3 border-t border-slate-100">
-                <p className="text-xs font-bold text-slate-600 mb-2">Suggested Reviewers ({uniqueReviewers.length})</p>
-                <div className="space-y-2">
-                  {uniqueReviewers.map((s) => {
-                    const hasAuthor = s.sources.has('AUTHOR');
-                    const hasEditor = s.sources.has('EDITOR');
-                    const badgeLabel = hasAuthor && hasEditor
-                      ? 'Suggested by Author & Editor'
-                      : hasAuthor
-                      ? 'Suggested by Author'
-                      : 'Suggested by Editor';
-                    const badgeStyle = hasAuthor && hasEditor
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      : hasAuthor
-                      ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                      : 'bg-teal-50 text-teal-700 border border-teal-200';
-                    return (
-                      <div key={s.id} className="border border-slate-200 rounded-lg p-3 flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold text-slate-900">{s.name}</p>
-                          <p className="text-xs text-slate-600">{s.email}</p>
-                          {s.note && <p className="text-xs text-slate-500 mt-0.5">{s.note}</p>}
-                        </div>
-                        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${badgeStyle}`}>
-                          {badgeLabel}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      )}
-
-      {manuscript.status === 'EDITOR_REVIEW' && activeEditorAssignment?.assessment_status === 'SUBMITTED' && (
-        <AssignReviewersPanel
-          busy={busy}
-          onAssign={(r1, r2) => {
-            setPendingReviewerAssignment({ r1, r2 });
-            setShowReviewerConfirmation(true);
-          }}
-        />
-      )}
-
-      {reviewerAssignments.length > 0 && (
-        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-3">Review Progress</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-            <div className="bg-white rounded-xl border border-slate-200 p-3">
-              <p className="text-slate-500 uppercase tracking-wide mb-1">Invited</p>
-              <p className="font-black text-slate-900">{reviewerAssignments.filter((r) => r.status === 'INVITED').length}</p>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-3">
-              <p className="text-slate-500 uppercase tracking-wide mb-1">Accepted</p>
-              <p className="font-black text-slate-900">{reviewerAssignments.filter((r) => r.status === 'ACCEPTED').length}</p>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-3">
-              <p className="text-slate-500 uppercase tracking-wide mb-1">Submitted</p>
-              <p className="font-black text-slate-900">{reviewerAssignments.filter((r) => r.status === 'SUBMITTED').length}</p>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-3">
-              <p className="text-slate-500 uppercase tracking-wide mb-1">Declined</p>
-              <p className="font-black text-slate-900">{reviewerAssignments.filter((r) => r.status === 'DECLINED').length}</p>
-            </div>
-          </div>
-          {manuscript.status === 'AWAITING_DECISION' && (
-            <div className="mt-4 rounded-2xl bg-sky-50 border border-sky-200 p-4 text-sky-700 text-xs">
-              All reviewer reports are in. The editor may now submit a final recommendation for Coordinator verification.
-            </div>
-          )}
-        </div>
-      )}
-      {reviewerAssignments.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-2"><Users className="w-4 h-4" /> Reviewer Reports</h3>
-          <div className="space-y-4">
-            {reviewerAssignments.map((r, idx) => (
-              <div key={r.id} className="border border-slate-200 rounded-lg overflow-hidden">
-                <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-                  <div>
-                    <span className="font-bold text-slate-900">Reviewer {idx + 1}</span>
-                    <p className="text-xs text-slate-600">{profiles[r.reviewer_id]?.name || r.reviewer_id}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {r.submitted_at && (
-                      <p className="text-xs text-slate-500">
-                        Submitted: {new Date(r.submitted_at).toLocaleString()}
-                      </p>
-                    )}
-                    <span className={`px-2 py-1 rounded-full font-bold uppercase text-[10px] ${
-                      r.status === 'SUBMITTED' ? 'bg-emerald-50 text-emerald-700' : r.status === 'DECLINED' ? 'bg-red-50 text-red-700' : r.status === 'ACCEPTED' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
-                    }`}>{r.status}</span>
-                  </div>
-                </div>
-                {r.status === 'SUBMITTED' && (
-                  <div className="p-4 space-y-3">
-                    <div>
-                      <p className="text-xs font-bold text-slate-900 mb-2">Assessment Scores</p>
-                      <div className="grid grid-cols-4 gap-2">
-                        {[
-                          {label: 'Scientific Merit', value: r.scientific_merit},
-                          {label: 'Novelty', value: r.novelty_innovation},
-                          {label: 'Methodology', value: r.methodology_quality},
-                          {label: 'Literature', value: r.literature_adequacy},
-                          {label: 'Ethics', value: r.ethical_compliance},
-                          {label: 'Data Reliability', value: r.data_reliability},
-                          {label: 'Writing', value: r.writing_quality}
-                        ].map((score) => (
-                          <div key={score.label} className="bg-white rounded px-2 py-1.5 border border-slate-200">
-                            <p className="text-slate-400 text-[10px] uppercase">{score.label}</p>
-                            <p className="font-black text-slate-800">{score.value ?? '--'}/10</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-900 mb-1"><strong>Recommendation:</strong> {r.recommendation?.replace(/_/g, ' ')}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-900 mb-1">To Author:</p>
-                      <p className="text-xs text-slate-600 bg-slate-50 p-2 rounded">{r.comments_to_author || '(No comments)'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-900 mb-1">To Editor:</p>
-                      <p className="text-xs text-slate-600 bg-slate-50 p-2 rounded">{r.comments_to_editor || '(No comments)'}</p>
-                    </div>
-                  </div>
-                )}
-                {r.status !== 'SUBMITTED' && (
-                  <div className="p-4">
-                    <p className="text-xs text-slate-500">
-                      {r.status === 'INVITED' && '⏳ Awaiting reviewer response to invitation'}
-                      {r.status === 'ACCEPTED' && '✓ Reviewer has accepted and is preparing assessment'}
-                      {r.status === 'DECLINED' && '✕ Reviewer declined this assignment'}
-                    </p>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {manuscript.status === 'AWAITING_DECISION' && (
-        <PublishDecisionPanel
-          busy={busy}
-          editorHasRecommended={editorHasRecommended}
-          recommendation={activeEditorAssignment?.recommendation ?? null}
-          reviewerAssignments={reviewerAssignments}
-          onPublish={async (decision, letter) => {
-            setBusy(true); setError('');
-            try { await publishDecision(manuscript.id, decision, letter); await load(); onChanged(); }
-            catch (e: any) { setError(e.message); }
-            finally { setBusy(false); }
-          }}
-        />
-      )}
-
-      {manuscript.status === 'ACCEPTED' && !manuscript.production_stage && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 mb-1">Status: Production</p>
-          <h3 className="text-sm font-black text-slate-900 mb-2">Move to Publish</h3>
-          <p className="text-xs text-slate-600 mb-4">
-            Send this accepted manuscript to the Publisher for production and galley preparation.
-          </p>
-          <button
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true); setError('');
-              try {
-                await sendToPublisher(manuscript.id);
-                await load();
-                onChanged();
-              } catch (e: any) {
-                setError(e.message);
-              } finally {
-                setBusy(false);
-              }
-            }}
-            className="w-full bg-[#008751] hover:bg-[#007043] disabled:bg-slate-300 text-white font-bold py-2.5 rounded-lg transition"
-          >
-            {busy ? 'Moving...' : 'Move to Publish'}
-          </button>
-        </div>
-      )}
-
-      {manuscript.status === 'ACCEPTED' && manuscript.production_stage && (
-        <PublishProductionPanel
-          busy={busy}
-          onPublish={async (doi, volume, issue) => {
-            setBusy(true); setError('');
-            try { await markPublished(manuscript.id, doi, volume, issue); await load(); onChanged(); }
-            catch (e: any) { setError(e.message); }
-            finally { setBusy(false); }
-          }}
-        />
-      )}
-
-      <div>
-        <h3 className="text-sm font-black text-slate-900 mb-3">Revision History</h3>
-        <RevisionHistoryPanel manuscriptId={manuscript.id} profiles={profiles} />
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
-        <h3 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-2"><Clock className="w-4 h-4" /> Timeline</h3>
-        <div className="space-y-3">
-          {history.map((h) => (
-            <div key={h.id} className="flex items-center gap-3 text-xs">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#008751] shrink-0" />
-              <span className="text-slate-400 font-mono w-40 shrink-0">{new Date(h.created_at).toLocaleString()}</span>
-              <span className="font-bold text-slate-700">{h.to_status.replace(/_/g, ' ')}</span>
-              {h.note && <span className="text-slate-500">&mdash; {h.note}</span>}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <AssignmentConfirmationDialog
-        isOpen={showReviewerConfirmation}
-        title="Confirm Reviewer Assignment"
-        message="Do you confirm the assignment of these 2 peer reviewers to this manuscript?"
-        details={pendingReviewerAssignment ?
-          `Reviewer 1: ${profiles[pendingReviewerAssignment.r1]?.name || 'Unknown'}\nReviewer 2: ${profiles[pendingReviewerAssignment.r2]?.name || 'Unknown'}`
-          : ''}
-        confirmText="Confirm Assign"
-        cancelText="Cancel"
-        isLoading={busy}
-        onConfirm={async () => {
-          if (!pendingReviewerAssignment) return;
-          setBusy(true);
-          setError('');
-          try {
-            await assignReviewers(manuscript.id, [pendingReviewerAssignment.r1, pendingReviewerAssignment.r2]);
-            await load();
-            onChanged();
-            setShowReviewerConfirmation(false);
-            setPendingReviewerAssignment(null);
-          } catch (e: any) {
-            setError(e.message);
-          } finally {
-            setBusy(false);
-          }
-        }}
-        onCancel={() => {
-          setShowReviewerConfirmation(false);
-          setPendingReviewerAssignment(null);
-        }}
-      />
-    </div>
-  );
-}
-
-function Score({ label, value }: { label: string; value: number | null }) {
-  return (
-    <div className="bg-white rounded px-2 py-1.5 border border-slate-200">
-      <p className="text-slate-400 text-[10px] uppercase">{label}</p>
-      <p className="font-black text-slate-800">{value ?? '--'}/10</p>
-    </div>
-  );
-}
-
-function AssignEditorPanel({ busy, onAssign }: { busy: boolean; onAssign: (editorId: string) => void }) {
-  const [editors, setEditors] = useState<ProfileRow[]>([]);
-  const [selected, setSelected] = useState('');
-
-  useEffect(() => { listActiveProfilesByRole('EDITOR').then(setEditors); }, []);
-
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6">
-      <h3 className="text-sm font-black text-slate-900 mb-3">Assign an Editor</h3>
-      {editors.length === 0 ? (
-        <p className="text-xs text-slate-400">No active editor accounts yet.</p>
-      ) : (
-        <div className="flex items-center gap-2">
-          <select value={selected} onChange={(e) => setSelected(e.target.value)} className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs">
-            <option value="">-- Select Editor --</option>
-            {editors.map((e) => <option key={e.id} value={e.id}>{e.name} ({e.email})</option>)}
-          </select>
-          <button disabled={!selected || busy} onClick={() => onAssign(selected)} className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50">
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Assign'}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AssignReviewersPanel({ busy, onAssign }: { busy: boolean; onAssign: (r1: string, r2: string) => void }) {
-  const [reviewers, setReviewers] = useState<ProfileRow[]>([]);
-  const [r1, setR1] = useState('');
-  const [r2, setR2] = useState('');
-
-  useEffect(() => { listActiveProfilesByRole('REVIEWER').then(setReviewers); }, []);
-
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6">
-      <h3 className="text-sm font-black text-slate-900 mb-3">Assign 2 Reviewers</h3>
-      {reviewers.length < 2 ? (
-        <p className="text-xs text-slate-400">Need at least 2 active reviewer accounts.</p>
-      ) : (
-        <div className="space-y-2">
-          <select value={r1} onChange={(e) => setR1(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs">
-            <option value="">-- Reviewer 1 --</option>
-            {reviewers.map((r) => <option key={r.id} value={r.id} disabled={r.id === r2}>{r.name} ({r.email})</option>)}
-          </select>
-          <select value={r2} onChange={(e) => setR2(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs">
-            <option value="">-- Reviewer 2 --</option>
-            {reviewers.map((r) => <option key={r.id} value={r.id} disabled={r.id === r1}>{r.name} ({r.email})</option>)}
-          </select>
-          <button disabled={!r1 || !r2 || busy} onClick={() => onAssign(r1, r2)} className="w-full bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50">
-            {busy ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Assign & Send Invitations'}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PublishDecisionPanel({ busy, editorHasRecommended, recommendation, reviewerAssignments, onPublish }: {
-  busy: boolean; editorHasRecommended: boolean; recommendation: string | null; reviewerAssignments?: ReviewerAssignmentRow[]; onPublish: (decision: PublishDecision, letter: string) => void;
-}) {
-  const [decision, setDecision] = useState<PublishDecision>('ACCEPT');
-  const [letter, setLetter] = useState('');
-  const [showModal, setShowModal] = useState(false);
-  const [viewMode, setViewMode] = useState<'SUMMARY' | 'REVIEWERS' | 'DECISION'>('SUMMARY');
-
-  const submittedReviews = (reviewerAssignments || []).filter((r) => r.status === 'SUBMITTED');
-  const allReviewsIn = submittedReviews.length >= 2;
-
-  if (!editorHasRecommended) {
-    return (
-      <div className="bg-sky-50 border border-sky-200 rounded-2xl p-6 text-xs text-sky-700 flex items-center gap-2">
-        <Clock className="w-4 h-4" /> Waiting for the editor's recommendation before you can verify and publish a decision.
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <div className="bg-gradient-to-r from-emerald-50 to-emerald-100/50 border border-emerald-200 rounded-2xl p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h3 className="text-sm font-black text-slate-900">Complete Review Package</h3>
-            <p className="text-xs text-slate-600 mt-1">All assessments compiled • Ready for final decision</p>
-          </div>
-          <span className={`px-3 py-1 rounded-full font-bold text-[11px] ${allReviewsIn ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-100 text-amber-700'}`}>
-            {allReviewsIn ? '✓ READY' : `${submittedReviews.length}/2 REVIEWS IN`}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          {['SUMMARY', 'REVIEWERS', 'DECISION'].map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setViewMode(mode as any)}
-              className={`px-3 py-2 rounded-lg text-xs font-bold transition ${
-                viewMode === mode
-                  ? 'bg-[#008751] text-white'
-                  : 'bg-white border border-slate-200 text-slate-700 hover:border-emerald-300'
-              }`}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
-
-        {viewMode === 'SUMMARY' && (
-          <div className="space-y-3 text-xs">
-            <div className="bg-white rounded-lg p-4 border border-slate-100">
-              <p className="font-bold text-slate-900 mb-3">Editor Assessment</p>
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  {label: 'Scientific Merit', key: 'scientific_merit'},
-                  {label: 'Novelty', key: 'novelty_innovation'},
-                  {label: 'Methodology', key: 'methodology_quality'},
-                  {label: 'Literature', key: 'literature_adequacy'},
-                  {label: 'Ethics', key: 'ethical_compliance'},
-                  {label: 'Data Reliability', key: 'data_reliability'},
-                  {label: 'Writing', key: 'writing_quality'}
-                ].map((score) => (
-                  <div key={score.key} className="bg-slate-50 rounded px-2 py-1.5 border border-slate-200">
-                    <p className="text-slate-400 text-[10px] uppercase">{score.label}</p>
-                    <p className="font-black text-slate-800">--/10</p>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-3 text-slate-600">Recommendation: <span className="font-bold text-[#008751]">{recommendation?.replace(/_/g, ' ')}</span></p>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="bg-white rounded-lg p-3 border border-slate-100">
-                <p className="text-slate-500 uppercase font-bold text-[10px] mb-1">Reviews Received</p>
-                <p className="text-2xl font-black text-slate-900">{submittedReviews.length}/2</p>
-              </div>
-              <div className="bg-white rounded-lg p-3 border border-slate-100">
-                <p className="text-slate-500 uppercase font-bold text-[10px] mb-1">Status</p>
-                <p className="font-bold text-emerald-700">{allReviewsIn ? 'All In' : 'Pending'}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {viewMode === 'REVIEWERS' && (
-          <div className="space-y-2">
-            {submittedReviews.map((r, idx) => (
-              <div key={r.id} className="bg-white rounded-lg p-3 border border-slate-100 text-xs">
-                <p className="font-bold text-slate-900 mb-2">Reviewer {idx + 1}</p>
-                <div className="space-y-1 text-slate-600">
-                  <p><strong>Recommendation:</strong> <span className="font-bold">{r.recommendation?.replace(/_/g, ' ')}</span></p>
-                  <p><strong>To Author:</strong> {r.comments_to_author?.substring(0, 80)}...</p>
-                  <p><strong>To Editor:</strong> {r.comments_to_editor?.substring(0, 80)}...</p>
-                </div>
-              </div>
-            ))}
-            {submittedReviews.length < 2 && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
-                ⏳ Waiting for {2 - submittedReviews.length} more review(s) before final decision
-              </div>
-            )}
-          </div>
-        )}
-
-        {viewMode === 'DECISION' && (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-900 mb-2">Final Decision</label>
-              <select value={decision} onChange={(e) => setDecision(e.target.value as PublishDecision)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white">
-                <option value="ACCEPT">✓ Accept - Ready for Publication</option>
-                <option value="MINOR_REVISION">◊ Minor Revisions Required</option>
-                <option value="MAJOR_REVISION">◆ Major Revisions Required</option>
-                <option value="REJECT">✕ Reject - Not Suitable</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-900 mb-2">Decision Letter to Author</label>
-              <textarea
-                value={letter}
-                onChange={(e) => setLetter(e.target.value)}
-                rows={4}
-                placeholder="Communicate the final decision and next steps clearly..."
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white font-sans"
-              />
-            </div>
-          </div>
-        )}
-
-        <div className="flex gap-2 mt-4 pt-4 border-t border-emerald-200">
-          <button
-            onClick={() => {
-              const message = window.prompt('Request clarification from the editor:', 'Please clarify...');
-              if (message) {
-                alert(`Clarification request sent to editor: "${message}"`);
-                // This would call an RPC function to create a communication record
-                // await postDiscussionMessage(manuscript.id, message, 'EDITOR_CLARIFICATION');
-              }
-            }}
-            className="flex-1 px-3 py-2 border border-slate-300 text-slate-700 font-bold text-xs rounded-lg hover:bg-slate-50 transition flex items-center justify-center gap-1.5"
-          >
-            <MessageCircle className="w-4 h-4" />
-            Return to Editor
-          </button>
-          <button
-            disabled={busy || !allReviewsIn}
-            onClick={() => setShowModal(true)}
-            className="flex-1 bg-[#008751] hover:bg-[#007043] disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer transition flex items-center justify-center gap-1.5"
-          >
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-            Publish Decision
-          </button>
-        </div>
-      </div>
-
-      {showModal && (
-        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden">
-            <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 text-white p-6">
-              <h2 className="text-lg font-black">Publish Final Decision</h2>
-              <p className="text-emerald-100 text-xs mt-1">This will notify the author of the final verdict</p>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="bg-slate-50 rounded-lg p-4 text-xs space-y-2">
-                <p><strong>Decision:</strong> <span className="font-bold text-[#008751]">{decision.replace(/_/g, ' ')}</span></p>
-                <p><strong>Letter Preview:</strong></p>
-                <p className="text-slate-600 italic">{letter.substring(0, 150)}...</p>
-                <p className="text-slate-500 text-[11px] pt-2 border-t border-slate-200">✓ Reviewer reports reviewed and compiled<br/>✓ Editor recommendation confirmed<br/>✓ Ready to send to author</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowModal(false)}
-                  className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 font-bold text-xs rounded-lg hover:bg-slate-50 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  disabled={busy}
-                  onClick={() => {
-                    onPublish(decision, letter);
-                    setShowModal(false);
-                  }}
-                  className="flex-1 bg-[#008751] hover:bg-[#007043] disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg cursor-pointer transition flex items-center justify-center gap-1.5"
-                >
-                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  Confirm & Send
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-function PublishProductionPanel({ busy, onPublish }: { busy: boolean; onPublish: (doi: string, volume: string, issue: string) => void }) {
-  const [doi, setDoi] = useState('');
-  const [volume, setVolume] = useState('');
-  const [issue, setIssue] = useState('');
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6">
-      <h3 className="text-sm font-black text-slate-900 mb-3">Publish to Production</h3>
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        <input value={doi} onChange={(e) => setDoi(e.target.value)} placeholder="DOI" className="border border-slate-300 rounded-lg px-3 py-2 text-xs" />
-        <input value={volume} onChange={(e) => setVolume(e.target.value)} placeholder="Volume" className="border border-slate-300 rounded-lg px-3 py-2 text-xs" />
-        <input value={issue} onChange={(e) => setIssue(e.target.value)} placeholder="Issue" className="border border-slate-300 rounded-lg px-3 py-2 text-xs" />
-      </div>
-      <button disabled={busy} onClick={() => onPublish(doi, volume, issue)} className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50">
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Publish'}
-      </button>
     </div>
   );
 }

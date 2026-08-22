@@ -169,7 +169,7 @@ export default function CoordinatorManuscriptDetail({ manuscript, showAllFiles =
     };
   }, [manuscript.id, onChanged]);
 
-  if (loading || !data) {
+  if (!data) {
     return (
       <div className="flex items-center justify-center py-24">
         <div className="text-center">

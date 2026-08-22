@@ -441,21 +441,21 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
     <div className="w-full min-h-screen bg-slate-100 flex flex-col md:flex-row font-sans">
       {/* Dark Green Sidebar */}
       {view === 'list' && (
-        <div className="w-full md:w-64 bg-white md:border-r border-slate-200 p-6 md:min-h-screen md:overflow-y-auto">
+        <div className="w-full md:w-64 bg-[#00170f] md:border-r border-[#002116] p-4 md:min-h-screen md:sticky md:top-0 md:max-h-screen md:overflow-y-auto shrink-0">
           {/* Profile Card */}
-          <div className="bg-gradient-to-b from-[#1a4038] to-[#0f2e2a] text-white rounded-2xl p-5 mb-6">
+          <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-5 mb-6">
             <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-emerald-500/30 flex items-center justify-center border border-emerald-400/50">
+              <div className="w-10 h-10 rounded-lg bg-[#008751]/15 border border-[#008751]/30 flex items-center justify-center">
                 <span className="text-lg">👤</span>
               </div>
               <div className="flex-1">
-                <h3 className="font-black text-sm leading-tight">{currentUser?.name || 'Author'}</h3>
-                <p className="text-emerald-200/80 text-xs font-bold uppercase tracking-wide">AUTHOR</p>
+                <h3 className="font-black text-sm leading-tight text-white">{currentUser?.name || 'Author'}</h3>
+                <p className="text-emerald-300 text-xs font-bold uppercase tracking-wide">AUTHOR</p>
               </div>
             </div>
-            <div className="space-y-3 border-t border-emerald-800/40 pt-3">
+            <div className="space-y-3 border-t border-white/10 pt-3">
               <div>
-                <p className="text-emerald-100/70 text-xs uppercase tracking-wider font-semibold mb-1">Active Submissions:</p>
+                <p className="text-emerald-100/60 text-[11px] uppercase tracking-wider font-semibold mb-1">Active Submissions:</p>
                 <p className="text-2xl font-black text-emerald-300">{items.length}</p>
               </div>
             </div>
@@ -463,7 +463,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
           {/* Menu */}
           <div className="space-y-2">
-            <p className="text-xs uppercase tracking-widest font-bold text-slate-400 px-2 mb-3">MY SUBMISSIONS</p>
+            <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-emerald-300/60 px-2 mb-3">My Submissions</p>
             {([
               { id: 'active', label: 'Active', count: items.filter(m => !['REJECTED', 'PUBLISHED'].includes(m.status)).length, icon: '📤' },
               { id: 'review', label: 'Under Review', count: statusCounts.underReview, icon: '👀' },
@@ -475,10 +475,10 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               <button
                 key={item.id}
                 onClick={() => { setStatusFilter(item.id); setView('list'); }}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all font-semibold text-xs cursor-pointer ${
+                className={`group w-full flex items-center justify-between px-4 py-3 rounded-2xl transition text-sm ${
                   statusFilter === item.id
-                    ? 'bg-[#e6f7ef] text-[#008751] border border-emerald-200'
-                    : 'text-slate-700 hover:bg-slate-100 border border-transparent'
+                    ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
+                    : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
                 }`}
               >
                 <div className="flex items-center gap-2">
@@ -486,16 +486,16 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                   <span>{item.label}</span>
                 </div>
                 {item.count > 0 && (
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusFilter === item.id ? 'bg-[#008751] text-white' : 'bg-slate-100 text-slate-600'}`}>{item.count}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusFilter === item.id ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{item.count}</span>
                 )}
               </button>
             ))}
 
-            <p className="text-xs uppercase tracking-widest font-bold text-slate-400 px-2 mb-3 mt-4">ACTIONS</p>
+            <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-emerald-300/60 px-2 mb-3 mt-4">Actions</p>
             <button
               type="button"
               onClick={() => setView('new')}
-              className="w-full rounded-lg bg-[#008751] hover:bg-[#007043] text-white px-3 py-2.5 text-left font-semibold text-sm transition cursor-pointer"
+              className="w-full rounded-2xl bg-[#008751] hover:bg-[#007043] text-white px-4 py-3 text-left font-black text-sm transition cursor-pointer"
             >
               + New Submission
             </button>

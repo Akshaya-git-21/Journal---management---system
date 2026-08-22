@@ -157,7 +157,7 @@ export async function createUserAccount(
   email: string,
   password: string,
   fullName: string,
-  role: 'EDITOR' | 'REVIEWER',
+  role: 'EDITOR' | 'REVIEWER' | 'PUBLISHER',
   metadata: Record<string, any> = {}
 ): Promise<void> {
   const token = await getFreshAccessToken();
@@ -215,6 +215,61 @@ export async function createReviewerAccount(email: string, password: string, ful
   });
 
   return { temporaryPassword: password };
+}
+
+export async function createPublisherAccount(email: string, password: string, fullName: string, organization: string): Promise<{ temporaryPassword: string }> {
+  if (!password || password.length < 8) {
+    throw new Error('Password must be at least 8 characters');
+  }
+
+  await createUserAccount(email, password, fullName, 'PUBLISHER', {
+    organization,
+    invited_by: 'coordinator',
+    created_without_email: true,
+    password_set_by_coordinator: true
+  });
+
+  return { temporaryPassword: password };
+}
+
+/**
+ * Creates a Publisher account and immediately activates it (Coordinator-
+ * initiated accounts still land as PENDING_APPROVAL via handle_new_user()
+ * in 0001_profiles_rbac.sql, same as Editor/Reviewer -- there's no separate
+ * approval step to skip for a role the Coordinator is creating directly).
+ * Polls for the profiles row since handle_new_user() runs asynchronously
+ * off the auth.users insert trigger. Used by both the Publishers roster
+ * ("Invite Publisher") and the Decision tab's "Send to Publisher" action.
+ */
+export async function createAndActivatePublisherAccount(
+  email: string,
+  password: string,
+  fullName: string,
+  organization: string
+): Promise<{ id: string; email: string } | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+  await createPublisherAccount(normalizedEmail, password, fullName, organization);
+
+  let profile: { id: string; email: string } | null = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const { data, error } = await supabase.from('profiles').select('id, email').eq('email', normalizedEmail).maybeSingle();
+    if (!error && data) {
+      profile = data as { id: string; email: string };
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+
+  if (profile) {
+    const { approveUserRole } = await import('./workflow');
+    try {
+      await approveUserRole(profile.id, true);
+    } catch (approveError: any) {
+      console.warn('Could not auto-approve publisher account:', approveError.message);
+    }
+  }
+
+  return profile;
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {

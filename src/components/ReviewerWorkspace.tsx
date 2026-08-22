@@ -98,28 +98,28 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
   return (
     <div className="w-full min-h-screen bg-slate-100 flex flex-col md:flex-row font-sans">
       {/* Left Sidebar */}
-      <div className="w-full md:w-64 bg-white md:border-r border-slate-200 p-6 md:min-h-screen md:overflow-y-auto">
+      <div className="w-full md:w-64 bg-[#00170f] md:border-r border-[#002116] p-4 md:min-h-screen md:sticky md:top-0 md:max-h-screen md:overflow-y-auto shrink-0">
         {/* Profile Card */}
-        <div className="bg-gradient-to-b from-[#1a4038] to-[#0f2e2a] text-white rounded-2xl p-5 mb-6">
+        <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-5 mb-6">
           <div className="flex items-start gap-3 mb-4">
-            <div className="w-10 h-10 rounded-lg bg-emerald-500/30 flex items-center justify-center border border-emerald-400/50">
+            <div className="w-10 h-10 rounded-lg bg-[#008751]/15 border border-[#008751]/30 flex items-center justify-center">
               <span className="text-lg">👤</span>
             </div>
             <div className="flex-1">
-              <h3 className="font-black text-sm leading-tight">{currentUser?.name || 'Reviewer'}</h3>
-              <p className="text-emerald-200/80 text-xs font-bold uppercase tracking-wide">ASSIGNED VALIDATOR</p>
+              <h3 className="font-black text-sm leading-tight text-white">{currentUser?.name || 'Reviewer'}</h3>
+              <p className="text-emerald-300 text-xs font-bold uppercase tracking-wide">ASSIGNED VALIDATOR</p>
             </div>
           </div>
-          <div className="space-y-3 border-t border-emerald-800/40 pt-3">
+          <div className="space-y-3 border-t border-white/10 pt-3">
             <div>
-              <p className="text-emerald-100/70 text-xs uppercase tracking-wider font-semibold mb-1">Active Dummy Reviewer Persona:</p>
-              <div className="flex items-center gap-2 bg-emerald-900/40 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-100">
+              <p className="text-emerald-100/60 text-[11px] uppercase tracking-wider font-semibold mb-1">Active Dummy Reviewer Persona:</p>
+              <div className="flex items-center gap-2 bg-white/5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-100">
                 <span>{currentUser?.name || 'Reviewer'}</span>
                 <ChevronDown className="w-3.5 h-3.5 ml-auto" />
               </div>
             </div>
-            <div className="pt-2 border-t border-emerald-800/40">
-              <p className="text-emerald-100/70 text-xs uppercase tracking-wider font-semibold mb-1">Reviews Filed:</p>
+            <div className="pt-2 border-t border-white/10">
+              <p className="text-emerald-100/60 text-[11px] uppercase tracking-wider font-semibold mb-1">Reviews Filed:</p>
               <p className="text-2xl font-black text-emerald-300">{counts.completed} <span className="text-xs text-emerald-200/70 font-semibold">Complete</span></p>
             </div>
           </div>
@@ -127,15 +127,15 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
 
         {/* Menu */}
         <div className="space-y-2">
-          <p className="text-xs uppercase tracking-widest font-bold text-slate-400 px-2 mb-3">MY ACTIVE ASSIGNMENTS</p>
+          <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-emerald-300/60 px-2 mb-3">My Active Assignments</p>
           {menuItems.slice(0, 2).map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all font-semibold text-xs ${
+              className={`group w-full flex items-center justify-between px-4 py-3 rounded-2xl transition text-sm ${
                 activeTab === item.id
-                  ? 'bg-[#008751] text-white'
-                  : 'text-slate-700 hover:bg-slate-100'
+                  ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
+                  : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
               }`}
             >
               <div className="flex items-center gap-2">
@@ -143,8 +143,8 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
                 <span>{item.label}</span>
               </div>
               {item.count > 0 && (
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                  activeTab === item.id ? 'bg-white/20' : 'bg-slate-100'
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  activeTab === item.id ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'
                 }`}>
                   {item.count}
                 </span>
@@ -152,15 +152,15 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
             </button>
           ))}
 
-          <p className="text-xs uppercase tracking-widest font-bold text-slate-400 px-2 mb-3 mt-4">REVIEW STATUS</p>
+          <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-emerald-300/60 px-2 mb-3 mt-4">Review Status</p>
           {menuItems.slice(2).map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all font-semibold text-xs ${
+              className={`group w-full flex items-center justify-between px-4 py-3 rounded-2xl transition text-sm ${
                 activeTab === item.id
-                  ? 'bg-[#008751] text-white'
-                  : 'text-slate-700 hover:bg-slate-100'
+                  ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
+                  : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
               }`}
             >
               <div className="flex items-center gap-2">
@@ -168,8 +168,8 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
                 <span>{item.label}</span>
               </div>
               {item.count > 0 && (
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                  activeTab === item.id ? 'bg-white/20' : 'bg-slate-100'
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  activeTab === item.id ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'
                 }`}>
                   {item.count}
                 </span>
@@ -177,20 +177,20 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
             </button>
           ))}
 
-          <p className="text-xs uppercase tracking-widest font-bold text-slate-400 px-2 mb-3 mt-4">ADDITIONAL MODULES</p>
-          <button className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-slate-700 hover:bg-slate-100 transition-all font-semibold text-xs">
+          <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-emerald-300/60 px-2 mb-3 mt-4">Additional Modules</p>
+          <button className="w-full flex items-center gap-2 px-4 py-3 rounded-2xl text-sm text-emerald-100/70 hover:bg-white/5 hover:text-white transition">
             <span>👁️</span>
             <span>Active Review Invites</span>
           </button>
-          <button className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-slate-700 hover:bg-slate-100 transition-all font-semibold text-xs">
+          <button className="w-full flex items-center gap-2 px-4 py-3 rounded-2xl text-sm text-emerald-100/70 hover:bg-white/5 hover:text-white transition">
             <span>📜</span>
             <span>Historic Logs</span>
           </button>
-          <button className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-slate-700 hover:bg-slate-100 transition-all font-semibold text-xs">
+          <button className="w-full flex items-center gap-2 px-4 py-3 rounded-2xl text-sm text-emerald-100/70 hover:bg-white/5 hover:text-white transition">
             <span>⭐</span>
             <span>Scoring Rubric</span>
           </button>
-          <button className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-slate-700 hover:bg-slate-100 transition-all font-semibold text-xs">
+          <button className="w-full flex items-center gap-2 px-4 py-3 rounded-2xl text-sm text-emerald-100/70 hover:bg-white/5 hover:text-white transition">
             <span>📊</span>
             <span>Performance Score</span>
           </button>
@@ -199,7 +199,7 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
 
       {/* Main Content */}
       <div className="flex-1 p-6 md:p-8 overflow-y-auto">
-        <div className="max-w-5xl">
+        <div className="max-w-none">
           <h1 className="text-2xl font-black text-slate-900 mb-1">ACTION REQUIRED ASSIGNMENTS</h1>
           <p className="text-sm text-slate-500 font-semibold mb-6">Select items below to accept, decline, or compose consensus reviews.</p>
 
