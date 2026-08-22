@@ -226,28 +226,30 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
 
   return (
     <div className="w-full h-screen bg-slate-50 flex font-sans overflow-hidden">
-      <aside className="w-80 bg-[#1a4038] text-white flex flex-col overflow-y-auto shadow-lg border-r border-[#0f3f37]">
-        <div className="p-6 border-b border-[#0f3f37] shrink-0">
-          <div className="flex items-start gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30 shrink-0">
-              <Settings className="w-5 h-5 text-emerald-400" />
+      <aside className="w-80 bg-[#00170f] text-white flex flex-col shrink-0 border-r border-[#002116]">
+        <div className="p-4 shrink-0">
+          <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-5">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-[#008751]/15 border border-[#008751]/30 flex items-center justify-center shrink-0">
+                <Settings className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <h3 className="font-black text-sm text-white">{currentUser?.name || 'Editor'}</h3>
+                <p className="text-xs text-emerald-300 font-bold uppercase tracking-wide">Managing Editor</p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-sm text-white">{currentUser?.name || 'Editor'}</h3>
-              <p className="text-xs text-emerald-200/80">Managing Editor</p>
+            <div className="border-t border-white/10 pt-3">
+              <p className="text-emerald-100/60 text-[11px] uppercase tracking-wider font-semibold">Core Jurisdiction:</p>
+              <p className="text-emerald-300 font-bold mt-1">Unrestricted</p>
             </div>
-          </div>
-          <div className="bg-[#0f3f37] rounded-lg px-3 py-2 text-xs">
-            <p className="text-emerald-200/60 text-[10px] uppercase tracking-wider font-semibold">Core Jurisdiction:</p>
-            <p className="text-emerald-400 font-bold mt-1">Unrestricted</p>
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-3 overflow-y-auto">
-          <div className="border border-emerald-500/20 rounded-2xl overflow-hidden">
+        <nav className="flex-1 p-4 pt-0 space-y-3 overflow-y-auto">
+          <div className="border border-white/10 rounded-2xl overflow-hidden">
             <button
               onClick={() => toggleSection('submissions')}
-              className="w-full bg-emerald-500/10 hover:bg-emerald-500/15 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
+              className="w-full bg-white/5 hover:bg-white/10 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
             >
               <span className="flex items-center gap-2">
                 <Clock className="w-4 h-4" />
@@ -256,7 +258,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
               <ChevronDown className={`w-4 h-4 transition ${expandedSections.submissions ? 'rotate-180' : ''}`} />
             </button>
             {expandedSections.submissions && (
-              <div className="bg-[#0f3f37]/50 divide-y divide-[#0f3f37]">
+              <div className="p-1.5 space-y-1">
                 {(['active-submissions', 'needs-editor', 'in-submission-stage'] as const).map((id) => {
                   const isActive = sectionFilter === id;
                   const count = rows.filter(SECTION_FILTERS[id].predicate).length;
@@ -264,12 +266,12 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
                     <button
                       key={id}
                       onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
-                      className={`w-full text-left px-4 py-2.5 text-xs transition flex items-center justify-between cursor-pointer ${
-                        isActive ? 'bg-emerald-500/20 text-white font-semibold' : 'text-emerald-100/80 hover:bg-emerald-500/10'
+                      className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition flex items-center justify-between cursor-pointer ${
+                        isActive ? 'bg-[#008751] text-white font-black' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
                       }`}
                     >
                       <span>{SECTION_FILTERS[id].label}</span>
-                      <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{count}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{count}</span>
                     </button>
                   );
                 })}
@@ -277,10 +279,10 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             )}
           </div>
 
-          <div className="border border-emerald-500/20 rounded-2xl overflow-hidden">
+          <div className="border border-white/10 rounded-2xl overflow-hidden">
             <button
               onClick={() => toggleSection('reviewStages')}
-              className="w-full bg-emerald-500/10 hover:bg-emerald-500/15 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
+              className="w-full bg-white/5 hover:bg-white/10 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
             >
               <span className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4" />
@@ -289,7 +291,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
               <ChevronDown className={`w-4 h-4 transition ${expandedSections.reviewStages ? 'rotate-180' : ''}`} />
             </button>
             {expandedSections.reviewStages && (
-              <div className="bg-[#0f3f37]/50 divide-y divide-[#0f3f37]">
+              <div className="p-1.5 space-y-1">
                 {(['awaiting-reviews', 'reviews-submitted', 'reviews-overdue', 'revisions-submitted', 'in-review-stage'] as const).map((id) => {
                   const isActive = sectionFilter === id;
                   const count = rows.filter(SECTION_FILTERS[id].predicate).length;
@@ -297,12 +299,12 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
                     <button
                       key={id}
                       onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
-                      className={`w-full text-left px-4 py-2.5 text-xs transition flex items-center justify-between cursor-pointer ${
-                        isActive ? 'bg-emerald-500/20 text-white font-semibold' : 'text-emerald-100/80 hover:bg-emerald-500/10'
+                      className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition flex items-center justify-between cursor-pointer ${
+                        isActive ? 'bg-[#008751] text-white font-black' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
                       }`}
                     >
                       <span>{SECTION_FILTERS[id].label}</span>
-                      <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{count}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{count}</span>
                     </button>
                   );
                 })}
@@ -310,10 +312,10 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             )}
           </div>
 
-          <div className="border border-emerald-500/20 rounded-2xl overflow-hidden">
+          <div className="border border-white/10 rounded-2xl overflow-hidden">
             <button
               onClick={() => toggleSection('copyedit')}
-              className="w-full bg-emerald-500/10 hover:bg-emerald-500/15 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
+              className="w-full bg-white/5 hover:bg-white/10 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
             >
               <span className="flex items-center gap-2">
                 <Archive className="w-4 h-4" />
@@ -322,7 +324,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
               <ChevronDown className={`w-4 h-4 transition ${expandedSections.copyedit ? 'rotate-180' : ''}`} />
             </button>
             {expandedSections.copyedit && (
-              <div className="bg-[#0f3f37]/50 divide-y divide-[#0f3f37]">
+              <div className="p-1.5 space-y-1">
                 {(['copyediting-stage', 'in-production-stage', 'scheduled-articles', 'published-articles', 'declined-rejected'] as const).map((id) => {
                   const isActive = sectionFilter === id;
                   const count = rows.filter(SECTION_FILTERS[id].predicate).length;
@@ -330,12 +332,12 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
                     <button
                       key={id}
                       onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
-                      className={`w-full text-left px-4 py-2.5 text-xs transition flex items-center justify-between cursor-pointer ${
-                        isActive ? 'bg-emerald-500/20 text-white font-semibold' : 'text-emerald-100/80 hover:bg-emerald-500/10'
+                      className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition flex items-center justify-between cursor-pointer ${
+                        isActive ? 'bg-[#008751] text-white font-black' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
                       }`}
                     >
                       <span>{SECTION_FILTERS[id].label}</span>
-                      <span className="bg-emerald-500/20 text-emerald-300 rounded px-2 py-0.5 text-[10px] font-bold">{count}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{count}</span>
                     </button>
                   );
                 })}

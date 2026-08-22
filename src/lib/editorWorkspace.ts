@@ -148,21 +148,26 @@ export function subscribeToEditorAssignments(
   editorId: string,
   onUpdate: (details: EditorManuscriptDetails[]) => void
 ): () => void {
+  // The sidebar's stage counts (Reviews Submitted, Reviews Overdue, Revisions
+  // Submitted, In Review Stage, Copyediting Stage, ...) are computed from
+  // reviewer_assignments/manuscripts/manuscript_revisions, not just
+  // editor_assignments -- listening only to editor_assignments left those
+  // counts stale until a manual reload whenever e.g. a reviewer submitted a
+  // review. RLS already scopes what this editor can see on each table, so a
+  // broad "any change" listener re-fetches only when something relevant to
+  // them could have changed.
+  const refresh = async () => {
+    const details = await getEditorAssignedManuscripts(editorId);
+    onUpdate(details);
+  };
+
   const channel = supabase
     .channel(`editor:${editorId}:assignments`)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'editor_assignments',
-        filter: `editor_id=eq.${editorId}`
-      },
-      async () => {
-        const details = await getEditorAssignedManuscripts(editorId);
-        onUpdate(details);
-      }
-    )
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'editor_assignments', filter: `editor_id=eq.${editorId}` }, refresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscripts' }, refresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'reviewer_assignments' }, refresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_revisions' }, refresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_status_history' }, refresh)
     .subscribe();
 
   return () => channel.unsubscribe();

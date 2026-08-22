@@ -7,7 +7,11 @@ import {
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
 import { getManuscriptStatusLabel } from '../lib/manuscriptStatusLabel';
-import { Loader2, Check, X as XIcon, ChevronDown } from 'lucide-react';
+import { NavGroup, NavItem } from './SidebarNavGroup';
+import {
+  Loader2, Check, X as XIcon, ChevronDown, User, AlertTriangle, ClipboardList, CheckCircle2, XCircle,
+  FileText, Lock, Eye, History, Star, BarChart3, Download, ClipboardCheck, Pencil, ShieldAlert
+} from 'lucide-react';
 
 interface ReviewerWorkspaceProps {
   manuscripts?: any[];
@@ -29,11 +33,26 @@ const STATUS_STYLES: Record<ManuscriptStatus, string> = {
 
 interface Row { manuscript: ManuscriptRow; assignment: ReviewerAssignmentRow; }
 
+const TAB_META: Record<string, { title: string; subtitle: string }> = {
+  ACTION_REQUIRED: { title: 'Action Required Assignments', subtitle: 'Select items below to accept, decline, or compose consensus reviews.' },
+  ALL: { title: 'All Assignments', subtitle: 'Every manuscript you have ever been invited to review.' },
+  COMPLETED: { title: 'Completed Reviews', subtitle: 'Reviews you have submitted, now locked for editing.' },
+  DECLINED: { title: 'Declined Reports', subtitle: 'Invitations you declined to review.' },
+  PUBLISHED: { title: 'Published Papers', subtitle: 'Manuscripts you reviewed that have since been published.' },
+  CLOSED: { title: 'Closed Records', subtitle: 'Manuscripts you reviewed that were ultimately rejected.' },
+  INVITES: { title: 'Active Review Invites', subtitle: 'Invitations awaiting your accept/decline response.' },
+  HISTORY: { title: 'Historic Logs', subtitle: 'A timeline of every action recorded against your assignments.' },
+  RUBRIC: { title: 'Scoring Rubric', subtitle: 'The evaluation criteria used when compiling a review.' },
+  PERFORMANCE: { title: 'Performance Score', subtitle: 'Your review activity, computed from your real assignment history.' },
+};
+
 export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProps) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'ACTION_REQUIRED' | 'ALL' | 'COMPLETED' | 'DECLINED' | 'PUBLISHED' | 'CLOSED'>('ACTION_REQUIRED');
+  const [activeTab, setActiveTab] = useState<'ACTION_REQUIRED' | 'ALL' | 'COMPLETED' | 'DECLINED' | 'PUBLISHED' | 'CLOSED' | 'INVITES' | 'HISTORY' | 'RUBRIC' | 'PERFORMANCE'>('ACTION_REQUIRED');
+  const [expandedNavGroups, setExpandedNavGroups] = useState<Record<string, boolean>>({ assignments: true, status: true, modules: true });
+  const toggleNavGroup = (key: string) => setExpandedNavGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const load = async () => {
     try {
@@ -58,6 +77,7 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
     declined: rows.filter((r) => r.assignment.status === 'DECLINED').length,
     published: rows.filter((r) => r.manuscript.status === 'PUBLISHED').length,
     closed: rows.filter((r) => r.manuscript.status === 'REJECTED').length,
+    invites: rows.filter((r) => r.assignment.status === 'INVITED').length,
   };
 
   const filteredRows = rows.filter((row) => {
@@ -87,12 +107,12 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
   const selected = rows.find((r) => r.manuscript.id === selectedManuscriptId) || null;
 
   const menuItems = [
-    { id: 'ACTION_REQUIRED' as const, label: 'Action Required', count: counts.actionRequired, icon: '⚠️' },
-    { id: 'ALL' as const, label: 'All Assignments', count: counts.total, icon: '📋' },
-    { id: 'COMPLETED' as const, label: 'Completed', count: counts.completed, icon: '✓' },
-    { id: 'DECLINED' as const, label: 'Declined Reports', count: counts.declined, icon: '✕' },
-    { id: 'PUBLISHED' as const, label: 'Published Papers', count: counts.published, icon: '📄' },
-    { id: 'CLOSED' as const, label: 'Closed Records', count: counts.closed, icon: '🔒' },
+    { id: 'ACTION_REQUIRED' as const, label: 'Action Required', count: counts.actionRequired, icon: <AlertTriangle className="w-4 h-4" /> },
+    { id: 'ALL' as const, label: 'All Assignments', count: counts.total, icon: <ClipboardList className="w-4 h-4" /> },
+    { id: 'COMPLETED' as const, label: 'Completed', count: counts.completed, icon: <CheckCircle2 className="w-4 h-4" /> },
+    { id: 'DECLINED' as const, label: 'Declined Reports', count: counts.declined, icon: <XCircle className="w-4 h-4" /> },
+    { id: 'PUBLISHED' as const, label: 'Published Papers', count: counts.published, icon: <FileText className="w-4 h-4" /> },
+    { id: 'CLOSED' as const, label: 'Closed Records', count: counts.closed, icon: <Lock className="w-4 h-4" /> },
   ];
 
   return (
@@ -103,7 +123,7 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
         <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-5 mb-6">
           <div className="flex items-start gap-3 mb-4">
             <div className="w-10 h-10 rounded-lg bg-[#008751]/15 border border-[#008751]/30 flex items-center justify-center">
-              <span className="text-lg">👤</span>
+              <User className="w-5 h-5 text-emerald-400" />
             </div>
             <div className="flex-1">
               <h3 className="font-black text-sm leading-tight text-white">{currentUser?.name || 'Reviewer'}</h3>
@@ -126,82 +146,37 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
         </div>
 
         {/* Menu */}
-        <div className="space-y-2">
-          <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-emerald-300/60 px-2 mb-3">My Active Assignments</p>
-          {menuItems.slice(0, 2).map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`group w-full flex items-center justify-between px-4 py-3 rounded-2xl transition text-sm ${
-                activeTab === item.id
-                  ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
-                  : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span>{item.icon}</span>
-                <span>{item.label}</span>
-              </div>
-              {item.count > 0 && (
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                  activeTab === item.id ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'
-                }`}>
-                  {item.count}
-                </span>
-              )}
-            </button>
-          ))}
+        <div className="space-y-3">
+          <NavGroup title="My Active Assignments" icon={<AlertTriangle className="w-4 h-4" />} expanded={expandedNavGroups.assignments} onToggle={() => toggleNavGroup('assignments')}>
+            {menuItems.slice(0, 2).map((item) => (
+              <NavItem key={item.id} icon={item.icon} label={item.label} count={item.count} active={activeTab === item.id} onClick={() => setActiveTab(item.id)} />
+            ))}
+          </NavGroup>
 
-          <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-emerald-300/60 px-2 mb-3 mt-4">Review Status</p>
-          {menuItems.slice(2).map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`group w-full flex items-center justify-between px-4 py-3 rounded-2xl transition text-sm ${
-                activeTab === item.id
-                  ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
-                  : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span>{item.icon}</span>
-                <span>{item.label}</span>
-              </div>
-              {item.count > 0 && (
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                  activeTab === item.id ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'
-                }`}>
-                  {item.count}
-                </span>
-              )}
-            </button>
-          ))}
+          <NavGroup title="Review Status" icon={<CheckCircle2 className="w-4 h-4" />} expanded={expandedNavGroups.status} onToggle={() => toggleNavGroup('status')}>
+            {menuItems.slice(2).map((item) => (
+              <NavItem key={item.id} icon={item.icon} label={item.label} count={item.count} active={activeTab === item.id} onClick={() => setActiveTab(item.id)} />
+            ))}
+          </NavGroup>
 
-          <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-emerald-300/60 px-2 mb-3 mt-4">Additional Modules</p>
-          <button className="w-full flex items-center gap-2 px-4 py-3 rounded-2xl text-sm text-emerald-100/70 hover:bg-white/5 hover:text-white transition">
-            <span>👁️</span>
-            <span>Active Review Invites</span>
-          </button>
-          <button className="w-full flex items-center gap-2 px-4 py-3 rounded-2xl text-sm text-emerald-100/70 hover:bg-white/5 hover:text-white transition">
-            <span>📜</span>
-            <span>Historic Logs</span>
-          </button>
-          <button className="w-full flex items-center gap-2 px-4 py-3 rounded-2xl text-sm text-emerald-100/70 hover:bg-white/5 hover:text-white transition">
-            <span>⭐</span>
-            <span>Scoring Rubric</span>
-          </button>
-          <button className="w-full flex items-center gap-2 px-4 py-3 rounded-2xl text-sm text-emerald-100/70 hover:bg-white/5 hover:text-white transition">
-            <span>📊</span>
-            <span>Performance Score</span>
-          </button>
+          <NavGroup title="Additional Modules" icon={<Star className="w-4 h-4" />} expanded={expandedNavGroups.modules} onToggle={() => toggleNavGroup('modules')}>
+            {([
+              { id: 'INVITES' as const, label: 'Active Review Invites', count: counts.invites, icon: <Eye className="w-4 h-4" /> },
+              { id: 'HISTORY' as const, label: 'Historic Logs', count: 0, icon: <History className="w-4 h-4" /> },
+              { id: 'RUBRIC' as const, label: 'Scoring Rubric', count: 0, icon: <Star className="w-4 h-4" /> },
+              { id: 'PERFORMANCE' as const, label: 'Performance Score', count: 0, icon: <BarChart3 className="w-4 h-4" /> },
+            ]).map((item) => (
+              <NavItem key={item.id} icon={item.icon} label={item.label} count={item.count} active={activeTab === item.id} onClick={() => { setActiveTab(item.id); setSelectedManuscriptId(null); }} />
+            ))}
+          </NavGroup>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="flex-1 p-6 md:p-8 overflow-y-auto">
         <div className="max-w-none">
-          <h1 className="text-2xl font-black text-slate-900 mb-1">ACTION REQUIRED ASSIGNMENTS</h1>
-          <p className="text-sm text-slate-500 font-semibold mb-6">Select items below to accept, decline, or compose consensus reviews.</p>
+          <h1 className="text-2xl font-black text-slate-900 mb-1">{TAB_META[activeTab].title}</h1>
+          <p className="text-sm text-slate-500 font-semibold mb-6">{TAB_META[activeTab].subtitle}</p>
 
           {loading ? (
             <div className="flex items-center justify-center py-24 text-slate-400">
@@ -209,10 +184,105 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
             </div>
           ) : selected ? (
             <ManuscriptDetail row={selected} onBack={() => setSelectedManuscriptId(null)} onChanged={load} />
+          ) : activeTab === 'INVITES' ? (
+            <ManuscriptList rows={rows.filter((r) => r.assignment.status === 'INVITED')} onOpen={setSelectedManuscriptId} />
+          ) : activeTab === 'HISTORY' ? (
+            <HistoryLog rows={rows} />
+          ) : activeTab === 'RUBRIC' ? (
+            <ScoringRubricReference />
+          ) : activeTab === 'PERFORMANCE' ? (
+            <PerformanceScoreScreen rows={rows} />
           ) : (
             <ManuscriptList rows={filteredRows} onOpen={setSelectedManuscriptId} />
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function HistoryLog({ rows }: { rows: Row[] }) {
+  type Event = { manuscriptId: string; title: string; label: string; at: string };
+  const events: Event[] = [];
+  for (const { manuscript, assignment } of rows) {
+    if (assignment.invited_at) events.push({ manuscriptId: manuscript.id, title: manuscript.title, label: 'Invited to review', at: assignment.invited_at });
+    if (assignment.responded_at) events.push({ manuscriptId: manuscript.id, title: manuscript.title, label: assignment.status === 'DECLINED' ? 'Declined invitation' : 'Accepted invitation', at: assignment.responded_at });
+    if (assignment.submitted_at) events.push({ manuscriptId: manuscript.id, title: manuscript.title, label: 'Review submitted', at: assignment.submitted_at });
+  }
+  events.sort((a, b) => b.at.localeCompare(a.at));
+
+  if (events.length === 0) {
+    return <div className="text-center py-16 bg-white border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">No recorded activity yet.</div>;
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
+      {events.map((e, idx) => (
+        <div key={idx} className="p-4 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-slate-900 truncate">{e.label}</p>
+            <p className="text-xs text-slate-500 truncate">{e.title} • {e.manuscriptId}</p>
+          </div>
+          <span className="text-xs text-slate-400 shrink-0">{new Date(e.at).toLocaleString()}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ScoringRubricReference() {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-6">
+      <p className="text-xs text-slate-500 mb-5">These are the exact criteria used in the evaluation form when you review a manuscript, scored 1 (Poor) to 10 (Excellent).</p>
+      <div className="space-y-4">
+        {SCORE_FIELDS.map(([key, label, description], idx) => (
+          <div key={key} className="border-b border-slate-100 pb-4 last:border-b-0">
+            <p className="text-xs font-black text-slate-900">{idx + 1}. {label}</p>
+            <p className="text-xs text-slate-600 mt-0.5">{description}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PerformanceScoreScreen({ rows }: { rows: Row[] }) {
+  const invited = rows.length;
+  const responded = rows.filter((r) => r.assignment.status !== 'INVITED').length;
+  const accepted = rows.filter((r) => ['ACCEPTED', 'SUBMITTED'].includes(r.assignment.status)).length;
+  const declined = rows.filter((r) => r.assignment.status === 'DECLINED').length;
+  const completed = rows.filter((r) => r.assignment.status === 'SUBMITTED').length;
+  const acceptanceRate = responded > 0 ? Math.round((accepted / responded) * 100) : 0;
+  const completionRate = accepted > 0 ? Math.round((completed / accepted) * 100) : 0;
+
+  const turnaroundDays = rows
+    .filter((r) => r.assignment.status === 'SUBMITTED' && r.assignment.submitted_at && r.assignment.responded_at)
+    .map((r) => (new Date(r.assignment.submitted_at!).getTime() - new Date(r.assignment.responded_at!).getTime()) / 86400000);
+  const avgTurnaround = turnaroundDays.length > 0 ? (turnaroundDays.reduce((a, b) => a + b, 0) / turnaroundDays.length).toFixed(1) : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Total Invitations</p>
+          <p className="text-2xl font-black text-slate-900">{invited}</p>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Acceptance Rate</p>
+          <p className="text-2xl font-black text-slate-900">{acceptanceRate}%</p>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Completion Rate</p>
+          <p className="text-2xl font-black text-slate-900">{completionRate}%</p>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Declined</p>
+          <p className="text-2xl font-black text-slate-900">{declined}</p>
+        </div>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Average Turnaround (Accept → Submit)</p>
+        <p className="text-2xl font-black text-slate-900">{avgTurnaround !== null ? `${avgTurnaround} days` : 'Not enough data yet'}</p>
       </div>
     </div>
   );
@@ -275,7 +345,7 @@ function ManuscriptList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
                 </div>
                 <div>
                   <p className="text-slate-500 font-semibold mb-1">Double-Blind Status</p>
-                  <p className="text-emerald-700 font-bold">🔒 Double-Blind Seal Active</p>
+                  <p className="text-emerald-700 font-bold flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> Double-Blind Seal Active</p>
                 </div>
                 <div>
                   <p className="text-slate-500 font-semibold mb-1">Assigned Date</p>
@@ -295,7 +365,7 @@ function ManuscriptList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
                 disabled={downloading === manuscript.id}
                 className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all disabled:opacity-50 whitespace-nowrap flex items-center gap-1.5"
               >
-                {downloading === manuscript.id ? <Loader2 className="w-3 h-3 animate-spin" /> : '📥'}
+                {downloading === manuscript.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                 Download Manuscript
               </button>
               {(assignment.status === 'INVITED' || assignment.status === 'ACCEPTED') && (
@@ -374,7 +444,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
               </div>
               <div>
                 <p className="text-xs text-slate-500 font-semibold">Double-Blind</p>
-                <p className="text-sm font-bold text-emerald-700">🔒 Active</p>
+                <p className="text-sm font-bold text-emerald-700 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> Active</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500 font-semibold">Assignment Status</p>
@@ -394,7 +464,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
             disabled={downloading}
             className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all disabled:opacity-50 whitespace-nowrap flex items-center gap-1.5"
           >
-            {downloading ? <Loader2 className="w-3 h-3 animate-spin" /> : '📥'}
+            {downloading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             Download PDF
           </button>
         </div>
@@ -405,7 +475,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
 
       {assignment.status === 'INVITED' && (
         <div className="bg-white border border-slate-200 rounded-xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-4">📋 Accept or Decline Review Invitation</h3>
+          <h3 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-1.5"><ClipboardCheck className="w-4 h-4" /> Accept or Decline Review Invitation</h3>
           <p className="text-xs text-slate-600 mb-4">Do you accept this peer review invitation? You can decline if this manuscript is outside your area of expertise or you have a conflict of interest.</p>
           <div className="flex gap-3">
             <button disabled={busy} onClick={() => respond(true)} className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-5 py-3 rounded-lg cursor-pointer disabled:opacity-50 transition-all flex-1">
@@ -427,7 +497,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <p className="font-black text-sm text-emerald-900">✓ Review Submitted</p>
+                <p className="font-black text-sm text-emerald-900 flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4" /> Review Submitted</p>
                 <p className="text-xs text-emerald-700 mt-1">Your review has been successfully submitted and locked for editing.</p>
               </div>
               <span className="bg-emerald-200 text-emerald-900 px-3 py-1 rounded-full text-xs font-bold">READ-ONLY</span>
@@ -446,7 +516,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
           </div>
 
           <div className="bg-white border border-slate-200 rounded-xl p-6">
-            <h3 className="text-sm font-black text-slate-900 mb-4">📋 Review Details (Read-Only)</h3>
+            <h3 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-1.5"><FileText className="w-4 h-4" /> Review Details (Read-Only)</h3>
 
             <div className="space-y-4">
               <div>
@@ -493,7 +563,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
               </div>
 
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <label className="block text-xs font-bold text-blue-900 mb-2">📋 Confidential Editor Comments</label>
+                <label className="block text-xs font-bold text-blue-900 mb-2 flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5" /> Confidential Editor Comments</label>
                 <div className="p-3 bg-white rounded border border-blue-200 text-xs text-slate-900 min-h-20">
                   {assignment.comments_to_editor || 'No confidential comments provided'}
                 </div>
@@ -512,6 +582,17 @@ interface ScoreState {
   scientificMerit: number; noveltyInnovation: number; methodologyQuality: number;
   literatureAdequacy: number; ethicalCompliance: number; dataReliability: number; writingQuality: number; overallRecommendationScore: number;
 }
+
+const SCORE_FIELDS: [keyof ScoreState, string, string][] = [
+  ['scientificMerit', 'SCIENTIFIC MERIT', 'Original contribution and study rigor'],
+  ['noveltyInnovation', 'NOVELTY & INNOVATION', 'Breakthrough contributions and uniqueness'],
+  ['methodologyQuality', 'METHODOLOGY QUALITY', 'Experimental setup and verification rigor'],
+  ['literatureAdequacy', 'LITERATURE REVIEW', 'Mathematical reproducibility and accuracy'],
+  ['dataReliability', 'RESULTS & VALIDITY', 'Data quality and statistical validity'],
+  ['writingQuality', 'WRITING QUALITY', 'Clarity of presentation and writing'],
+  ['ethicalCompliance', 'ETHICAL STANDARDS', 'Research ethics and moral bounds'],
+  ['overallRecommendationScore', 'OVERALL RECOMMENDATION SCORE', 'Manual comprehensive peer rating evaluating overall scientific substance'],
+];
 
 function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: ManuscriptRow; assignmentId: string; onSubmitted: () => void }) {
   const [scores, setScores] = useState<ScoreState>({
@@ -633,16 +714,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
 
   if (!showModal) return null;
 
-  const scoreFields: [keyof ScoreState, string][] = [
-    ['scientificMerit', 'SCIENTIFIC MERIT'],
-    ['noveltyInnovation', 'NOVELTY & INNOVATION'],
-    ['methodologyQuality', 'METHODOLOGY QUALITY'],
-    ['literatureAdequacy', 'LITERATURE REVIEW'],
-    ['dataReliability', 'RESULTS & VALIDITY'],
-    ['writingQuality', 'WRITING QUALITY'],
-    ['ethicalCompliance', 'ETHICAL STANDARDS'],
-    ['overallRecommendationScore', 'OVERALL RECOMMENDATION SCORE'],
-  ];
+  const scoreFields = SCORE_FIELDS;
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
@@ -658,7 +730,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
               <span className="font-bold">Status:</span> ACCEPTED FOR REVIEW | <span className="font-bold">Referee:</span> You
             </p>
           </div>
-          <button onClick={() => setShowModal(false)} className="text-white font-black text-xl hover:opacity-75">✕ Close</button>
+          <button onClick={() => setShowModal(false)} className="text-white font-black text-sm hover:opacity-75 flex items-center gap-1.5"><XIcon className="w-4 h-4" /> Close</button>
         </div>
 
         {/* Modal Body */}
@@ -668,7 +740,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
           )}
 
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3.5 text-xs text-amber-800">
-            <p className="font-bold mb-1">⚠️ Your Expert Evaluation is Desired</p>
+            <p className="font-bold mb-1 flex items-center gap-1.5"><AlertTriangle className="w-4 h-4" /> Your Expert Evaluation is Desired</p>
             <p>Please provide your direct expert assessment by scoring each criterion and drafting qualitative critiques. All scores must be entered manually; no automated suggestions are applied.</p>
           </div>
 
@@ -679,21 +751,12 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
               <span className="text-xs font-bold text-blue-600">Scale: 1 (Poor) to 10 (Excellent)</span>
             </div>
             <div className="space-y-5">
-              {scoreFields.map(([key, label], idx) => (
+              {scoreFields.map(([key, label, description], idx) => (
                 <div key={key} className="border-b border-slate-200 pb-5 last:border-b-0">
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex-1">
                       <label className="block text-xs font-black text-slate-900 mb-1">{idx + 1}. {label}</label>
-                      <p className="text-xs text-slate-600">
-                        {key === 'scientificMerit' && 'Original contribution and study rigor'}
-                        {key === 'noveltyInnovation' && 'Breakthrough contributions and uniqueness'}
-                        {key === 'methodologyQuality' && 'Experimental setup and verification rigor'}
-                        {key === 'literatureAdequacy' && 'Mathematical reproducibility and accuracy'}
-                        {key === 'dataReliability' && 'Data quality and statistical validity'}
-                        {key === 'writingQuality' && 'Clarity of presentation and writing'}
-                        {key === 'ethicalCompliance' && 'Research ethics and moral bounds'}
-                        {key === 'overallRecommendationScore' && 'Manual comprehensive peer rating evaluating overall scientific substance'}
-                      </p>
+                      <p className="text-xs text-slate-600">{description}</p>
                     </div>
                     <label className="flex items-center gap-1 text-xs text-slate-600 font-semibold">
                       <input type="checkbox" className="w-4 h-4 rounded" />
@@ -736,10 +799,10 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
             <p className="text-xs text-slate-600 mb-4">Please select only one final recommendation for this manuscript.</p>
             <div className="grid grid-cols-1 gap-3">
               {[
-                { value: 'ACCEPT', label: '✅ Accept', desc: 'Suitable for immediate publication as is', color: 'emerald' },
-                { value: 'MINOR_REVISION', label: '🟡 Minor Revision', desc: 'Requires minor refinements or polishing', color: 'amber' },
-                { value: 'MAJOR_REVISION', label: '🟠 Major Revision', desc: 'Requires substantial conceptual refinements', color: 'orange' },
-                { value: 'REJECT', label: '🔴 Reject', desc: 'Not suitable for presentation or publication', color: 'red' },
+                { value: 'ACCEPT', label: 'Accept', desc: 'Suitable for immediate publication as is', dot: 'bg-emerald-500' },
+                { value: 'MINOR_REVISION', label: 'Minor Revision', desc: 'Requires minor refinements or polishing', dot: 'bg-amber-500' },
+                { value: 'MAJOR_REVISION', label: 'Major Revision', desc: 'Requires substantial conceptual refinements', dot: 'bg-orange-500' },
+                { value: 'REJECT', label: 'Reject', desc: 'Not suitable for presentation or publication', dot: 'bg-red-500' },
               ].map((option) => (
                 <label key={option.value} className={`flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all ${
                   recommendation === option.value
@@ -755,7 +818,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
                     className="w-4 h-4 mt-0.5 accent-[#008751]"
                   />
                   <div className="flex-1">
-                    <p className="font-bold text-sm text-slate-900">{option.label}</p>
+                    <p className="font-bold text-sm text-slate-900 flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${option.dot}`} />{option.label}</p>
                     <p className="text-xs text-slate-600 mt-0.5">{option.desc}</p>
                   </div>
                 </label>
@@ -791,7 +854,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
                     placeholder="List key strengths..."
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
                   />
-                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600 text-lg">✏️</button>
+                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600"><Pencil className="w-4 h-4" /></button>
                 </div>
               </label>
               <label>
@@ -804,7 +867,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
                     placeholder="List key weaknesses..."
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
                   />
-                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600 text-lg">✏️</button>
+                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600"><Pencil className="w-4 h-4" /></button>
                 </div>
               </label>
               <label>
@@ -817,7 +880,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
                     placeholder="List mandatory changes..."
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
                   />
-                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600 text-lg">✏️</button>
+                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600"><Pencil className="w-4 h-4" /></button>
                 </div>
               </label>
             </div>
@@ -841,7 +904,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
         {/* Modal Footer */}
         <div className="border-t border-slate-200 p-4 flex items-center justify-between bg-slate-50">
           <div className="text-xs text-slate-600">
-            {success && <span className="text-emerald-600 font-semibold">✓ {success}</span>}
+            {success && <span className="text-emerald-600 font-semibold inline-flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" />{success}</span>}
             {error && <span className="text-red-600 font-semibold">✗ {error}</span>}
           </div>
           <div className="flex items-center gap-3">

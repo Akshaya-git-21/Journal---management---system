@@ -14,7 +14,8 @@ import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
-import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2 } from 'lucide-react';
+import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2, LayoutGrid, Cog } from 'lucide-react';
+import { NavGroup, NavItem } from './SidebarNavGroup';
 import { AssignmentConfirmationDialog } from './AssignmentConfirmationDialog';
 
 interface CoordinatorWorkspaceProps {
@@ -64,6 +65,8 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('ALL');
   const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'PUBLISHERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS'>('DASHBOARD');
+  const [expandedNavGroups, setExpandedNavGroups] = useState<Record<string, boolean>>({ workspace: true, people: true, system: true });
+  const toggleNavGroup = (key: string) => setExpandedNavGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedManuscriptForRevision, setSelectedManuscriptForRevision] = useState<ManuscriptRow | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -396,96 +399,24 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
               </div>
               <p className="mt-3 text-[12px] text-emerald-200 leading-relaxed">Manage the editorial pipeline, approvals, and reviewer assignments from one central control panel.</p>
             </div>
-            <button
-              onClick={() => { setActiveSection('DASHBOARD'); setSelectedId(null); }}
-              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
-                isDashboardSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              <span>Dashboard</span>
-            </button>
-            <button
-              onClick={() => { setActiveSection('MANUSCRIPT_QUEUE'); setSelectedId(null); }}
-              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
-                isManuscriptQueueSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <ClipboardList className="w-4 h-4" />
-              <span>Manuscript Queue</span>
-            </button>
-            <button
-              onClick={() => { setActiveSection('EDITORIAL_BOARD'); setSelectedId(null); }}
-              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
-                isEditorialBoardSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <BookOpen className="w-4 h-4" />
-              <span>Editorial Board</span>
-            </button>
-            <button
-              onClick={() => { setActiveSection('REVIEWERS'); setSelectedId(null); }}
-              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
-                isReviewersSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <Users className="w-4 h-4" />
-              <span>Reviewers</span>
-            </button>
-            <button
-              onClick={() => { setActiveSection('PUBLISHERS'); setSelectedId(null); }}
-              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
-                isPublishersSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <Building2 className="w-4 h-4" />
-              <span>Publishers</span>
-            </button>
-            <button
-              onClick={() => { setActiveSection('REPORTS'); setSelectedId(null); }}
-              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
-                isReportsSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4" />
-              <span>Reports & Analytics</span>
-            </button>
-            <button
-              onClick={() => { setActiveSection('PENDING_APPROVALS'); setSelectedId(null); }}
-              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
-                isPendingApprovalsSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>Pending Approvals</span>
-            </button>
-            <button
-              onClick={() => { setActiveSection('COMMUNICATIONS'); setSelectedId(null); }}
-              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
-                isCommunicationsSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <MessageCircle className="w-4 h-4" />
-              <span>Communications</span>
-            </button>
-            <button
-              onClick={() => { setActiveSection('SETTINGS'); setSelectedId(null); }}
-              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
-                isSettingsSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <Settings className="w-4 h-4" />
-              <span>Settings</span>
-            </button>
-            <button
-              onClick={() => { setActiveSection('AUDIT_TRAIL'); setSelectedId(null); }}
-              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm transition ${
-                isAuditTrailSection ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <Activity className="w-4 h-4" />
-              <span>Audit Trail</span>
-            </button>
+            <NavGroup title="Workspace" icon={<LayoutGrid className="w-4 h-4" />} expanded={expandedNavGroups.workspace} onToggle={() => toggleNavGroup('workspace')}>
+              <NavItem icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" active={isDashboardSection} onClick={() => { setActiveSection('DASHBOARD'); setSelectedId(null); }} />
+              <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Manuscript Queue" active={isManuscriptQueueSection} onClick={() => { setActiveSection('MANUSCRIPT_QUEUE'); setSelectedId(null); }} />
+              <NavItem icon={<ShieldCheck className="w-4 h-4" />} label="Pending Approvals" active={isPendingApprovalsSection} onClick={() => { setActiveSection('PENDING_APPROVALS'); setSelectedId(null); }} />
+            </NavGroup>
+
+            <NavGroup title="People" icon={<Users className="w-4 h-4" />} expanded={expandedNavGroups.people} onToggle={() => toggleNavGroup('people')}>
+              <NavItem icon={<BookOpen className="w-4 h-4" />} label="Editorial Board" active={isEditorialBoardSection} onClick={() => { setActiveSection('EDITORIAL_BOARD'); setSelectedId(null); }} />
+              <NavItem icon={<Users className="w-4 h-4" />} label="Reviewers" active={isReviewersSection} onClick={() => { setActiveSection('REVIEWERS'); setSelectedId(null); }} />
+              <NavItem icon={<Building2 className="w-4 h-4" />} label="Publishers" active={isPublishersSection} onClick={() => { setActiveSection('PUBLISHERS'); setSelectedId(null); }} />
+            </NavGroup>
+
+            <NavGroup title="System" icon={<Cog className="w-4 h-4" />} expanded={expandedNavGroups.system} onToggle={() => toggleNavGroup('system')}>
+              <NavItem icon={<BarChart3 className="w-4 h-4" />} label="Reports & Analytics" active={isReportsSection} onClick={() => { setActiveSection('REPORTS'); setSelectedId(null); }} />
+              <NavItem icon={<MessageCircle className="w-4 h-4" />} label="Communications" active={isCommunicationsSection} onClick={() => { setActiveSection('COMMUNICATIONS'); setSelectedId(null); }} />
+              <NavItem icon={<Settings className="w-4 h-4" />} label="Settings" active={isSettingsSection} onClick={() => { setActiveSection('SETTINGS'); setSelectedId(null); }} />
+              <NavItem icon={<Activity className="w-4 h-4" />} label="Audit Trail" active={isAuditTrailSection} onClick={() => { setActiveSection('AUDIT_TRAIL'); setSelectedId(null); }} />
+            </NavGroup>
           </div>
         </aside>
 

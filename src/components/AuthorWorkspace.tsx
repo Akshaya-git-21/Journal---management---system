@@ -14,7 +14,8 @@ import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
 import AuthorRevisionRequest from './AuthorRevisionRequest';
-import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, AlertCircle, ChevronDown, Settings, Trash2 } from 'lucide-react';
+import { NavGroup, NavItem } from './SidebarNavGroup';
+import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, AlertCircle, ChevronDown, Settings, Trash2, User, Send, Eye, Pencil, CheckCircle2, Newspaper } from 'lucide-react';
 
 interface AuthorWorkspaceProps {
   manuscripts?: any[];
@@ -59,6 +60,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState({ submissions: true });
   const [statusFilter, setStatusFilter] = useState<'active' | 'review' | 'revisions' | 'accepted' | 'rejected' | 'published'>('active');
+  const [submissionsGroupExpanded, setSubmissionsGroupExpanded] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -446,7 +448,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-5 mb-6">
             <div className="flex items-start gap-3 mb-4">
               <div className="w-10 h-10 rounded-lg bg-[#008751]/15 border border-[#008751]/30 flex items-center justify-center">
-                <span className="text-lg">👤</span>
+                <User className="w-5 h-5 text-emerald-400" />
               </div>
               <div className="flex-1">
                 <h3 className="font-black text-sm leading-tight text-white">{currentUser?.name || 'Author'}</h3>
@@ -462,34 +464,26 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           </div>
 
           {/* Menu */}
-          <div className="space-y-2">
-            <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-emerald-300/60 px-2 mb-3">My Submissions</p>
-            {([
-              { id: 'active', label: 'Active', count: items.filter(m => !['REJECTED', 'PUBLISHED'].includes(m.status)).length, icon: '📤' },
-              { id: 'review', label: 'Under Review', count: statusCounts.underReview, icon: '👀' },
-              { id: 'revisions', label: 'Revisions', count: statusCounts.revisionRequested, icon: '✏️' },
-              { id: 'accepted', label: 'Accepted', count: statusCounts.accepted, icon: '✅' },
-              { id: 'rejected', label: 'Rejected', count: statusCounts.rejected, icon: '❌' },
-              { id: 'published', label: 'Published', count: statusCounts.published, icon: '📰' },
-            ] as const).map((item) => (
-              <button
-                key={item.id}
-                onClick={() => { setStatusFilter(item.id); setView('list'); }}
-                className={`group w-full flex items-center justify-between px-4 py-3 rounded-2xl transition text-sm ${
-                  statusFilter === item.id
-                    ? 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
-                    : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <span>{item.icon}</span>
-                  <span>{item.label}</span>
-                </div>
-                {item.count > 0 && (
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusFilter === item.id ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{item.count}</span>
-                )}
-              </button>
-            ))}
+          <div className="space-y-3">
+            <NavGroup title="My Submissions" icon={<Send className="w-4 h-4" />} expanded={submissionsGroupExpanded} onToggle={() => setSubmissionsGroupExpanded((v) => !v)}>
+              {([
+                { id: 'active', label: 'Active', count: items.filter(m => !['REJECTED', 'PUBLISHED'].includes(m.status)).length, icon: <Send className="w-4 h-4" /> },
+                { id: 'review', label: 'Under Review', count: statusCounts.underReview, icon: <Eye className="w-4 h-4" /> },
+                { id: 'revisions', label: 'Revisions', count: statusCounts.revisionRequested, icon: <Pencil className="w-4 h-4" /> },
+                { id: 'accepted', label: 'Accepted', count: statusCounts.accepted, icon: <CheckCircle2 className="w-4 h-4" /> },
+                { id: 'rejected', label: 'Rejected', count: statusCounts.rejected, icon: <XCircle className="w-4 h-4" /> },
+                { id: 'published', label: 'Published', count: statusCounts.published, icon: <Newspaper className="w-4 h-4" /> },
+              ] as const).map((item) => (
+                <NavItem
+                  key={item.id}
+                  icon={item.icon}
+                  label={item.label}
+                  count={item.count}
+                  active={statusFilter === item.id}
+                  onClick={() => { setStatusFilter(item.id); setView('list'); }}
+                />
+              ))}
+            </NavGroup>
 
             <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-emerald-300/60 px-2 mb-3 mt-4">Actions</p>
             <button

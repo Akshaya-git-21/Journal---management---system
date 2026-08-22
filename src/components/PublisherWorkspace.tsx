@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import TuliticsLogo from './TuliticsLogo';
+import { NavGroup, NavItem } from './SidebarNavGroup';
 import {
   listManuscripts, subscribeToManuscripts, markPublished, uploadPublishedGalley, getContributors,
   getEditorAssignments, getReviewerAssignments, getRevisions, getProfilesByIds, listActiveProfilesByRole,
@@ -17,8 +18,6 @@ interface PublisherWorkspaceProps {
 }
 
 const JOURNAL_NAME = 'Journal of Molecular Sciences';
-const SIDEBAR_ACTIVE_CLASS = 'bg-[#008751] text-white font-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)]';
-const SIDEBAR_INACTIVE_CLASS = 'text-emerald-100/70 hover:bg-white/5 hover:text-white';
 
 type Tab =
   | 'QUEUE' | 'SCHEDULED' | 'PUBLISHED'
@@ -101,6 +100,8 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
   const [publishing, setPublishing] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  const [expandedNavGroups, setExpandedNavGroups] = useState<Record<string, boolean>>({ publication: true, doi: true, website: true, reports: true, journal: true, system: true });
+  const toggleNavGroup = (key: string) => setExpandedNavGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   const [wizardStep, setWizardStep] = useState(0);
   const [publishedDetails, setPublishedDetails] = useState<PublishedDetails | null>(null);
   const [loadingPublishedDetails, setLoadingPublishedDetails] = useState(false);
@@ -137,7 +138,6 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
   const queue = manuscripts.filter((m) => m.production_stage === 'SENT_TO_PUBLISHER');
   const published = manuscripts.filter((m) => m.status === 'PUBLISHED');
   const doiPending = queue.filter((m) => !m.doi);
-  const navBtnClass = (tab: Tab) => `group w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-sm transition ${activeTab === tab ? SIDEBAR_ACTIVE_CLASS : SIDEBAR_INACTIVE_CLASS}`;
 
   const focusedManuscript = manuscripts.find((m) => m.id === focusedId) || null;
   const displayManuscript =
@@ -316,88 +316,40 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
               </div>
             </div>
 
-            <nav className="space-y-4">
-              <div>
-                <span className="block text-[11px] uppercase tracking-[0.24em] text-emerald-300/60 font-bold mb-2 px-2">Publication Management</span>
-                <div className="space-y-1">
-                  <button
-                    onClick={() => setActiveTab('QUEUE')}
-                    className={`group w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-sm transition ${activeTab === 'QUEUE' ? SIDEBAR_ACTIVE_CLASS : SIDEBAR_INACTIVE_CLASS}`}
-                  >
-                    <span className="flex items-center gap-3"><ClipboardList className="w-4 h-4" /> Publication Queue</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${activeTab === 'QUEUE' ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{queue.length}</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('SCHEDULED')}
-                    className={`group w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-sm transition ${activeTab === 'SCHEDULED' ? SIDEBAR_ACTIVE_CLASS : SIDEBAR_INACTIVE_CLASS}`}
-                  >
-                    <span className="flex items-center gap-3"><Clock className="w-4 h-4" /> Scheduled Publications</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${activeTab === 'SCHEDULED' ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>0</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('PUBLISHED')}
-                    className={`group w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-sm transition ${activeTab === 'PUBLISHED' ? SIDEBAR_ACTIVE_CLASS : SIDEBAR_INACTIVE_CLASS}`}
-                  >
-                    <span className="flex items-center gap-3"><CheckCircle2 className="w-4 h-4" /> Published Articles</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${activeTab === 'PUBLISHED' ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{published.length}</span>
-                  </button>
-                </div>
-              </div>
+            <nav className="space-y-3">
+              <NavGroup title="Publication Management" icon={<ClipboardList className="w-4 h-4" />} expanded={expandedNavGroups.publication} onToggle={() => toggleNavGroup('publication')}>
+                <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Publication Queue" active={activeTab === 'QUEUE'} count={queue.length} onClick={() => setActiveTab('QUEUE')} />
+                <NavItem icon={<Clock className="w-4 h-4" />} label="Scheduled Publications" active={activeTab === 'SCHEDULED'} count={0} onClick={() => setActiveTab('SCHEDULED')} />
+                <NavItem icon={<CheckCircle2 className="w-4 h-4" />} label="Published Articles" active={activeTab === 'PUBLISHED'} count={published.length} onClick={() => setActiveTab('PUBLISHED')} />
+              </NavGroup>
 
-              <div>
-                <span className="block text-[11px] uppercase tracking-[0.24em] text-emerald-300/60 font-bold mb-2 px-2">DOI Management</span>
-                <div className="space-y-1">
-                  <button onClick={() => setActiveTab('DOI_PIPELINE')} className={navBtnClass('DOI_PIPELINE')}>
-                    <span className="flex items-center gap-3"><Hash className="w-4 h-4" /> DOI Registration Pipeline</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${activeTab === 'DOI_PIPELINE' ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{doiPending.length}</span>
-                  </button>
-                  <button onClick={() => setActiveTab('DOI_REGISTRY')} className={navBtnClass('DOI_REGISTRY')}>
-                    <span className="flex items-center gap-3"><History className="w-4 h-4" /> DOI Tracking Registry</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${activeTab === 'DOI_REGISTRY' ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{published.length}</span>
-                  </button>
-                </div>
-              </div>
+              <NavGroup title="DOI Management" icon={<Hash className="w-4 h-4" />} expanded={expandedNavGroups.doi} onToggle={() => toggleNavGroup('doi')}>
+                <NavItem icon={<Hash className="w-4 h-4" />} label="DOI Registration Pipeline" active={activeTab === 'DOI_PIPELINE'} count={doiPending.length} onClick={() => setActiveTab('DOI_PIPELINE')} />
+                <NavItem icon={<History className="w-4 h-4" />} label="DOI Tracking Registry" active={activeTab === 'DOI_REGISTRY'} count={published.length} onClick={() => setActiveTab('DOI_REGISTRY')} />
+              </NavGroup>
 
-              <div>
-                <span className="block text-[11px] uppercase tracking-[0.24em] text-emerald-300/60 font-bold mb-2 px-2">Website Management</span>
-                <div className="space-y-1">
-                  <button onClick={() => setActiveTab('WEBSITE_ARTICLES')} className={navBtnClass('WEBSITE_ARTICLES')}>
-                    <span className="flex items-center gap-3"><LayoutGrid className="w-4 h-4" /> Website Articles</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${activeTab === 'WEBSITE_ARTICLES' ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{published.length}</span>
-                  </button>
-                  <button onClick={() => setActiveTab('WEBSITE_PREVIEW')} className={navBtnClass('WEBSITE_PREVIEW')}><span className="flex items-center gap-3"><Eye className="w-4 h-4" /> Website Preview</span></button>
-                  <button onClick={() => setActiveTab('PUBLIC_WEBSITE')} className={navBtnClass('PUBLIC_WEBSITE')}><span className="flex items-center gap-3"><ExternalLink className="w-4 h-4" /> Public Website</span></button>
-                </div>
-              </div>
+              <NavGroup title="Website Management" icon={<LayoutGrid className="w-4 h-4" />} expanded={expandedNavGroups.website} onToggle={() => toggleNavGroup('website')}>
+                <NavItem icon={<LayoutGrid className="w-4 h-4" />} label="Website Articles" active={activeTab === 'WEBSITE_ARTICLES'} count={published.length} onClick={() => setActiveTab('WEBSITE_ARTICLES')} />
+                <NavItem icon={<Eye className="w-4 h-4" />} label="Website Preview" active={activeTab === 'WEBSITE_PREVIEW'} onClick={() => setActiveTab('WEBSITE_PREVIEW')} />
+                <NavItem icon={<ExternalLink className="w-4 h-4" />} label="Public Website" active={activeTab === 'PUBLIC_WEBSITE'} onClick={() => setActiveTab('PUBLIC_WEBSITE')} />
+              </NavGroup>
 
-              <div>
-                <span className="block text-[11px] uppercase tracking-[0.24em] text-emerald-300/60 font-bold mb-2 px-2">Reports</span>
-                <div className="space-y-1">
-                  <button onClick={() => setActiveTab('REPORTS')} className={navBtnClass('REPORTS')}><span className="flex items-center gap-3"><BarChart3 className="w-4 h-4" /> Publication Reports</span></button>
-                  <button onClick={() => setActiveTab('DOWNLOAD_REPORTS')} className={navBtnClass('DOWNLOAD_REPORTS')}><span className="flex items-center gap-3"><Download className="w-4 h-4" /> Download Reports</span></button>
-                </div>
-              </div>
+              <NavGroup title="Reports" icon={<BarChart3 className="w-4 h-4" />} expanded={expandedNavGroups.reports} onToggle={() => toggleNavGroup('reports')}>
+                <NavItem icon={<BarChart3 className="w-4 h-4" />} label="Publication Reports" active={activeTab === 'REPORTS'} onClick={() => setActiveTab('REPORTS')} />
+                <NavItem icon={<Download className="w-4 h-4" />} label="Download Reports" active={activeTab === 'DOWNLOAD_REPORTS'} onClick={() => setActiveTab('DOWNLOAD_REPORTS')} />
+              </NavGroup>
 
-              <div>
-                <span className="block text-[11px] uppercase tracking-[0.24em] text-emerald-300/60 font-bold mb-2 px-2">Journal Management</span>
-                <div className="space-y-1">
-                  <button onClick={() => setActiveTab('JOURNAL_SETTINGS')} className={navBtnClass('JOURNAL_SETTINGS')}><span className="flex items-center gap-3"><Settings className="w-4 h-4" /> Journal Settings</span></button>
-                  <button onClick={() => setActiveTab('EDITORIAL_BOARD')} className={navBtnClass('EDITORIAL_BOARD')}>
-                    <span className="flex items-center gap-3"><Users className="w-4 h-4" /> Editorial Board</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${activeTab === 'EDITORIAL_BOARD' ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{editors.length}</span>
-                  </button>
-                  <button onClick={() => setActiveTab('JOURNAL_POLICIES')} className={navBtnClass('JOURNAL_POLICIES')}><span className="flex items-center gap-3"><CheckSquare className="w-4 h-4" /> Journal Policies</span></button>
-                  <button onClick={() => setActiveTab('JOURNAL_SECTIONS')} className={navBtnClass('JOURNAL_SECTIONS')}><span className="flex items-center gap-3"><LayoutGrid className="w-4 h-4" /> Journal Sections</span></button>
-                </div>
-              </div>
+              <NavGroup title="Journal Management" icon={<Settings className="w-4 h-4" />} expanded={expandedNavGroups.journal} onToggle={() => toggleNavGroup('journal')}>
+                <NavItem icon={<Settings className="w-4 h-4" />} label="Journal Settings" active={activeTab === 'JOURNAL_SETTINGS'} onClick={() => setActiveTab('JOURNAL_SETTINGS')} />
+                <NavItem icon={<Users className="w-4 h-4" />} label="Editorial Board" active={activeTab === 'EDITORIAL_BOARD'} count={editors.length} onClick={() => setActiveTab('EDITORIAL_BOARD')} />
+                <NavItem icon={<CheckSquare className="w-4 h-4" />} label="Journal Policies" active={activeTab === 'JOURNAL_POLICIES'} onClick={() => setActiveTab('JOURNAL_POLICIES')} />
+                <NavItem icon={<LayoutGrid className="w-4 h-4" />} label="Journal Sections" active={activeTab === 'JOURNAL_SECTIONS'} onClick={() => setActiveTab('JOURNAL_SECTIONS')} />
+              </NavGroup>
 
-              <div>
-                <span className="block text-[11px] uppercase tracking-[0.24em] text-emerald-300/60 font-bold mb-2 px-2">System Administration</span>
-                <div className="space-y-1">
-                  <button onClick={() => setActiveTab('ROLES')} className={navBtnClass('ROLES')}><span className="flex items-center gap-3"><ShieldAlert className="w-4 h-4" /> Roles & Permissions</span></button>
-                  <button onClick={() => setActiveTab('BACKUP')} className={navBtnClass('BACKUP')}><span className="flex items-center gap-3"><Database className="w-4 h-4" /> Backup & Restore</span></button>
-                </div>
-              </div>
+              <NavGroup title="System Administration" icon={<ShieldAlert className="w-4 h-4" />} expanded={expandedNavGroups.system} onToggle={() => toggleNavGroup('system')}>
+                <NavItem icon={<ShieldAlert className="w-4 h-4" />} label="Roles & Permissions" active={activeTab === 'ROLES'} onClick={() => setActiveTab('ROLES')} />
+                <NavItem icon={<Database className="w-4 h-4" />} label="Backup & Restore" active={activeTab === 'BACKUP'} onClick={() => setActiveTab('BACKUP')} />
+              </NavGroup>
             </nav>
           </aside>
 
