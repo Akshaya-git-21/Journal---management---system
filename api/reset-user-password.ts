@@ -16,7 +16,7 @@
  * this and the Express route both call one shared implementation instead of
  * duplicating it.
  */
-import { handlePasswordResetRequest } from '../src/lib/passwordResetHandler.ts';
+import { handlePasswordResetRequest } from '../src/lib/passwordResetHandler';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {

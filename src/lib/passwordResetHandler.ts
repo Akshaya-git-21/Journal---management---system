@@ -8,7 +8,7 @@
  * Server-only module: imports supabaseAdmin (service-role key). Never import
  * this from frontend code.
  */
-import { supabaseAdmin } from './supabaseAdmin.ts';
+import { supabaseAdmin } from './supabaseAdmin';
 
 export interface PasswordResetResult {
   status: number;
