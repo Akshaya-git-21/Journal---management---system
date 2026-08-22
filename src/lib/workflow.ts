@@ -76,6 +76,17 @@ export interface StatusHistoryRow {
   created_at: string;
 }
 
+export interface AuditLogRow {
+  id: string;
+  actor_id: string | null;
+  action: string;
+  manuscript_id: string | null;
+  before_status: string | null;
+  after_status: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface NotificationRow {
   id: string;
   recipient_id: string;
@@ -179,6 +190,14 @@ export const coordinatorAssignReviewerDirectly = (manuscriptId: string, reviewer
 
 export const finalizeReviewerBoard = (manuscriptId: string) =>
   rpcOrThrow(supabase.rpc('finalize_reviewer_board', { p_manuscript_id: manuscriptId }));
+
+/** Coordinator-only: replaces a reviewer who declined after the board was
+ * already finalized (manuscript status UNDER_REVIEW) -- the pre-finalization
+ * replacement RPCs (coordinator_assign_reviewer_directly,
+ * coordinator_replace_suggestion) only work at EDITOR_REVIEW. See
+ * coordinator_replace_reviewer() in 0024_coordinator_replace_declined_reviewer.sql. */
+export const coordinatorReplaceReviewer = (declinedAssignmentId: string, replacementReviewerId: string) =>
+  rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('coordinator_replace_reviewer', { p_declined_assignment_id: declinedAssignmentId, p_replacement_reviewer_id: replacementReviewerId }));
 
 /** Coordinator-only: forwards a submitted revision (manuscript_revisions.status
  * = 'REVISION_SUBMITTED') to the assigned editor for re-review. See
@@ -290,6 +309,14 @@ export async function getStatusHistory(manuscriptId: string): Promise<StatusHist
 
 export async function getRecentStatusHistory(limit: number = 8): Promise<StatusHistoryRow[]> {
   const { data, error } = await supabase.from('manuscript_status_history').select('*').order('created_at', { ascending: false }).limit(limit);
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/** Coordinator-only (audit_log RLS: audit_log_select_coordinator). Every
+ * workflow RPC writes one row here per transition it makes. */
+export async function getRecentAuditLog(limit: number = 100): Promise<AuditLogRow[]> {
+  const { data, error } = await supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(limit);
   if (error) throw new Error(error.message);
   return data ?? [];
 }

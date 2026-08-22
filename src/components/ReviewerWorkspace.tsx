@@ -521,16 +521,22 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-900 mb-2">Scores</label>
-                {assignment.scores && (
-                  <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded">
-                    {Object.entries(assignment.scores).map(([key, value]) => (
-                      <div key={key} className="flex justify-between">
-                        <span className="text-slate-600">{key.replace(/([A-Z])/g, ' $1')}</span>
-                        <span className="font-bold text-slate-900">{value}/10</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded">
+                  {[
+                    ['Scientific Merit', assignment.scientific_merit],
+                    ['Novelty / Innovation', assignment.novelty_innovation],
+                    ['Methodology Quality', assignment.methodology_quality],
+                    ['Literature Adequacy', assignment.literature_adequacy],
+                    ['Ethical Compliance', assignment.ethical_compliance],
+                    ['Data Reliability', assignment.data_reliability],
+                    ['Writing Quality', assignment.writing_quality],
+                  ].map(([label, value]) => (
+                    <div key={label as string} className="flex justify-between">
+                      <span className="text-slate-600">{label}</span>
+                      <span className="font-bold text-slate-900">{value != null ? `${value}/10` : '--'}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div>
@@ -615,31 +621,48 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
 
   const setScore = (key: keyof ScoreState, value: number) => setScores((s) => ({ ...s, [key]: value }));
 
+  const draftKey = `reviewer_draft_${assignmentId}`;
+
+  // Restore any previously saved draft for this assignment. This is a pure
+  // client-side load (no submission, no status change) so it's safe to run
+  // once on mount.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (draft.scores) setScores(draft.scores);
+      if (draft.criteriaReasons) setCriteriaReasons(draft.criteriaReasons);
+      if (draft.recommendation) setRecommendation(draft.recommendation);
+      if (typeof draft.commentsToAuthor === 'string') setCommentsToAuthor(draft.commentsToAuthor);
+      if (typeof draft.commentsToEditor === 'string') setCommentsToEditor(draft.commentsToEditor);
+      if (typeof draft.strengths === 'string') setStrengths(draft.strengths);
+      if (typeof draft.weaknesses === 'string') setWeaknesses(draft.weaknesses);
+      if (typeof draft.revisions === 'string') setRevisions(draft.revisions);
+      if (draft.lastSavedAt) setLastSaveTime(new Date(draft.lastSavedAt).toLocaleTimeString());
+    } catch {
+      // Corrupted/unreadable draft -- ignore and start from a blank form.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Saving a draft only persists the in-progress form locally -- it never
+  // calls submitReview and never touches manuscript/reviewer status.
   const saveDraft = async () => {
     setBusy(true);
     setError('');
     try {
-      await supabase
-        .from('review_drafts')
-        .upsert(
-          {
-            assignment_id: assignmentId,
-            scores: scores,
-            recommendation: recommendation,
-            comments_to_author: commentsToAuthor,
-            comments_to_editor: commentsToEditor,
-            strengths: strengths,
-            weaknesses: weaknesses,
-            mandatory_revisions: revisions,
-            last_saved_at: new Date().toISOString(),
-          },
-          { onConflict: 'assignment_id' }
-        );
-      setLastSaveTime(new Date().toLocaleTimeString());
+      const savedAt = new Date().toISOString();
+      localStorage.setItem(draftKey, JSON.stringify({
+        scores, criteriaReasons, recommendation,
+        commentsToAuthor, commentsToEditor, strengths, weaknesses, revisions,
+        lastSavedAt: savedAt,
+      }));
+      setLastSaveTime(new Date(savedAt).toLocaleTimeString());
       setSuccess('Draft saved successfully');
       setTimeout(() => setSuccess(''), 2000);
     } catch (e: any) {
-      setError('Failed to save draft: ' + e.message);
+      setError('Failed to save draft: ' + (e?.message || 'local storage unavailable'));
     } finally {
       setBusy(false);
     }
@@ -703,6 +726,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
         mandatory_revisions: revisions,
         criteriaReasons
       });
+      try { localStorage.removeItem(draftKey); } catch { /* non-fatal */ }
       setSuccess('Review submitted successfully!');
       setTimeout(() => onSubmitted(), 1500);
     } catch (e: any) {

@@ -3,7 +3,8 @@ import { ManuscriptRow, SuggestedReviewerRow, ReviewerAssignmentRow, ProfileRow 
 import {
   coordinatorAcceptSuggestion, coordinatorDeclineSuggestion, coordinatorReplaceSuggestion,
   coordinatorAssignReviewerDirectly, finalizeReviewerBoard, getEditorReviewerActions,
-  coordinatorFinalizeReviewerSuggestion, approveUserRole, coordinatorReactivateReviewer
+  coordinatorFinalizeReviewerSuggestion, approveUserRole, coordinatorReactivateReviewer,
+  coordinatorReplaceReviewer
 } from '../../../lib/workflow';
 import { createReviewerAccount } from '../../../lib/auth';
 import { Plus, AlertCircle, Loader2, CheckCircle, Star, XCircle, RefreshCw, UserPlus } from 'lucide-react';
@@ -46,6 +47,8 @@ export function ReviewBoardTab({
   const [showReplaceModal, setShowReplaceModal] = useState<string | null>(null);
   const [replacementReviewerId, setReplacementReviewerId] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
+  const [showReplaceDeclinedModal, setShowReplaceDeclinedModal] = useState<string | null>(null);
+  const [declinedReplacementId, setDeclinedReplacementId] = useState<string | null>(null);
 
   // Accept-a-new-reviewer flow: suggestion accepted but no matching account exists yet
   const [needsAccount, setNeedsAccount] = useState<{ suggestionId: string; name: string; email: string; note: string | null } | null>(null);
@@ -277,6 +280,32 @@ export function ReviewBoardTab({
     }
   };
 
+  // Handle replacing a reviewer who declined after the board was already
+  // finalized (manuscript already UNDER_REVIEW) -- coordinatorAssignReviewerDirectly
+  // and coordinatorReplaceSuggestion only work pre-finalization.
+  const handleReplaceDeclinedReviewer = async (declinedAssignmentId: string) => {
+    if (!declinedReplacementId) {
+      setError('Please select a replacement reviewer');
+      return;
+    }
+
+    setError('');
+    setProcessing(declinedAssignmentId);
+
+    try {
+      await coordinatorReplaceReviewer(declinedAssignmentId, declinedReplacementId);
+      setShowReplaceDeclinedModal(null);
+      setDeclinedReplacementId(null);
+      setSuccess('Replacement reviewer invited');
+      setTimeout(() => setSuccess(''), 3000);
+      onDataChange();
+    } catch (e: any) {
+      setError(e.message || 'Failed to replace reviewer');
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   // Handle finalize board
   const handleFinalize = async () => {
     if (assignedCount !== 2) {
@@ -493,16 +522,63 @@ export function ReviewBoardTab({
           <div className="space-y-3">
             {reviewerAssignments.map((assignment, idx) => {
               const reviewer = profiles[assignment.reviewer_id];
+              const isDeclined = assignment.status === 'DECLINED';
+              const canReplace = isDeclined && manuscript.status === 'UNDER_REVIEW';
               return (
-                <div key={assignment.id} className="border border-emerald-200 bg-emerald-50 rounded-lg p-4">
+                <div key={assignment.id} className={`border rounded-lg p-4 ${isDeclined ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="font-semibold text-slate-900">{reviewer?.name}</p>
                       <p className="text-xs text-slate-600">{reviewer?.email}</p>
-                      <p className="text-xs text-emerald-700 mt-1 font-bold">Status: {assignment.status}</p>
+                      <p className={`text-xs mt-1 font-bold ${isDeclined ? 'text-red-700' : 'text-emerald-700'}`}>Status: {assignment.status}</p>
                     </div>
-                    <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                    {isDeclined ? <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" /> : <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />}
                   </div>
+
+                  {canReplace && (
+                    <div className="mt-3 pt-3 border-t border-red-200">
+                      {showReplaceDeclinedModal === assignment.id ? (
+                        <div className="space-y-2">
+                          <p className="text-xs font-bold text-slate-700">Select Replacement Reviewer:</p>
+                          <select
+                            value={declinedReplacementId || ''}
+                            onChange={(e) => setDeclinedReplacementId(e.target.value)}
+                            className="w-full text-xs px-2 py-1.5 border border-slate-300 rounded focus:outline-none focus:border-blue-500"
+                          >
+                            <option value="">-- Select a reviewer --</option>
+                            {availableReviewers
+                              .filter(r => !assignedReviewerIds.has(r.id))
+                              .map(r => (
+                                <option key={r.id} value={r.id}>{r.name} ({r.email})</option>
+                              ))}
+                          </select>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleReplaceDeclinedReviewer(assignment.id)}
+                              disabled={!declinedReplacementId || processing === assignment.id}
+                              className="text-xs px-3 py-1 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              {processing === assignment.id ? 'Replacing...' : 'Confirm Replacement'}
+                            </button>
+                            <button
+                              onClick={() => { setShowReplaceDeclinedModal(null); setDeclinedReplacementId(null); }}
+                              className="text-xs px-3 py-1 border border-slate-300 text-slate-700 rounded font-bold hover:bg-slate-50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowReplaceDeclinedModal(assignment.id)}
+                          className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 transition flex items-center gap-1"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Replace Reviewer
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   {(assignment.invited_at || assignment.responded_at || assignment.submitted_at) && (
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm mt-3 pt-3 border-t border-emerald-200">

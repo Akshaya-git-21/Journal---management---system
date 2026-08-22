@@ -19,9 +19,6 @@ import {
   submitAssessment,
   submitRecommendation,
   publishFinalDecision,
-  assignReviewers,
-  removeReviewerAssignment,
-  updateReviewerStatus,
   subscribeToReviewerChanges,
   postDiscussion,
   subscribeToDiscussions,
@@ -1377,9 +1374,9 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   <div className="space-y-3">
                     {details.contributors.map((contributor, idx) => (
                       <div key={idx} className="border border-slate-200 rounded p-4 hover:bg-slate-50">
-                        <p className="font-semibold text-slate-900">{contributor.full_name}</p>
+                        <p className="font-semibold text-slate-900">{contributor.name}</p>
                         <p className="text-xs text-slate-600">{contributor.email}</p>
-                        {contributor.institution && <p className="text-xs text-slate-600">{contributor.institution}</p>}
+                        {contributor.affiliation && <p className="text-xs text-slate-600">{contributor.affiliation}</p>}
                       </div>
                     ))}
                   </div>
@@ -1692,7 +1689,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                     {details.revisions.map((revision, idx) => (
                       <div key={idx} className="border border-slate-200 rounded p-4">
                         <p className="font-semibold text-slate-900">{revision.revision_number}</p>
-                        <p className="text-xs text-slate-600">{formatDate(revision.created_at)}</p>
+                        <p className="text-xs text-slate-600">{formatDate(revision.requested_at)}</p>
                       </div>
                     ))}
                   </div>

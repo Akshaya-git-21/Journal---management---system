@@ -3,18 +3,18 @@ import { ManuscriptStatus } from '../types';
 import { supabase } from '../lib/supabase';
 import { createEditorAccount, createReviewerAccount, createAndActivatePublisherAccount } from '../lib/auth';
 import {
-  ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, SuggestedReviewerRow, ProfileRow,
+  ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, SuggestedReviewerRow, ProfileRow, AuditLogRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getStatusHistory, getSuggestedReviewers,
   listActiveProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished, sendToPublisher,
   subscribeToManuscripts, PublishDecision, getRevisions, RevisionRow, getReviewerAssignmentCounts,
-  getRecentStatusHistory, getOverdueReviewerAssignments, OverdueReviewRow
+  getRecentStatusHistory, getOverdueReviewerAssignments, OverdueReviewRow, getRecentAuditLog
 } from '../lib/workflow';
 import { getManuscriptStatusLabel, getLatestRevision } from '../lib/manuscriptStatusLabel';
 import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
-import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2, LayoutGrid, Cog } from 'lucide-react';
+import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2, LayoutGrid, Cog, Inbox } from 'lucide-react';
 import { NavGroup, NavItem } from './SidebarNavGroup';
 import { AssignmentConfirmationDialog } from './AssignmentConfirmationDialog';
 
@@ -480,6 +480,12 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
               />
             ) : isReportsSection ? (
               <ReportsAnalyticsScreen totalCount={totalCount} stageCounts={stageCounts} pendingApprovals={pendingApprovals.length} editors={editorialBoardProfiles.length} reviewers={reviewerProfiles.length} />
+            ) : isCommunicationsSection ? (
+              <NotAvailableScreen title="Communications" text="Coordinator-wide messaging is not connected to a data source yet." />
+            ) : isSettingsSection ? (
+              <NotAvailableScreen title="Settings" text="Journal configuration settings are not connected to a data source yet." />
+            ) : isAuditTrailSection ? (
+              <AuditTrailScreen manuscripts={items} />
             ) : (
               <PendingApprovalsScreen
                 approvals={pendingApprovals}
@@ -1685,6 +1691,88 @@ function InvitePublisherModal({ open, onClose, name, email, organization, passwo
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function NotAvailableScreen({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="space-y-5">
+      <div>
+        <p className="text-xs uppercase tracking-[0.3em] text-slate-400 font-bold">{title}</p>
+        <h1 className="mt-2 text-2xl font-black text-slate-900">{title}</h1>
+      </div>
+      <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-12 text-center">
+        <Inbox className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+        <p className="text-sm font-semibold text-slate-700">Not available yet</p>
+        <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">{text}</p>
+      </div>
+    </div>
+  );
+}
+
+function AuditTrailScreen({ manuscripts }: { manuscripts: ManuscriptRow[] }) {
+  const [entries, setEntries] = useState<AuditLogRow[]>([]);
+  const [actors, setActors] = useState<Record<string, ProfileRow>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await getRecentAuditLog(100);
+        if (cancelled) return;
+        setEntries(rows);
+        const actorIds = Array.from(new Set(rows.map((r) => r.actor_id).filter((id): id is string => !!id)));
+        setActors(actorIds.length > 0 ? await getProfilesByIds(actorIds) : {});
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || 'Failed to load the audit log');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const manuscriptsById = Object.fromEntries(manuscripts.map((m) => [m.id, m]));
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <p className="text-xs uppercase tracking-[0.3em] text-slate-400 font-bold">Audit Trail</p>
+        <h1 className="mt-2 text-2xl font-black text-slate-900">Audit Trail</h1>
+        <p className="text-sm text-slate-500 mt-1">Every workflow transition recorded by the system, most recent first.</p>
+      </div>
+      {loading ? (
+        <div className="flex items-center justify-center py-16 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>
+      ) : error ? (
+        <div className="bg-white border border-dashed border-red-200 rounded-2xl p-12 text-center text-sm text-red-500">{error}</div>
+      ) : entries.length === 0 ? (
+        <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-12 text-center">
+          <Activity className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+          <p className="text-sm font-semibold text-slate-700">No audit events yet</p>
+        </div>
+      ) : (
+        <div className="bg-white border border-slate-200 rounded-2xl divide-y divide-slate-100">
+          {entries.map((e) => {
+            const manuscript = e.manuscript_id ? manuscriptsById[e.manuscript_id] : null;
+            const actor = e.actor_id ? actors[e.actor_id] : null;
+            return (
+              <div key={e.id} className="px-5 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900 truncate">{e.action}{manuscript ? ` — ${manuscript.title}` : e.manuscript_id ? ` — ${e.manuscript_id}` : ''}</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    By: {actor?.name || 'System'}
+                    {e.before_status && e.after_status && e.before_status !== e.after_status ? ` • ${e.before_status} → ${e.after_status}` : ''}
+                  </p>
+                </div>
+                <span className="text-[11px] text-slate-400 shrink-0">{formatDate(e.created_at)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

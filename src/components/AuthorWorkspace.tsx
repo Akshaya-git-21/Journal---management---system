@@ -13,6 +13,7 @@ import { getManuscriptStatusLabel } from '../lib/manuscriptStatusLabel';
 import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
+import NotificationBell from './NotificationBell';
 import AuthorRevisionRequest from './AuthorRevisionRequest';
 import { NavGroup, NavItem } from './SidebarNavGroup';
 import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, AlertCircle, ChevronDown, Settings, Trash2, User, Send, Eye, Pencil, CheckCircle2, Newspaper } from 'lucide-react';
@@ -514,6 +515,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                 <Plus className="w-4 h-4" /> New Submission
               </button>
             )}
+            <NotificationBell dark={false} />
             <button onClick={onSignOut} className="text-sm font-semibold text-red-600 hover:text-red-700 px-3 py-1.5 cursor-pointer">
               Log Out
             </button>
