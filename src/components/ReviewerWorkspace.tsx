@@ -1,17 +1,31 @@
 import React, { useEffect, useState } from 'react';
 import { Role, ManuscriptStatus, ReviewerRecommendation } from '../types';
 import {
-  ManuscriptRow, ReviewerAssignmentRow,
+  ManuscriptRow, ReviewerAssignmentRow, ManuscriptFileRow, ScreeningResponse,
   listManuscripts, getReviewerAssignments, subscribeToManuscripts,
-  respondToReviewInvite, submitReview
+  respondToReviewInvite, submitPeerReview, getManuscriptFiles
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
 import { getManuscriptStatusLabel } from '../lib/manuscriptStatusLabel';
 import { NavGroup, NavItem } from './SidebarNavGroup';
+import FilePreviewModal from './FilePreviewModal';
 import {
   Loader2, Check, X as XIcon, ChevronDown, User, AlertTriangle, ClipboardList, CheckCircle2, XCircle,
-  FileText, Lock, Eye, History, Star, BarChart3, Download, ClipboardCheck, Pencil, ShieldAlert
+  FileText, Lock, Eye, History, Star, BarChart3, Download, ClipboardCheck, ShieldAlert
 } from 'lucide-react';
+
+const PEER_REVIEW_QUESTIONS: { id: string; label: string; question: string }[] = [
+  { id: 'focus_scope_relevance', label: 'Focus, Scope, and Relevance', question: 'Does this manuscript explicitly match the research parameters and technical domain of this journal?' },
+  { id: 'theoretical_novelty', label: 'Theoretical Novelty', question: 'Does the study introduce distinct data insights, experimental approaches, or practical advancements that set it apart from prior publications?' },
+  { id: 'methodology_soundness', label: 'Methodology Soundness', question: 'Are the experimental designs, control variables, collection systems, and frameworks execution-sound and free from logical error?' },
+  { id: 'replicability_check', label: 'Replicability Check', question: 'Is the explanation in the methods section detailed enough for an independent lab to reproduce the exact experiment?' },
+  { id: 'structured_completeness', label: 'Structured Completeness', question: 'Are all core structural requirements -- including full data tables, high-resolution figures, and necessary abstract fields -- fully embedded?' },
+  { id: 'data_integrity', label: 'Data Integrity', question: 'Are the reported outcomes, statistical values, and graphs logically consistent across all body text and visual metrics?' },
+  { id: 'references_relevance', label: 'References Relevance', question: 'Are the cited references accurate, complete, up-to-date, and balanced without showing excessive author self-citations?' },
+  { id: 'ethical_attestation', label: 'Ethical Attestation', question: 'Does the text include explicit ethical approval numbers, trial registrations, or relevant human/animal participant safety declarations?' },
+  { id: 'structural_clarity', label: 'Structural Clarity', question: 'Is the level of language, sentence flow, and argument layout clear enough to communicate the scientific intent to the global field?' },
+  { id: 'conclusion_justification', label: 'Conclusion Justification', question: 'Do the final discussion claims align directly with the verified parameters of the collected data trends?' },
+];
 
 interface ReviewerWorkspaceProps {
   manuscripts?: any[];
@@ -31,7 +45,7 @@ const STATUS_STYLES: Record<ManuscriptStatus, string> = {
   REJECTED: 'bg-red-50 text-red-700 border-red-200',
 };
 
-interface Row { manuscript: ManuscriptRow; assignment: ReviewerAssignmentRow; }
+interface Row { manuscript: ManuscriptRow; assignment: ReviewerAssignmentRow; priorRounds: ReviewerAssignmentRow[]; }
 
 const TAB_META: Record<string, { title: string; subtitle: string }> = {
   ACTION_REQUIRED: { title: 'Action Required Assignments', subtitle: 'Select items below to accept, decline, or compose consensus reviews.' },
@@ -61,8 +75,14 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
       const withAssignments: Row[] = [];
       for (const m of manuscripts) {
         const assignments = await getReviewerAssignments(m.id);
-        const mine = assignments.find((a) => a.reviewer_id === data.user?.id);
-        if (mine) withAssignments.push({ manuscript: m, assignment: mine });
+        // A re-review round (Phase 2 Checkpoint C) creates a new
+        // reviewer_assignments row per manuscript_revisions cycle -- the
+        // most recent one (highest revision_number) is the one the reviewer
+        // should act on; earlier rounds are kept as read-only context.
+        const mine = assignments
+          .filter((a) => a.reviewer_id === data.user?.id)
+          .sort((a, b) => b.revision_number - a.revision_number);
+        if (mine.length > 0) withAssignments.push({ manuscript: m, assignment: mine[0], priorRounds: mine.slice(1) });
       }
       setRows(withAssignments);
     } finally {
@@ -233,12 +253,12 @@ function HistoryLog({ rows }: { rows: Row[] }) {
 function ScoringRubricReference() {
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-6">
-      <p className="text-xs text-slate-500 mb-5">These are the exact criteria used in the evaluation form when you review a manuscript, scored 1 (Poor) to 10 (Excellent).</p>
+      <p className="text-xs text-slate-500 mb-5">These are the exact questions used in the review questionnaire when you review a manuscript. Each requires a Yes/No answer and a reason.</p>
       <div className="space-y-4">
-        {SCORE_FIELDS.map(([key, label, description], idx) => (
-          <div key={key} className="border-b border-slate-100 pb-4 last:border-b-0">
-            <p className="text-xs font-black text-slate-900">{idx + 1}. {label}</p>
-            <p className="text-xs text-slate-600 mt-0.5">{description}</p>
+        {PEER_REVIEW_QUESTIONS.map((q, idx) => (
+          <div key={q.id} className="border-b border-slate-100 pb-4 last:border-b-0">
+            <p className="text-xs font-black text-slate-900">{idx + 1}. {q.label}</p>
+            <p className="text-xs text-slate-600 mt-0.5">{q.question}</p>
           </div>
         ))}
       </div>
@@ -399,32 +419,93 @@ function ManuscriptList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
   );
 }
 
+// Read-only summary of the reviewer's own earlier round(s) on this
+// manuscript -- shown when re-reviewing a revision (Phase 2 Checkpoint C)
+// so the reviewer can see what they said last time before evaluating the
+// changes.
+function PriorRoundsContext({ priorRounds }: { priorRounds: ReviewerAssignmentRow[] }) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const sorted = [...priorRounds].sort((a, b) => a.revision_number - b.revision_number);
+  return (
+    <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden">
+      {sorted.map((r) => (
+        <div key={r.id} className="border-b border-slate-200 last:border-b-0">
+          <button
+            type="button"
+            onClick={() => setExpanded(prev => ({ ...prev, [r.id]: !prev[r.id] }))}
+            className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-100 transition"
+          >
+            <span className="text-xs font-bold text-slate-700">
+              Your Previous Review — {r.revision_number === 0 ? 'Original Submission' : `Revision ${r.revision_number}`}
+            </span>
+            <span className="text-xs font-bold text-slate-500">{r.recommendation?.replace(/_/g, ' ') || r.status} {expanded[r.id] ? '▲' : '▼'}</span>
+          </button>
+          {expanded[r.id] && (
+            <div className="px-4 pb-4 space-y-2">
+              {(r.screening_responses || []).map((resp, idx) => {
+                const meta = PEER_REVIEW_QUESTIONS.find(q => q.id === resp.question_id);
+                return (
+                  <div key={resp.question_id} className="bg-white border border-slate-200 rounded p-2.5">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs font-bold text-slate-800">{idx + 1}. {meta?.label || resp.question_id}</p>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${resp.answer ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                        {resp.answer ? 'Yes' : 'No'}
+                      </span>
+                    </div>
+                    {resp.reason && <p className="text-xs text-slate-600">{resp.reason}</p>}
+                  </div>
+                );
+              })}
+              {r.comments_to_author && (
+                <div className="bg-white border border-slate-200 rounded p-2.5">
+                  <p className="text-[11px] font-bold text-slate-500 uppercase mb-1">Your Comments to Author</p>
+                  <p className="text-xs text-slate-700">{r.comments_to_author}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => void; onChanged: () => void }) {
-  const { manuscript, assignment } = row;
+  const { manuscript, assignment, priorRounds } = row;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [downloading, setDownloading] = useState(false);
+  const [showDeclineModal, setShowDeclineModal] = useState(false);
+  const [declineReason, setDeclineReason] = useState('');
+  const [files, setFiles] = useState<ManuscriptFileRow[]>([]);
+  const [previewFile, setPreviewFile] = useState<ManuscriptFileRow | null>(null);
 
-  const respond = async (accept: boolean) => {
+  useEffect(() => {
+    // The manuscript PDF is only unlocked once the invitation is accepted
+    // (see spec: "Do not show the manuscript PDF ... before the reviewer
+    // accepts the invitation").
+    if (assignment.status === 'INVITED') return;
+    getManuscriptFiles(manuscript.id).then(setFiles).catch(() => {});
+  }, [manuscript.id, assignment.status]);
+
+  const accept = async () => {
     setBusy(true); setError('');
-    try { await respondToReviewInvite(assignment.id, accept); onChanged(); }
+    try { await respondToReviewInvite(assignment.id, true); onChanged(); }
     catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
   };
 
-  const handleDownload = async () => {
-    setDownloading(true);
+  const decline = async () => {
+    if (!declineReason.trim()) { setError('Please provide a reason for declining.'); return; }
+    setBusy(true); setError('');
     try {
-      // In a real implementation, this would download the manuscript file from storage
-      setTimeout(() => {
-        alert(`Downloading manuscript ${manuscript.id}...`);
-        setDownloading(false);
-      }, 1000);
-    } catch (e: any) {
-      setError('Download failed: ' + e.message);
-      setDownloading(false);
-    }
+      await respondToReviewInvite(assignment.id, false, declineReason.trim());
+      setShowDeclineModal(false);
+      onChanged();
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
   };
+
+  const manuscriptPdf = files.find(f => f.file_type?.toLowerCase().includes('manuscript')) || files[0] || null;
 
   return (
     <div className="space-y-5">
@@ -436,11 +517,22 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
         <div className="flex items-start justify-between gap-4 mb-4">
           <div className="flex-1">
             <p className="font-mono text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded w-fit">{manuscript.id}</p>
-            <h2 className="text-lg font-black text-slate-900 mt-2">{manuscript.title}</h2>
+            <div className="flex items-center gap-2 mt-2">
+              <h2 className="text-lg font-black text-slate-900">{manuscript.title}</h2>
+              {assignment.revision_number > 0 && (
+                <span className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200">
+                  Revision {assignment.revision_number} re-review
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
               <div>
                 <p className="text-xs text-slate-500 font-semibold">Manuscript Status</p>
                 <p className="text-sm font-bold text-slate-900">{getManuscriptStatusLabel(manuscript.status)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 font-semibold">Submitted</p>
+                <p className="text-sm font-bold text-slate-900">{manuscript.submitted_at ? new Date(manuscript.submitted_at).toLocaleDateString() : 'N/A'}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500 font-semibold">Double-Blind</p>
@@ -459,31 +551,77 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
               </div>
             </div>
           </div>
-          <button
-            onClick={handleDownload}
-            disabled={downloading}
-            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all disabled:opacity-50 whitespace-nowrap flex items-center gap-1.5"
-          >
-            {downloading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-            Download PDF
-          </button>
+          {assignment.status !== 'INVITED' && (
+            <button
+              onClick={() => manuscriptPdf && setPreviewFile(manuscriptPdf)}
+              disabled={!manuscriptPdf}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all disabled:opacity-50 whitespace-nowrap flex items-center gap-1.5"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              {manuscriptPdf ? 'View Manuscript PDF' : 'No file available'}
+            </button>
+          )}
         </div>
         <p className="text-sm text-slate-600 leading-relaxed">{manuscript.abstract}</p>
       </div>
+
+      {priorRounds.length > 0 && (
+        <PriorRoundsContext priorRounds={priorRounds} />
+      )}
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">{error}</div>}
 
       {assignment.status === 'INVITED' && (
         <div className="bg-white border border-slate-200 rounded-xl p-6">
           <h3 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-1.5"><ClipboardCheck className="w-4 h-4" /> Accept or Decline Review Invitation</h3>
-          <p className="text-xs text-slate-600 mb-4">Do you accept this peer review invitation? You can decline if this manuscript is outside your area of expertise or you have a conflict of interest.</p>
+          <p className="text-xs text-slate-600 mb-4">Do you accept this peer review invitation? You can decline if this manuscript is outside your area of expertise or you have a conflict of interest. The manuscript PDF and review questionnaire unlock once you accept.</p>
           <div className="flex gap-3">
-            <button disabled={busy} onClick={() => respond(true)} className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-5 py-3 rounded-lg cursor-pointer disabled:opacity-50 transition-all flex-1">
+            <button disabled={busy} onClick={accept} className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-5 py-3 rounded-lg cursor-pointer disabled:opacity-50 transition-all flex-1">
               <Check className="w-4 h-4" /> ACCEPT REVIEW INVITATION
             </button>
-            <button disabled={busy} onClick={() => respond(false)} className="flex items-center gap-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold px-4 py-2.5 rounded-lg cursor-pointer disabled:opacity-50 transition-all">
+            <button disabled={busy} onClick={() => setShowDeclineModal(true)} className="flex items-center gap-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold px-4 py-2.5 rounded-lg cursor-pointer disabled:opacity-50 transition-all">
               <XIcon className="w-4 h-4" /> DECLINE
             </button>
+          </div>
+        </div>
+      )}
+
+      {showDeclineModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-lg max-w-md w-full p-6 space-y-4">
+            <h3 className="text-lg font-black text-slate-900">Decline Review Invitation</h3>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-2">Reason for declining *</label>
+              <textarea
+                value={declineReason}
+                onChange={(e) => setDeclineReason(e.target.value)}
+                disabled={busy}
+                autoFocus
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
+                rows={4}
+                placeholder="e.g. outside my area of expertise, conflict of interest..."
+              />
+            </div>
+            {error && <p className="text-xs text-red-600">{error}</p>}
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => { setShowDeclineModal(false); setError(''); }}
+                className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={decline}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-bold rounded-lg flex items-center gap-1.5"
+              >
+                {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Confirm Decline
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -518,53 +656,34 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
           <div className="bg-white border border-slate-200 rounded-xl p-6">
             <h3 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-1.5"><FileText className="w-4 h-4" /> Review Details (Read-Only)</h3>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-900 mb-2">Scores</label>
-                <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded">
-                  {[
-                    ['Scientific Merit', assignment.scientific_merit],
-                    ['Novelty / Innovation', assignment.novelty_innovation],
-                    ['Methodology Quality', assignment.methodology_quality],
-                    ['Literature Adequacy', assignment.literature_adequacy],
-                    ['Ethical Compliance', assignment.ethical_compliance],
-                    ['Data Reliability', assignment.data_reliability],
-                    ['Writing Quality', assignment.writing_quality],
-                  ].map(([label, value]) => (
-                    <div key={label as string} className="flex justify-between">
-                      <span className="text-slate-600">{label}</span>
-                      <span className="font-bold text-slate-900">{value != null ? `${value}/10` : '--'}</span>
+            <div className="space-y-3">
+              {(assignment.screening_responses || []).map((r, idx) => {
+                const meta = PEER_REVIEW_QUESTIONS.find(q => q.id === r.question_id);
+                return (
+                  <div key={r.question_id} className="border border-slate-200 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs font-bold text-slate-800">{idx + 1}. {meta?.label || r.question_id}</p>
+                      {r.answer ? (
+                        <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                          <Check className="w-3 h-3" /> Yes
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[11px] font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+                          <XIcon className="w-3 h-3" /> No
+                        </span>
+                      )}
                     </div>
-                  ))}
-                </div>
-              </div>
+                    {r.reason && <p className="text-xs text-slate-600">{r.reason}</p>}
+                  </div>
+                );
+              })}
+            </div>
 
+            <div className="space-y-4 mt-4">
               <div>
                 <label className="block text-xs font-bold text-slate-900 mb-2">Comments to Author</label>
                 <div className="p-3 bg-slate-50 rounded border border-slate-200 text-xs text-slate-900 min-h-20">
                   {assignment.comments_to_author || 'No comments provided'}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-900 mb-2">Strengths</label>
-                  <div className="p-3 bg-emerald-50 rounded border border-emerald-200 text-xs text-emerald-900 min-h-20">
-                    {assignment.strengths || 'No strengths noted'}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-900 mb-2">Weaknesses</label>
-                  <div className="p-3 bg-orange-50 rounded border border-orange-200 text-xs text-orange-900 min-h-20">
-                    {assignment.weaknesses || 'No weaknesses noted'}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-900 mb-2">Mandatory Revisions</label>
-                <div className="p-3 bg-slate-50 rounded border border-slate-200 text-xs text-slate-900 min-h-20">
-                  {assignment.mandatory_revisions || 'No revisions requested'}
                 </div>
               </div>
 
@@ -580,46 +699,36 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
           </div>
         </div>
       )}
+
+      {previewFile && (
+        <FilePreviewModal
+          isOpen={!!previewFile}
+          onClose={() => setPreviewFile(null)}
+          fileName={previewFile.file_name}
+          fileType={previewFile.file_type}
+          fileSize={previewFile.file_size || undefined}
+          publicUrl={previewFile.public_url || undefined}
+        />
+      )}
     </div>
   );
 }
 
-interface ScoreState {
-  scientificMerit: number; noveltyInnovation: number; methodologyQuality: number;
-  literatureAdequacy: number; ethicalCompliance: number; dataReliability: number; writingQuality: number; overallRecommendationScore: number;
-}
-
-const SCORE_FIELDS: [keyof ScoreState, string, string][] = [
-  ['scientificMerit', 'SCIENTIFIC MERIT', 'Original contribution and study rigor'],
-  ['noveltyInnovation', 'NOVELTY & INNOVATION', 'Breakthrough contributions and uniqueness'],
-  ['methodologyQuality', 'METHODOLOGY QUALITY', 'Experimental setup and verification rigor'],
-  ['literatureAdequacy', 'LITERATURE REVIEW', 'Mathematical reproducibility and accuracy'],
-  ['dataReliability', 'RESULTS & VALIDITY', 'Data quality and statistical validity'],
-  ['writingQuality', 'WRITING QUALITY', 'Clarity of presentation and writing'],
-  ['ethicalCompliance', 'ETHICAL STANDARDS', 'Research ethics and moral bounds'],
-  ['overallRecommendationScore', 'OVERALL RECOMMENDATION SCORE', 'Manual comprehensive peer rating evaluating overall scientific substance'],
-];
-
 function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: ManuscriptRow; assignmentId: string; onSubmitted: () => void }) {
-  const [scores, setScores] = useState<ScoreState>({
-    scientificMerit: 0, noveltyInnovation: 0, methodologyQuality: 0, literatureAdequacy: 0, ethicalCompliance: 0, dataReliability: 0, writingQuality: 0, overallRecommendationScore: 0
-  });
-  const [criteriaReasons, setCriteriaReasons] = useState<Record<string, string>>({
-    scientificMerit: '', noveltyInnovation: '', methodologyQuality: '', literatureAdequacy: '', ethicalCompliance: '', dataReliability: '', writingQuality: '', overallRecommendationScore: ''
-  });
-  const [recommendation, setRecommendation] = useState<ReviewerRecommendation>('MINOR_REVISION');
+  const [responses, setResponses] = useState<Record<string, { answer: boolean | null; reason: string }>>(
+    () => Object.fromEntries(PEER_REVIEW_QUESTIONS.map(q => [q.id, { answer: null, reason: '' }]))
+  );
+  const [recommendation, setRecommendation] = useState<ReviewerRecommendation | null>(null);
   const [commentsToAuthor, setCommentsToAuthor] = useState('');
   const [commentsToEditor, setCommentsToEditor] = useState('');
-  const [strengths, setStrengths] = useState('');
-  const [weaknesses, setWeaknesses] = useState('');
-  const [revisions, setRevisions] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showModal, setShowModal] = useState(true);
   const [lastSaveTime, setLastSaveTime] = useState<string | null>(null);
 
-  const setScore = (key: keyof ScoreState, value: number) => setScores((s) => ({ ...s, [key]: value }));
+  const setAnswer = (id: string, answer: boolean) => setResponses(prev => ({ ...prev, [id]: { ...prev[id], answer } }));
+  const setReason = (id: string, reason: string) => setResponses(prev => ({ ...prev, [id]: { ...prev[id], reason } }));
 
   const draftKey = `reviewer_draft_${assignmentId}`;
 
@@ -631,14 +740,10 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
       const raw = localStorage.getItem(draftKey);
       if (!raw) return;
       const draft = JSON.parse(raw);
-      if (draft.scores) setScores(draft.scores);
-      if (draft.criteriaReasons) setCriteriaReasons(draft.criteriaReasons);
+      if (draft.responses) setResponses(draft.responses);
       if (draft.recommendation) setRecommendation(draft.recommendation);
       if (typeof draft.commentsToAuthor === 'string') setCommentsToAuthor(draft.commentsToAuthor);
       if (typeof draft.commentsToEditor === 'string') setCommentsToEditor(draft.commentsToEditor);
-      if (typeof draft.strengths === 'string') setStrengths(draft.strengths);
-      if (typeof draft.weaknesses === 'string') setWeaknesses(draft.weaknesses);
-      if (typeof draft.revisions === 'string') setRevisions(draft.revisions);
       if (draft.lastSavedAt) setLastSaveTime(new Date(draft.lastSavedAt).toLocaleTimeString());
     } catch {
       // Corrupted/unreadable draft -- ignore and start from a blank form.
@@ -647,17 +752,13 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
   }, []);
 
   // Saving a draft only persists the in-progress form locally -- it never
-  // calls submitReview and never touches manuscript/reviewer status.
+  // calls submitPeerReview and never touches manuscript/reviewer status.
   const saveDraft = async () => {
     setBusy(true);
     setError('');
     try {
       const savedAt = new Date().toISOString();
-      localStorage.setItem(draftKey, JSON.stringify({
-        scores, criteriaReasons, recommendation,
-        commentsToAuthor, commentsToEditor, strengths, weaknesses, revisions,
-        lastSavedAt: savedAt,
-      }));
+      localStorage.setItem(draftKey, JSON.stringify({ responses, recommendation, commentsToAuthor, commentsToEditor, lastSavedAt: savedAt }));
       setLastSaveTime(new Date(savedAt).toLocaleTimeString());
       setSuccess('Draft saved successfully');
       setTimeout(() => setSuccess(''), 2000);
@@ -671,39 +772,20 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
   // Auto-save every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      if (commentsToAuthor || commentsToEditor || strengths || weaknesses || revisions) {
-        saveDraft();
-      }
+      if (commentsToAuthor || commentsToEditor) saveDraft();
     }, 30000);
     return () => clearInterval(interval);
-  }, [scores, recommendation, commentsToAuthor, commentsToEditor, strengths, weaknesses, revisions, assignmentId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [responses, recommendation, commentsToAuthor, commentsToEditor, assignmentId]);
+
+  const unanswered = PEER_REVIEW_QUESTIONS.filter(q => responses[q.id].answer === null);
+  const missingReasons = PEER_REVIEW_QUESTIONS.filter(q => responses[q.id].answer !== null && !responses[q.id].reason.trim());
+  const questionnaireComplete = unanswered.length === 0 && missingReasons.length === 0;
 
   const validateForm = (): string | null => {
-    // Check all scores are filled
-    const allScoresFilled = scoreFields.every(([key]) => scores[key] > 0);
-    if (!allScoresFilled) {
-      return 'Please provide scores for all evaluation criteria (1-10 scale).';
-    }
-
-    // Check qualitative fields
-    if (!commentsToAuthor.trim()) {
-      return 'Comments to Authors is required.';
-    }
-    if (!strengths.trim()) {
-      return 'Strengths of Manuscript is required.';
-    }
-    if (!weaknesses.trim()) {
-      return 'Weaknesses of Manuscript is required.';
-    }
-    if (!revisions.trim()) {
-      return 'Mandatory Revisions is required.';
-    }
-
-    // Check recommendation is selected
-    if (!recommendation) {
-      return 'Please select a recommendation.';
-    }
-
+    if (!questionnaireComplete) return 'Please answer all 10 questions and provide a reason for each.';
+    if (!commentsToAuthor.trim()) return 'Comments to Author is required.';
+    if (!recommendation) return 'Please select a recommendation.';
     return null;
   };
 
@@ -716,16 +798,12 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
 
     setBusy(true); setError('');
     try {
-      await submitReview(assignmentId, {
-        ...scores,
-        recommendation,
-        commentsToAuthor,
-        commentsToEditor,
-        strengths,
-        weaknesses,
-        mandatory_revisions: revisions,
-        criteriaReasons
-      });
+      const payload: ScreeningResponse[] = PEER_REVIEW_QUESTIONS.map(q => ({
+        question_id: q.id,
+        answer: responses[q.id].answer as boolean,
+        reason: responses[q.id].reason.trim(),
+      }));
+      await submitPeerReview(assignmentId, payload, commentsToAuthor, recommendation as ReviewerRecommendation, commentsToEditor);
       try { localStorage.removeItem(draftKey); } catch { /* non-fatal */ }
       setSuccess('Review submitted successfully!');
       setTimeout(() => onSubmitted(), 1500);
@@ -737,8 +815,6 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
   };
 
   if (!showModal) return null;
-
-  const scoreFields = SCORE_FIELDS;
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
@@ -765,67 +841,95 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
 
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3.5 text-xs text-amber-800">
             <p className="font-bold mb-1 flex items-center gap-1.5"><AlertTriangle className="w-4 h-4" /> Your Expert Evaluation is Desired</p>
-            <p>Please provide your direct expert assessment by scoring each criterion and drafting qualitative critiques. All scores must be entered manually; no automated suggestions are applied.</p>
+            <p>Please answer each questionnaire item and explain your reasoning. This review is a recommendation only -- the Editor makes the final editorial decision.</p>
           </div>
 
-          {/* Evaluation Criteria */}
+          {/* Questionnaire */}
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-black text-sm text-slate-900">EVALUATION CRITERIA</h3>
-              <span className="text-xs font-bold text-blue-600">Scale: 1 (Poor) to 10 (Excellent)</span>
-            </div>
+            <h3 className="font-black text-sm text-slate-900 mb-4">REVIEW QUESTIONNAIRE</h3>
             <div className="space-y-5">
-              {scoreFields.map(([key, label, description], idx) => (
-                <div key={key} className="border-b border-slate-200 pb-5 last:border-b-0">
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="flex-1">
-                      <label className="block text-xs font-black text-slate-900 mb-1">{idx + 1}. {label}</label>
-                      <p className="text-xs text-slate-600">{description}</p>
-                    </div>
-                    <label className="flex items-center gap-1 text-xs text-slate-600 font-semibold">
-                      <input type="checkbox" className="w-4 h-4 rounded" />
-                      N/A
-                    </label>
-                  </div>
-                  <div className="flex gap-1 mb-2">
-                    {Array.from({ length: 10 }).map((_, i) => (
+              {PEER_REVIEW_QUESTIONS.map((q, idx) => {
+                const state = responses[q.id];
+                return (
+                  <div key={q.id} className="border-b border-slate-200 pb-5 last:border-b-0">
+                    <label className="block text-xs font-black text-slate-900 mb-1">{idx + 1}. {q.label.toUpperCase()}</label>
+                    <p className="text-xs text-slate-600 mb-3">{q.question}</p>
+                    <div className="flex gap-2 mb-3">
                       <button
-                        key={i + 1}
-                        onClick={() => setScore(key, i + 1)}
-                        className={`w-8 h-8 rounded font-bold text-xs transition-all ${
-                          scores[key] === i + 1
-                            ? 'bg-[#008751] text-white'
-                            : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setAnswer(q.id, true)}
+                        className={`px-5 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 ${
+                          state.answer === true ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
                         }`}
                       >
-                        {i + 1}
+                        <Check className="w-4 h-4" /> Yes
                       </button>
-                    ))}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setAnswer(q.id, false)}
+                        className={`px-5 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 ${
+                          state.answer === false ? 'bg-red-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                        }`}
+                      >
+                        <XIcon className="w-4 h-4" /> No
+                      </button>
+                    </div>
+                    <label className="block text-xs font-bold text-slate-700 mb-2">Reason *</label>
+                    <textarea
+                      value={state.reason}
+                      onChange={(e) => setReason(q.id, e.target.value)}
+                      placeholder="Explain your answer for this question..."
+                      disabled={busy}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
+                      rows={2}
+                    />
                   </div>
-                  <p className="text-[10px] text-blue-600 font-bold mb-2">SCORE SELECTION: {scores[key]} / 10</p>
-                  <label className="block text-xs font-bold text-slate-700 mb-2">Reason for this score</label>
-                  <textarea
-                    value={criteriaReasons[key]}
-                    onChange={(e) => setCriteriaReasons(prev => ({ ...prev, [key]: e.target.value }))}
-                    placeholder="Explain your score for this criterion..."
-                    disabled={busy}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
-                    rows={2}
-                  />
-                </div>
-              ))}
+                );
+              })}
             </div>
+            {!questionnaireComplete && (
+              <p className="text-xs text-amber-700 font-semibold mt-3">
+                Answer all 10 questions with a reason for each before submitting ({unanswered.length + missingReasons.length} remaining).
+              </p>
+            )}
+          </div>
+
+          {/* Comments to Author */}
+          <div className="border-t border-slate-200 pt-6">
+            <p className="text-xs font-bold text-slate-900 mb-1">Comments to Author <span className="text-red-600">*</span></p>
+            <p className="text-[11px] text-slate-500 mb-2">This is your detailed feedback that will eventually be shared with the Author through the Coordinator.</p>
+            <textarea
+              value={commentsToAuthor}
+              onChange={(e) => setCommentsToAuthor(e.target.value)}
+              rows={5}
+              placeholder="Provide detailed feedback for the author..."
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
+            />
+          </div>
+
+          <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
+            <p className="text-xs font-bold text-emerald-900 mb-1">📋 Confidential Comments to Editor (Optional)</p>
+            <p className="text-xs text-emerald-800">Private feedback regarding manuscript novelty or scientific validity. Locked strictly to editors.</p>
+            <textarea
+              value={commentsToEditor}
+              onChange={(e) => setCommentsToEditor(e.target.value)}
+              rows={3}
+              placeholder="Private notes for editors only..."
+              className="w-full border border-emerald-300 rounded-lg px-3 py-2 text-xs font-sans mt-2 bg-white focus:border-emerald-400 focus:outline-none"
+            />
           </div>
 
           {/* Recommendation */}
           <div className="border-t border-slate-200 pt-6">
-            <h3 className="font-black text-sm text-slate-900 mb-4">FINAL RECOMMENDATION</h3>
-            <p className="text-xs text-slate-600 mb-4">Please select only one final recommendation for this manuscript.</p>
+            <h3 className="font-black text-sm text-slate-900 mb-4">RECOMMENDATION</h3>
+            <p className="text-xs text-slate-600 mb-4">Please select only one recommendation for this manuscript.</p>
             <div className="grid grid-cols-1 gap-3">
               {[
                 { value: 'ACCEPT', label: 'Accept', desc: 'Suitable for immediate publication as is', dot: 'bg-emerald-500' },
-                { value: 'MINOR_REVISION', label: 'Minor Revision', desc: 'Requires minor refinements or polishing', dot: 'bg-amber-500' },
-                { value: 'MAJOR_REVISION', label: 'Major Revision', desc: 'Requires substantial conceptual refinements', dot: 'bg-orange-500' },
+                { value: 'MINOR_REVISION', label: 'Accept with Minor Revision', desc: 'Requires minor refinements or polishing', dot: 'bg-amber-500' },
+                { value: 'MAJOR_REVISION', label: 'Accept with Major Revision', desc: 'Requires substantial conceptual refinements', dot: 'bg-orange-500' },
                 { value: 'REJECT', label: 'Reject', desc: 'Not suitable for presentation or publication', dot: 'bg-red-500' },
               ].map((option) => (
                 <label key={option.value} className={`flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all ${
@@ -848,81 +952,10 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
                 </label>
               ))}
             </div>
+            <p className="text-xs text-slate-500 italic mt-3">Your recommendation and review comments will be forwarded to the Editor for final editorial assessment.</p>
           </div>
 
-          {/* Qualitative Appraisals */}
-          <div>
-            <h3 className="font-black text-sm text-slate-900 mb-3">QUALITATIVE APPRAISALS</h3>
-            <p className="text-xs text-slate-600 mb-4">Provide detailed, comprehensive reports inside these specific comments gates.</p>
-
-            <label className="block mb-5 pb-5 border-b border-slate-200">
-              <p className="text-xs font-bold text-slate-900 mb-1">1. Comments to Authors <span className="text-red-600">*</span></p>
-              <p className="text-[11px] text-slate-500 mb-2">Visible to authors</p>
-              <textarea
-                value={commentsToAuthor}
-                onChange={(e) => setCommentsToAuthor(e.target.value)}
-                rows={4}
-                placeholder="Provide feedback visible to the authors..."
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
-              />
-            </label>
-
-            <div className="grid grid-cols-3 gap-4 mb-5">
-              <label>
-                <p className="text-xs font-bold text-slate-900 mb-2">Strengths of Manuscript <span className="text-red-600">*</span></p>
-                <div className="relative">
-                  <textarea
-                    value={strengths}
-                    onChange={(e) => setStrengths(e.target.value)}
-                    rows={4}
-                    placeholder="List key strengths..."
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
-                  />
-                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600"><Pencil className="w-4 h-4" /></button>
-                </div>
-              </label>
-              <label>
-                <p className="text-xs font-bold text-slate-900 mb-2">Weaknesses of Manuscript <span className="text-red-600">*</span></p>
-                <div className="relative">
-                  <textarea
-                    value={weaknesses}
-                    onChange={(e) => setWeaknesses(e.target.value)}
-                    rows={4}
-                    placeholder="List key weaknesses..."
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
-                  />
-                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600"><Pencil className="w-4 h-4" /></button>
-                </div>
-              </label>
-              <label>
-                <p className="text-xs font-bold text-slate-900 mb-2">Mandatory Revisions <span className="text-red-600">*</span></p>
-                <div className="relative">
-                  <textarea
-                    value={revisions}
-                    onChange={(e) => setRevisions(e.target.value)}
-                    rows={4}
-                    placeholder="List mandatory changes..."
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
-                  />
-                  <button className="absolute bottom-2 right-2 text-slate-400 hover:text-slate-600"><Pencil className="w-4 h-4" /></button>
-                </div>
-              </label>
-            </div>
-
-            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
-              <p className="text-xs font-bold text-emerald-900 mb-1">📋 Confidential Comments to Editor</p>
-              <p className="text-xs text-emerald-800">Private feedback regarding manuscript novelty or scientific validity. Locked strictly to editors.</p>
-              <textarea
-                value={commentsToEditor}
-                onChange={(e) => setCommentsToEditor(e.target.value)}
-                rows={4}
-                placeholder="Private notes for editors only..."
-                className="w-full border border-emerald-300 rounded-lg px-3 py-2 text-xs font-sans mt-2 bg-white focus:border-emerald-400 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <p className="text-xs text-slate-500 italic">All edits auto-saved to Supabase every 30 seconds. {lastSaveTime && <span className="text-emerald-600 font-semibold">Last saved: {lastSaveTime}</span>}</p>
+          <p className="text-xs text-slate-500 italic">Draft auto-saved locally every 30 seconds. {lastSaveTime && <span className="text-emerald-600 font-semibold">Last saved: {lastSaveTime}</span>}</p>
         </div>
 
         {/* Modal Footer */}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getRevisions, getRevisionFiles, getManuscriptFiles, RevisionRow, ManuscriptFileRow, ProfileRow } from '../lib/workflow';
+import { getRevisions, getRevisionFiles, getManuscriptFiles, getReviewerAssignments, RevisionRow, ManuscriptFileRow, ProfileRow, ReviewerAssignmentRow } from '../lib/workflow';
 import { ChevronDown, ChevronRight, FileText, Loader2 } from 'lucide-react';
 
 interface Props {
@@ -28,6 +28,7 @@ export default function RevisionHistoryPanel({ manuscriptId, profiles = {} }: Pr
   const [revisions, setRevisions] = useState<RevisionRow[]>([]);
   const [originalFiles, setOriginalFiles] = useState<ManuscriptFileRow[]>([]);
   const [revisionFiles, setRevisionFiles] = useState<Record<string, ManuscriptFileRow[]>>({});
+  const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -37,11 +38,12 @@ export default function RevisionHistoryPanel({ manuscriptId, profiles = {} }: Pr
     setLoading(true);
     setError('');
 
-    Promise.all([getRevisions(manuscriptId), getManuscriptFiles(manuscriptId)])
-      .then(async ([revs, files]) => {
+    Promise.all([getRevisions(manuscriptId), getManuscriptFiles(manuscriptId), getReviewerAssignments(manuscriptId).catch(() => [])])
+      .then(async ([revs, files, reviewers]) => {
         if (!active) return;
         setRevisions(revs);
         setOriginalFiles(files);
+        setReviewerAssignments(reviewers);
 
         const filesByRevision: Record<string, ManuscriptFileRow[]> = {};
         await Promise.all(revs.map(async (r) => {
@@ -141,7 +143,7 @@ export default function RevisionHistoryPanel({ manuscriptId, profiles = {} }: Pr
               : rev.status === 'REVISION_SUBMITTED' || rev.status === 'UNDER_REVIEW' ? 'bg-blue-100 text-blue-700'
               : 'bg-amber-100 text-amber-700'
             }`}>
-              {STATUS_LABEL[rev.status] || rev.status}
+              {rev.status === 'UNDER_REVIEW' && rev.origin === 'PEER_REVIEW' ? 'With Reviewers' : (STATUS_LABEL[rev.status] || rev.status)}
             </span>
           </button>
           {expanded[rev.id] && (
@@ -164,6 +166,26 @@ export default function RevisionHistoryPanel({ manuscriptId, profiles = {} }: Pr
                   <p className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3 whitespace-pre-wrap">{rev.decision_letter}</p>
                 </div>
               )}
+              {(() => {
+                // Reviewer reports from the round that led to THIS revision
+                // (Phase 2 Checkpoint C) -- kept visually distinct from the
+                // Decision Letter above so it's clear which role said what.
+                const reviewerReports = reviewerAssignments.filter(r => r.revision_number === rev.revision_number - 1 && r.status === 'SUBMITTED');
+                if (reviewerReports.length === 0) return null;
+                return (
+                  <div>
+                    <p className="font-bold text-slate-700 uppercase text-[10px] mb-2">Reviewer Comments</p>
+                    <div className="space-y-2">
+                      {reviewerReports.map((r, idx) => (
+                        <div key={r.id} className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                          <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Reviewer {idx + 1}{r.recommendation ? ` — ${r.recommendation.replace(/_/g, ' ')}` : ''}</p>
+                          {r.comments_to_author && <p className="text-sm text-slate-700 whitespace-pre-wrap">{r.comments_to_author}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               <div>
                 <p className="font-bold text-slate-700 uppercase text-[10px] mb-2">Files for This Revision</p>
                 {renderFiles(revisionFiles[rev.id] || [])}

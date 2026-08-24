@@ -289,7 +289,7 @@ export default function EditorEvaluationSidebar({
         items={[
           {
             id: 'editor_evaluation',
-            label: 'Editor Evaluation',
+            label: 'Initial Editorial Screening',
             icon: BarChart3,
             badge: evaluationBadge
           },
@@ -307,7 +307,7 @@ export default function EditorEvaluationSidebar({
           },
           {
             id: 'suggestions',
-            label: 'Suggestions',
+            label: 'Reviewer Selection',
             icon: Users,
             badge: suggestionsBadge
           },

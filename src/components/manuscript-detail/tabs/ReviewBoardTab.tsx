@@ -4,10 +4,10 @@ import {
   coordinatorAcceptSuggestion, coordinatorDeclineSuggestion, coordinatorReplaceSuggestion,
   coordinatorAssignReviewerDirectly, finalizeReviewerBoard, getEditorReviewerActions,
   coordinatorFinalizeReviewerSuggestion, approveUserRole, coordinatorReactivateReviewer,
-  coordinatorReplaceReviewer
+  coordinatorReplaceReviewer, coordinatorSendReviewerInvitations, REPLACEMENT_WINDOW_MS
 } from '../../../lib/workflow';
 import { createReviewerAccount } from '../../../lib/auth';
-import { Plus, AlertCircle, Loader2, CheckCircle, Star, XCircle, RefreshCw, UserPlus } from 'lucide-react';
+import { Plus, AlertCircle, Loader2, CheckCircle, Star, XCircle, RefreshCw, UserPlus, Send } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 
 const generateTempPassword = () => {
@@ -47,6 +47,7 @@ export function ReviewBoardTab({
   const [showReplaceModal, setShowReplaceModal] = useState<string | null>(null);
   const [replacementReviewerId, setReplacementReviewerId] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
+  const [sendingInvitations, setSendingInvitations] = useState(false);
   const [showReplaceDeclinedModal, setShowReplaceDeclinedModal] = useState<string | null>(null);
   const [declinedReplacementId, setDeclinedReplacementId] = useState<string | null>(null);
 
@@ -306,6 +307,25 @@ export function ReviewBoardTab({
     }
   };
 
+  // Handle sending invitations for the 2 reviewers the Editor selected
+  // (via "Move to Next Stage") -- a single action instead of Accept-ing
+  // each suggestion individually. See coordinator_send_reviewer_invitations()
+  // in 0026_editor_reviewer_selection.sql.
+  const handleSendInvitations = async () => {
+    setError('');
+    setSendingInvitations(true);
+    try {
+      await coordinatorSendReviewerInvitations(manuscript.id);
+      setSuccess('Invitations sent. The manuscript stays in Editorial Review until both reviewers accept.');
+      setTimeout(() => setSuccess(''), 4000);
+      onDataChange();
+    } catch (e: any) {
+      setError(e.message || 'Failed to send invitations');
+    } finally {
+      setSendingInvitations(false);
+    }
+  };
+
   // Handle finalize board
   const handleFinalize = async () => {
     if (assignedCount !== 2) {
@@ -370,17 +390,60 @@ export function ReviewBoardTab({
         </div>
       </div>
 
-      {/* Editor Suggested Reviewers */}
-      {editorSuggestions.length > 0 && (
+      {/* Editor Selected Reviewers -- exactly 2 pending, from "Move to Next
+          Stage". A single Send Invitation action, per the reviewer-selection
+          workflow (0026), instead of the per-suggestion Accept/Decline/Replace
+          UI below (which still exists for the pre-existing ad-hoc suggestion
+          path -- odd counts, or suggestions already partially actioned). */}
+      {manuscript.status === 'EDITOR_REVIEW' && editorSuggestions.filter(s => getSuggestionStatus(s.id) === 'PENDING').length === 2 && (
+        <div className="bg-white border-2 border-emerald-200 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Send className="w-5 h-5 text-emerald-600" />
+            <h3 className="text-sm font-black text-slate-900">Reviewers Selected by Editor</h3>
+          </div>
+          <div className="space-y-2">
+            {editorSuggestions.filter(s => getSuggestionStatus(s.id) === 'PENDING').map((s, idx) => (
+              <div key={s.id} className="border border-slate-200 rounded-lg p-3">
+                <p className="text-xs font-bold text-slate-500 uppercase mb-1">Reviewer {idx + 1}</p>
+                <p className="text-sm font-semibold text-slate-900">{s.name}</p>
+                <p className="text-xs text-slate-600">{s.email}</p>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={handleSendInvitations}
+            disabled={sendingInvitations}
+            className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-sm rounded-lg transition flex items-center justify-center gap-2"
+          >
+            {sendingInvitations ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            Send Invitation
+          </button>
+          <p className="text-[11px] text-slate-500">
+            The manuscript stays in Editorial Review until both reviewers accept — it only moves to Peer Review once both have.
+          </p>
+        </div>
+      )}
+
+      {/* Editor Suggested Reviewers -- the 2 selections already shown above
+          (via Send Invitation) are excluded here to avoid showing the same
+          pending pair twice; this list still covers everything else
+          (already actioned suggestions, or the older ad-hoc suggestion path). */}
+      {(() => {
+        const showSimplifiedInvite = manuscript.status === 'EDITOR_REVIEW' && editorSuggestions.filter(s => getSuggestionStatus(s.id) === 'PENDING').length === 2;
+        const visibleEditorSuggestions = showSimplifiedInvite
+          ? editorSuggestions.filter(s => getSuggestionStatus(s.id) !== 'PENDING')
+          : editorSuggestions;
+        if (visibleEditorSuggestions.length === 0) return null;
+        return (
         <div className="bg-white border-2 border-amber-200 rounded-2xl p-6 space-y-4">
           <div className="flex items-center gap-2 mb-1">
             <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
-            <h3 className="text-sm font-black text-slate-900">Suggested Reviewers ({editorSuggestions.length})</h3>
+            <h3 className="text-sm font-black text-slate-900">Suggested Reviewers ({visibleEditorSuggestions.length})</h3>
           </div>
           <p className="text-xs text-slate-500 mb-4">Reviewers suggested by the editor. Accept to create an account and send an invitation, or choose from Available Reviewers below instead.</p>
 
           <div className="space-y-3">
-            {editorSuggestions.map(suggestion => {
+            {visibleEditorSuggestions.map(suggestion => {
               const status = getSuggestionStatus(suggestion.id);
               const isAssigned = reviewerAssignments.some(r => r.reviewer_id === suggestion.id);
 
@@ -513,7 +576,8 @@ export function ReviewBoardTab({
             })}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Assigned Reviewers */}
       {assignedCount > 0 && (
@@ -523,7 +587,19 @@ export function ReviewBoardTab({
             {reviewerAssignments.map((assignment, idx) => {
               const reviewer = profiles[assignment.reviewer_id];
               const isDeclined = assignment.status === 'DECLINED';
-              const canReplace = isDeclined && manuscript.status === 'UNDER_REVIEW';
+              // At EDITOR_REVIEW, replacing is the Editor's job for the first
+              // 2 days after a decline (see ReviewerReplacementAlert.tsx) --
+              // the Coordinator only steps in as a fallback once that
+              // deadline has passed. At UNDER_REVIEW (peer review already
+              // started), the Coordinator could always replace immediately;
+              // unchanged from 0024.
+              const replacementDeadlinePassed = !!assignment.responded_at &&
+                Date.now() - new Date(assignment.responded_at).getTime() > REPLACEMENT_WINDOW_MS;
+              const canReplace = isDeclined && (
+                manuscript.status === 'UNDER_REVIEW' ||
+                (manuscript.status === 'EDITOR_REVIEW' && replacementDeadlinePassed)
+              );
+              const awaitingEditorReplacement = isDeclined && manuscript.status === 'EDITOR_REVIEW' && !replacementDeadlinePassed;
               return (
                 <div key={assignment.id} className={`border rounded-lg p-4 ${isDeclined ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
                   <div className="flex items-start justify-between">
@@ -578,6 +654,12 @@ export function ReviewBoardTab({
                         </button>
                       )}
                     </div>
+                  )}
+
+                  {awaitingEditorReplacement && (
+                    <p className="text-xs text-amber-700 mt-3 pt-3 border-t border-red-200">
+                      Awaiting the Editor to select a replacement (2-day window). You'll be able to assign one directly after that.
+                    </p>
                   )}
 
                   {(assignment.invited_at || assignment.responded_at || assignment.submitted_at) && (

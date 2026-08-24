@@ -1,5 +1,5 @@
 import { useState, useEffect, ChangeEvent, DragEvent } from 'react';
-import { getRevisions, getRevisionFiles, uploadRevisionFile, deleteManuscriptFile, submitRevision, ManuscriptFileRow, RevisionRow } from '../lib/workflow';
+import { getRevisions, getRevisionFiles, uploadRevisionFile, deleteManuscriptFile, submitRevision, getReviewerAssignments, ManuscriptFileRow, RevisionRow, ReviewerAssignmentRow } from '../lib/workflow';
 import { Loader2, Upload, CheckCircle, X, FileText } from 'lucide-react';
 
 interface AuthorRevisionRequestProps {
@@ -120,6 +120,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   const [showDecisionLetter, setShowDecisionLetter] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
   const [manualChecklist, setManualChecklist] = useState({ addressedComments: false, confirmedDetails: false });
+  const [reviewerComments, setReviewerComments] = useState<ReviewerAssignmentRow[]>([]);
 
   useEffect(() => {
     loadRevisions();
@@ -130,6 +131,17 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
       loadRevisionFiles(selectedRevision.id);
     }
   }, [selectedRevision]);
+
+  // Reviewer feedback that led to this revision (Phase 2 Checkpoint C) --
+  // the round just before this one. Kept separate from the Editor's
+  // Decision card below so the Author can tell which feedback came from
+  // which role. Reviewer identity isn't resolved/shown (double-blind).
+  useEffect(() => {
+    if (!selectedRevision || selectedRevision.revision_number <= 0) { setReviewerComments([]); return; }
+    getReviewerAssignments(manuscriptId)
+      .then(rows => setReviewerComments(rows.filter(r => r.revision_number === selectedRevision.revision_number - 1 && r.status === 'SUBMITTED')))
+      .catch(() => setReviewerComments([]));
+  }, [manuscriptId, selectedRevision?.id, selectedRevision?.revision_number]);
 
   const loadRevisions = async () => {
     try {
@@ -194,7 +206,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   const handleSubmitRevision = async () => {
     if (!selectedRevision || !canSubmit || submitting) return;
     if (selectedRevision.status !== 'AWAITING_AUTHOR_UPLOAD') return;
-    if (!window.confirm(`Send Revision ${selectedRevision.revision_number} to the editor? You won't be able to make further changes once it's sent.`)) return;
+    if (!window.confirm(`Send Revision ${selectedRevision.revision_number} to the coordinator? You won't be able to make further changes once it's sent.`)) return;
 
     setSubmitting(true);
     setError('');
@@ -295,6 +307,31 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
         )}
       </div>
 
+      {/* Reviewer Comments -- kept visually separate from the Editor's
+          Decision card above so the Author knows which feedback came from
+          which role, per spec. Only present when this revision followed a
+          peer-review round. */}
+      {reviewerComments.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
+          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide">Reviewer Comments</h3>
+          {reviewerComments.map((r, idx) => (
+            <div key={r.id} className="border border-slate-200 rounded-lg p-4">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Reviewer {idx + 1}</p>
+              {r.comments_to_author && <p className="text-sm text-slate-700 leading-relaxed">{r.comments_to_author}</p>}
+              {(r.screening_responses?.length ?? 0) > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  {r.screening_responses.filter(resp => !resp.answer).map(resp => (
+                    <p key={resp.question_id} className="text-xs text-slate-600 bg-slate-50 rounded p-2">
+                      <span className="font-bold text-red-700">Flagged:</span> {resp.reason}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Revision Checklist */}
       <div className="bg-white border border-slate-200 rounded-lg p-6">
         <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Revision Checklist</h3>
@@ -392,7 +429,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
                 className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-3 rounded-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                Send to Editor
+                Send to Coordinator
               </button>
             </div>
             {!canSubmit && (

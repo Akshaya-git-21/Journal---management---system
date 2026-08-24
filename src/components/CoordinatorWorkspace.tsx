@@ -7,7 +7,8 @@ import {
   listManuscripts, getEditorAssignments, getReviewerAssignments, getStatusHistory, getSuggestedReviewers,
   listActiveProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished, sendToPublisher,
   subscribeToManuscripts, PublishDecision, getRevisions, RevisionRow, getReviewerAssignmentCounts,
-  getRecentStatusHistory, getOverdueReviewerAssignments, OverdueReviewRow, getRecentAuditLog
+  getRecentStatusHistory, getOverdueReviewerAssignments, OverdueReviewRow, getRecentAuditLog,
+  notifyExpiredReviewerReplacements
 } from '../lib/workflow';
 import { getManuscriptStatusLabel, getLatestRevision } from '../lib/manuscriptStatusLabel';
 import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
@@ -104,6 +105,14 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
       }
     };
     getToken();
+  }, []);
+
+  // Lazily surface any reviewer-replacement deadline that expired with no
+  // Editor action taken -- idempotent (see notify_expired_reviewer_replacements
+  // in 0034_reviewer_replacement_round_isolation.sql), safe to call every
+  // time the Coordinator lands on their dashboard.
+  useEffect(() => {
+    notifyExpiredReviewerReplacements().catch(() => {});
   }, []);
 
   const resetInviteForm = () => {

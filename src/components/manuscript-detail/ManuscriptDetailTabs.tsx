@@ -29,7 +29,7 @@ const TABS = [
   { id: 'overview', label: 'Overview', icon: '📋' },
   { id: 'manuscript', label: 'Manuscript', icon: '📄' },
   { id: 'files', label: 'Files for Review (1)', icon: '📁' },
-  { id: 'evaluation', label: 'Editor Evaluation (2)', icon: '✍️' },
+  { id: 'evaluation', label: 'Initial Editorial Screening (2)', icon: '✍️' },
   { id: 'review-board', label: 'Review Board (3)', icon: '👥' },
   { id: 'reviewers', label: 'Reviewers (4)', icon: '🔍' },
   { id: 'reviews', label: 'Reviews (5)', icon: '📝' },

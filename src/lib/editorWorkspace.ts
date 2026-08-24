@@ -7,6 +7,7 @@ import {
   getStatusHistory,
   getRevisions,
   getSuggestedReviewers,
+  getEditorReviewerActions,
   ManuscriptRow,
   ContributorRow,
   DiscussionRow,
@@ -15,6 +16,7 @@ import {
   StatusHistoryRow,
   RevisionRow,
   SuggestedReviewerRow,
+  EditorReviewerActionRow,
   respondToEditorAssignment,
   submitEditorAssessment,
   submitEditorRecommendation,
@@ -32,6 +34,7 @@ export interface EditorManuscriptDetails {
   statusHistory: StatusHistoryRow[];
   revisions: RevisionRow[];
   suggestedReviewers: SuggestedReviewerRow[];
+  editorReviewerActions: EditorReviewerActionRow[];
   files: ManuscriptFileRow[];
   profiles: Map<string, ProfileData>;
 }
@@ -79,14 +82,16 @@ export async function getEditorAssignedManuscripts(editorId: string): Promise<Ed
           reviewers,
           statusHistory,
           revisions,
-          suggestedReviewers
+          suggestedReviewers,
+          editorReviewerActions
         ] = await Promise.all([
           getContributors(assignment.manuscript_id),
           getDiscussions(assignment.manuscript_id),
           getReviewerAssignments(assignment.manuscript_id),
           getStatusHistory(assignment.manuscript_id),
           getRevisions(assignment.manuscript_id),
-          getSuggestedReviewers(assignment.manuscript_id)
+          getSuggestedReviewers(assignment.manuscript_id),
+          getEditorReviewerActions(assignment.manuscript_id)
         ]);
 
         const { data: filesData } = await supabase
@@ -128,6 +133,7 @@ export async function getEditorAssignedManuscripts(editorId: string): Promise<Ed
           statusHistory,
           revisions,
           suggestedReviewers,
+          editorReviewerActions,
           files: (filesData || []) as ManuscriptFileRow[],
           profiles
         });
@@ -168,6 +174,8 @@ export function subscribeToEditorAssignments(
     .on('postgres_changes', { event: '*', schema: 'public', table: 'reviewer_assignments' }, refresh)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_revisions' }, refresh)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_status_history' }, refresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_suggested_reviewers' }, refresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'editor_reviewer_actions' }, refresh)
     .subscribe();
 
   return () => channel.unsubscribe();
@@ -205,9 +213,10 @@ export async function submitAssessment(
 
 export async function submitRecommendation(
   manuscriptId: string,
-  recommendation: string
+  recommendation: string,
+  comments?: string
 ): Promise<void> {
-  return submitEditorRecommendation(manuscriptId, recommendation as any);
+  return submitEditorRecommendation(manuscriptId, recommendation as any, comments);
 }
 
 export async function publishFinalDecision(
