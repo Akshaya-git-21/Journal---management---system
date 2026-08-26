@@ -10,7 +10,7 @@ import {
   getRecentStatusHistory, getOverdueReviewerAssignments, OverdueReviewRow, getRecentAuditLog,
   notifyExpiredReviewerReplacements
 } from '../lib/workflow';
-import { getManuscriptStatusLabel, getLatestRevision } from '../lib/manuscriptStatusLabel';
+import { getManuscriptStatusLabel, getLatestRevision, getRevisionMeta, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
 import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
@@ -24,31 +24,36 @@ interface CoordinatorWorkspaceProps {
   onUpdateManuscript?: (manuscript: any) => void;
 }
 
-const STATUS_STYLES: Record<ManuscriptStatus, string> = {
-  DRAFT: 'bg-slate-100 text-slate-600 border-slate-200',
-  SUBMITTED: 'bg-amber-50 text-amber-700 border-amber-200',
-  EDITOR_REVIEW: 'bg-blue-50 text-blue-700 border-blue-200',
-  UNDER_REVIEW: 'bg-purple-50 text-purple-700 border-purple-200',
-  REVISION_REQUESTED: 'bg-orange-50 text-orange-700 border-orange-200',
-  AWAITING_DECISION: 'bg-sky-50 text-sky-700 border-sky-200',
-  ACCEPTED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  PUBLISHED: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-  REJECTED: 'bg-red-50 text-red-700 border-red-200',
-};
-
-const STAGE_TABS: { key: string; label: string; statuses: ManuscriptStatus[] }[] = [
-  { key: 'ALL', label: 'All Stages', statuses: [] },
-  { key: 'SUBMITTED', label: 'Unassigned Queue', statuses: ['SUBMITTED'] },
-  { key: 'EDITOR_REVIEW', label: 'Editor Review', statuses: ['EDITOR_REVIEW'] },
-  { key: 'UNDER_REVIEW', label: 'Peer Review', statuses: ['UNDER_REVIEW'] },
-  { key: 'AWAITING_DECISION', label: 'Decision Pending', statuses: ['AWAITING_DECISION'] },
-  { key: 'DONE', label: 'Resolved', statuses: ['ACCEPTED', 'PUBLISHED', 'REJECTED', 'REVISION_REQUESTED'] },
+// Coordinator work-queue tabs -- internal navigation aids (spec explicitly
+// permits these to stay Coordinator-specific, e.g. "Decision Pending" as a
+// queue of manuscripts needing the Coordinator's own next action), distinct
+// from the manuscript's own primary status shown via StatusBadge below.
+// "Editor Review"/"Peer Review" are keyed off the standardized display
+// status (not the raw UNDER_REVIEW value) so a manuscript with only one
+// reviewer accepted doesn't wrongly show up in the Peer Review queue.
+const STAGE_TABS: { key: string; label: string; predicate: (m: ManuscriptRow) => boolean }[] = [
+  { key: 'ALL', label: 'All Stages', predicate: () => true },
+  { key: 'SUBMITTED', label: 'Unassigned Queue', predicate: (m) => m.status === 'SUBMITTED' },
+  { key: 'EDITOR_REVIEW', label: 'Editor Review', predicate: (m) => getManuscriptStatusLabel(m) === 'EDITORIAL REVIEW' },
+  { key: 'UNDER_REVIEW', label: 'Peer Review', predicate: (m) => getManuscriptStatusLabel(m) === 'PEER REVIEW' },
+  { key: 'AWAITING_DECISION', label: 'Decision Pending', predicate: (m) => m.status === 'AWAITING_DECISION' },
+  { key: 'DONE', label: 'Resolved', predicate: (m) => ['ACCEPTED', 'PUBLISHED', 'REJECTED', 'REVISION_REQUESTED'].includes(m.status) },
 ];
 
-function StatusBadge({ status, latestRevision }: { status: ManuscriptStatus; latestRevision?: RevisionRow | null }) {
+function StatusBadge({ manuscript, latestRevision }: { manuscript: ManuscriptRow; latestRevision?: RevisionRow | null }) {
+  const label = getManuscriptStatusLabel(manuscript, latestRevision);
+  const revisionMeta = getRevisionMeta(latestRevision);
+  const style = STANDARD_STATUS_COLORS[label as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT;
   return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-bold uppercase tracking-wide ${STATUS_STYLES[status]}`}>
-      {getManuscriptStatusLabel(status, latestRevision)}
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-bold uppercase tracking-wide ${style}`}>
+        {label}
+      </span>
+      {revisionMeta && (
+        <span className="inline-flex items-center px-2 py-1 rounded-full border border-slate-200 bg-slate-50 text-slate-500 text-[9px] font-bold uppercase tracking-wide">
+          Rev {revisionMeta.revisionNumber}
+        </span>
+      )}
     </span>
   );
 }
@@ -370,7 +375,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   }, []);
 
   const activeTab = STAGE_TABS.find((t) => t.key === tab) || STAGE_TABS[0];
-  const filteredByStage = activeTab.statuses.length === 0 ? items : items.filter((m) => activeTab.statuses.includes(m.status));
+  const filteredByStage = activeTab.key === 'ALL' ? items : items.filter(activeTab.predicate);
   const filtered = filteredByStage.filter((m) => (m.title + m.author_name + m.id).toLowerCase().includes(searchTerm.toLowerCase()));
   const filteredEditors = editorialBoardProfiles.filter((profile) => (profile.name + profile.email + profile.role).toLowerCase().includes(editorSearch.toLowerCase()));
   const filteredReviewers = reviewerProfiles.filter((profile) => (profile.name + profile.email + profile.role).toLowerCase().includes(reviewerSearch.toLowerCase()));
@@ -380,8 +385,8 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const stageCounts = {
     all: items.length,
     submitted: items.filter((m) => m.status === 'SUBMITTED').length,
-    editorReview: items.filter((m) => m.status === 'EDITOR_REVIEW').length,
-    underReview: items.filter((m) => m.status === 'UNDER_REVIEW').length,
+    editorReview: items.filter((m) => getManuscriptStatusLabel(m) === 'EDITORIAL REVIEW').length,
+    underReview: items.filter((m) => getManuscriptStatusLabel(m) === 'PEER REVIEW').length,
     awaitingDecision: items.filter((m) => m.status === 'AWAITING_DECISION').length,
     done: items.filter((m) => ['ACCEPTED', 'PUBLISHED', 'REJECTED', 'REVISION_REQUESTED'].includes(m.status)).length,
   };
@@ -675,7 +680,7 @@ function QueueTable({ items, onOpen }: { items: ManuscriptRow[]; onOpen: (id: st
                 <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.id}</td>
                 <td className="px-4 py-3 font-bold text-slate-800 max-w-xs truncate">{m.title}</td>
                 <td className="px-4 py-3 text-slate-600 text-xs">{m.author_name}</td>
-                <td className="px-4 py-3"><StatusBadge status={m.status} /></td>
+                <td className="px-4 py-3"><StatusBadge manuscript={m} /></td>
                 <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(m.submitted_at)}</td>
                 <td className="px-4 py-3 text-right text-[#008751] font-bold text-xs">Open &rarr;</td>
               </tr>

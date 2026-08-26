@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getManuscriptStatusLabel, getManuscriptStatusMeta, getLatestRevision, getWorkflowStageLabel } from '../lib/manuscriptStatusLabel';
+import { getManuscriptStatusLabel, getManuscriptStatusMeta, getRevisionMeta, getLatestRevision } from '../lib/manuscriptStatusLabel';
 import FilePreviewModal from './FilePreviewModal';
 import SubmissionSidebar from './SubmissionSidebar';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
@@ -826,184 +826,112 @@ export default function OjsSubmissionDetail({
     }
   };
 
-  // Builds the Submission Timeline strictly from real workflow records
-  // (manuscript_status_history / editor_assignments / reviewer_assignments).
-  // A step only shows a completion date when the underlying record actually
-  // has one -- never today's date, never a fabricated placeholder.
+  // Builds the Submission Timeline using ONLY the standard status
+  // vocabulary (Phase 3) -- the same 5-node pipeline as the "Submission
+  // Workflow" stepper above, just rendered vertically with real dates
+  // pulled from manuscript_status_history where available. Granular
+  // internal events ("Editor assigned", "Reviewer 1 accepted", ...) belong
+  // in the separate "Recent Activity" log below this component, not here --
+  // this is the primary status progression, so it must stay in the 8
+  // standard statuses.
   const getRealSubmissionTimeline = (details: AuthorManuscriptDetails | null): { label: string; sub: string; status: 'completed' | 'active' | 'pending' }[] => {
     if (!details) return [];
-    const { manuscript, editorAssignments, reviewerAssignments, statusHistory, revisions } = details;
-    const editorAssignment = editorAssignments[0] || null;
-    const reviewersInvited = reviewerAssignments.length > 0;
-    const reviewersAccepted = reviewerAssignments.filter((r) => r.status === 'ACCEPTED' || r.status === 'SUBMITTED');
-    const reviewsSubmitted = reviewerAssignments.filter((r) => r.status === 'SUBMITTED');
-    const allReviewsIn = reviewersInvited && reviewsSubmitted.length === reviewerAssignments.length;
-    // A "decision" is any transition off the original review cycle -- either
-    // a terminal ACCEPTED/REJECTED, or a REVISION_REQUESTED that kicked off
-    // revision #1. Only used for the base (pre-revision) timeline entry.
-    const decisionEntry = statusHistory.find((h) => ['ACCEPTED', 'REJECTED', 'REVISION_REQUESTED'].includes(h.to_status));
-    const isPublished = manuscript.status === 'PUBLISHED';
-
+    const { manuscript, reviewerAssignments, statusHistory, revisions } = details;
+    const latestRevision = getLatestRevision(revisions);
+    const label = getManuscriptStatusLabel(manuscript, latestRevision);
     const fmt = (iso: string | null) => (iso ? formatDateTime(iso) : '');
 
-    const revisionSteps: { label: string; sub: string; status: 'completed' | 'active' | 'pending' }[] = [];
-    const sortedRevisions = [...(revisions || [])].sort((a, b) => a.revision_number - b.revision_number);
-    sortedRevisions.forEach((rev, idx) => {
-      const isLatestRevision = idx === sortedRevisions.length - 1;
-      const kind = rev.decision_type === 'MAJOR_REVISION' ? 'Major' : 'Minor';
-      const authorSubmitted = rev.status !== 'AWAITING_AUTHOR_UPLOAD';
-      const withCoordinator = isLatestRevision && rev.status === 'REVISION_SUBMITTED';
-      const sentToEditor = !isLatestRevision || rev.status === 'UNDER_REVIEW' || rev.status === 'COMPLETED';
-      // Once a newer revision cycle exists, everything about this one is
-      // necessarily finished -- only the latest cycle's stages can still be
-      // active/pending.
-      const cycleStatus = manuscript.status; // only meaningful for the latest revision
-      const editorReviewInProgress = isLatestRevision && cycleStatus === 'EDITOR_REVIEW';
-      const editorReviewDone = !isLatestRevision || ['UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(cycleStatus);
-      const reviewerReviewDone = !isLatestRevision || ['AWAITING_DECISION', 'ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(cycleStatus);
-      const decided = !isLatestRevision || ['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(cycleStatus);
-      // Find this cycle's outcome, if decided (or if a newer revision exists,
-      // that newer revision's requested_at note IS this cycle's decision).
-      const nextRevision = sortedRevisions[idx + 1];
-      const cycleDecisionLabel = !isLatestRevision
-        ? `Revision ${nextRevision.revision_number} requested`
-        : manuscript.status === 'ACCEPTED' ? 'Accepted'
-        : manuscript.status === 'REJECTED' ? 'Rejected'
-        : manuscript.status === 'PUBLISHED' ? 'Accepted'
-        : '';
+    // Earliest status_history timestamp for a given raw status, used as
+    // this pipeline node's "reached this stage on" date -- never fabricated.
+    const firstTimestampFor = (rawStatus: string): string | null => {
+      const hit = statusHistory
+        .filter((h) => h.to_status === rawStatus)
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0];
+      return hit ? hit.created_at : null;
+    };
+    const rawStatusFor = ['SUBMITTED', 'EDITOR_REVIEW', 'UNDER_REVIEW', 'ACCEPTED', 'PUBLISHED'];
 
-      revisionSteps.push({
-        label: `Revision ${rev.revision_number} Requested (${kind})`,
-        sub: fmt(rev.requested_at),
-        status: 'completed',
-      });
-      revisionSteps.push({
-        label: `Revision ${rev.revision_number} Submitted`,
-        sub: !authorSubmitted ? 'Awaiting author upload' : withCoordinator ? 'Awaiting coordinator review' : fmt(rev.submitted_at),
-        status: !authorSubmitted ? 'pending' : withCoordinator ? 'active' : 'completed',
-      });
-      revisionSteps.push({
-        label: `Revision ${rev.revision_number} — Editor Review`,
-        sub: !sentToEditor ? 'Not Started' : editorReviewDone ? 'Completed' : 'In Progress',
-        status: !sentToEditor ? 'pending' : editorReviewDone ? 'completed' : (editorReviewInProgress ? 'active' : 'pending'),
-      });
-      revisionSteps.push({
-        label: `Revision ${rev.revision_number} — Reviewer Review`,
-        sub: !editorReviewDone ? 'Not Started' : reviewerReviewDone ? 'Completed' : (isLatestRevision && cycleStatus === 'UNDER_REVIEW' ? 'In Progress' : 'Not Started'),
-        status: !editorReviewDone ? 'pending' : reviewerReviewDone ? 'completed' : (isLatestRevision && cycleStatus === 'UNDER_REVIEW' ? 'active' : 'pending'),
-      });
-      revisionSteps.push({
-        label: `Revision ${rev.revision_number} Decision`,
-        sub: decided ? cycleDecisionLabel : (isLatestRevision && cycleStatus === 'AWAITING_DECISION' ? 'Pending' : 'Not Started'),
-        status: decided ? 'completed' : (isLatestRevision && cycleStatus === 'AWAITING_DECISION' ? 'active' : 'pending'),
-      });
-    });
-
-    return [
-      {
-        label: 'Manuscript Submitted',
-        sub: manuscript.submitted_at ? fmt(manuscript.submitted_at) : 'Not Started',
-        status: manuscript.submitted_at ? 'completed' : 'pending',
-      },
-      {
-        label: 'Editor Assigned',
-        sub: editorAssignment ? fmt(editorAssignment.assigned_at) : 'Not Started',
-        status: editorAssignment ? 'completed' : 'pending',
-      },
-      {
-        label: 'Editor Accepted',
-        sub: editorAssignment?.status === 'ACCEPTED' ? fmt(editorAssignment.responded_at) : editorAssignment ? 'Awaiting editor response' : 'Not Started',
-        status: editorAssignment?.status === 'ACCEPTED' ? 'completed' : editorAssignment ? 'active' : 'pending',
-      },
-      {
-        label: 'Editor Evaluation',
-        sub: editorAssignment?.assessment_status === 'SUBMITTED' ? fmt(editorAssignment.assessment_submitted_at) : editorAssignment?.status === 'ACCEPTED' ? 'In Progress' : 'Not Started',
-        status: editorAssignment?.assessment_status === 'SUBMITTED' ? 'completed' : editorAssignment?.status === 'ACCEPTED' ? 'active' : 'pending',
-      },
-      {
-        label: 'Reviewers Assigned',
-        sub: reviewersInvited
-          ? fmt(reviewerAssignments.map((r) => r.invited_at).sort()[0])
-          : 'Not Started',
-        status: reviewersInvited ? 'completed' : 'pending',
-      },
-      {
-        label: 'Reviewers Accepted',
-        sub: reviewersInvited ? `${reviewersAccepted.length} of ${reviewerAssignments.length} accepted` : 'Not Started',
-        status: reviewersInvited && reviewersAccepted.length === reviewerAssignments.length ? 'completed' : reviewersInvited ? 'active' : 'pending',
-      },
-      {
-        label: 'Reviews Completed',
-        sub: reviewersInvited ? (allReviewsIn ? fmt(reviewsSubmitted.map((r) => r.submitted_at).sort().slice(-1)[0]) : `${reviewsSubmitted.length} of ${reviewerAssignments.length} submitted`) : 'Not Started',
-        status: allReviewsIn ? 'completed' : reviewersInvited ? 'active' : 'pending',
-      },
-      {
-        label: 'Decision',
-        sub: decisionEntry ? `${getManuscriptStatusLabel(decisionEntry.to_status, getLatestRevision(revisions))} – ${fmt(decisionEntry.created_at)}` : 'Pending',
-        status: decisionEntry ? 'completed' : 'pending',
-      },
-      ...revisionSteps,
-      {
-        label: 'Published',
-        sub: isPublished && manuscript.published_at ? fmt(manuscript.published_at) : 'Not Started',
-        status: isPublished ? 'completed' : 'pending',
-      },
-    ];
-  };
-
-  // Six-slot horizontal stepper. Kept at a fixed slot count so the layout
-  // never reflows -- when a revision cycle is active, the first four slots
-  // are relabeled to describe that cycle (Requested/Submitted/Editor
-  // Review/Reviewer Review) instead of the original Submitted/Editor
-  // Assigned/Reviewer Invited/Under Review sequence; Decision and Production
-  // always occupy the last two slots.
-  const getWorkflowStepperSlots = (details: AuthorManuscriptDetails | null): { label: string; sub: string; status: 'completed' | 'active' | 'pending' }[] => {
-    if (!details) return [];
-    const { manuscript, editorAssignments, reviewerAssignments, revisions } = details;
-    const editorAssignment = editorAssignments[0] || null;
-    const reviewersInvited = reviewerAssignments.length > 0;
-    const reviewsSubmitted = reviewerAssignments.filter((r) => r.status === 'SUBMITTED');
-    const allReviewsIn = reviewersInvited && reviewsSubmitted.length === reviewerAssignments.length;
-    const isTerminal = ['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
-    const isProduction = manuscript.status === 'ACCEPTED' || manuscript.status === 'PUBLISHED';
-
-    const latestRevision = getLatestRevision(revisions);
-    const fmtShort = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '');
-
-    if (!latestRevision) {
-      return [
-        { label: 'Submitted', sub: manuscript.submitted_at ? fmtShort(manuscript.submitted_at) : 'Pending', status: manuscript.submitted_at ? 'completed' : 'pending' },
-        { label: 'Editor Assigned', sub: editorAssignment ? 'Assigned' : 'Pending', status: editorAssignment ? 'completed' : 'pending' },
-        { label: 'Reviewer Invited', sub: reviewersInvited ? 'Invited' : 'Pending', status: reviewersInvited ? 'completed' : (editorAssignment?.status === 'ACCEPTED' ? 'active' : 'pending') },
-        { label: 'Under Review', sub: allReviewsIn ? 'Completed' : reviewersInvited ? 'In Progress' : 'Pending', status: allReviewsIn ? 'completed' : reviewersInvited ? 'active' : 'pending' },
-        { label: 'Decision', sub: isTerminal || manuscript.status === 'REVISION_REQUESTED' ? getManuscriptStatusLabel(manuscript.status) : manuscript.status === 'AWAITING_DECISION' ? 'In Progress' : 'Pending', status: isTerminal || manuscript.status === 'REVISION_REQUESTED' ? 'completed' : manuscript.status === 'AWAITING_DECISION' ? 'active' : 'pending' },
-        { label: 'Production', sub: isProduction ? 'In Production' : 'Pending', status: isProduction ? 'completed' : 'pending' },
-      ];
+    if (manuscript.status === 'REJECTED') {
+      const rejectedFromPeerReview = (reviewerAssignments?.length ?? 0) > 0;
+      const idx = rejectedFromPeerReview ? 2 : 1;
+      const rejectedAt = firstTimestampFor('REJECTED');
+      return STANDARD_PIPELINE.map((s, i) => ({
+        label: s.label,
+        sub: i < idx ? (fmt(firstTimestampFor(rawStatusFor[i])) || 'Completed')
+          : i === idx ? `Rejected${rejectedAt ? ' — ' + fmt(rejectedAt) : ''}`
+          : 'Not Reached',
+        status: i < idx ? 'completed' : i === idx ? 'active' : 'pending',
+      }));
     }
 
-    const n = latestRevision.revision_number;
-    // manuscript_revisions.status carries the fine-grained sub-stage while
-    // manuscripts.status stays REVISION_REQUESTED for both "with author" and
-    // "with coordinator" -- see 0018_coordinator_revision_gate.sql.
-    const authorSubmitted = latestRevision.status !== 'AWAITING_AUTHOR_UPLOAD';
-    const withCoordinator = latestRevision.status === 'REVISION_SUBMITTED';
-    const sentToEditor = latestRevision.status === 'UNDER_REVIEW' || latestRevision.status === 'COMPLETED';
-    const editorReviewInProgress = manuscript.status === 'EDITOR_REVIEW';
-    const editorReviewDone = ['UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
-    const reviewerReviewDone = ['AWAITING_DECISION', 'ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
+    let currentIndex = STANDARD_PIPELINE.findIndex((s) => s.key === label);
+    let detourSub: string | null = null;
+    if (label === 'IN REVISION') {
+      currentIndex = latestRevision?.origin === 'PEER_REVIEW' ? 2 : 1;
+      detourSub = `In Revision (Revision ${latestRevision?.revision_number ?? ''})`;
+    }
+    if (currentIndex < 0) currentIndex = 0;
 
-    return [
-      { label: `Revision ${n} Requested`, sub: fmtShort(latestRevision.requested_at), status: 'completed' },
-      {
-        label: `Revision ${n} Submitted`,
-        sub: !authorSubmitted ? 'Awaiting Upload' : withCoordinator ? 'Awaiting Coordinator' : fmtShort(latestRevision.submitted_at),
-        status: !authorSubmitted ? 'pending' : withCoordinator ? 'active' : 'completed',
-      },
-      { label: `Revision ${n} — Editor Review`, sub: !sentToEditor ? 'Pending' : editorReviewDone ? 'Completed' : 'In Progress', status: !sentToEditor ? 'pending' : editorReviewDone ? 'completed' : (editorReviewInProgress ? 'active' : 'pending') },
-      { label: `Revision ${n} — Reviewer Review`, sub: !editorReviewDone ? 'Pending' : reviewerReviewDone ? 'Completed' : (manuscript.status === 'UNDER_REVIEW' ? 'In Progress' : 'Pending'), status: !editorReviewDone ? 'pending' : reviewerReviewDone ? 'completed' : (manuscript.status === 'UNDER_REVIEW' ? 'active' : 'pending') },
-      { label: 'Decision', sub: isTerminal ? getManuscriptStatusLabel(manuscript.status) : manuscript.status === 'AWAITING_DECISION' ? 'In Progress' : 'Pending', status: isTerminal ? 'completed' : manuscript.status === 'AWAITING_DECISION' ? 'active' : 'pending' },
-      { label: 'Production', sub: isProduction ? 'In Production' : 'Pending', status: isProduction ? 'completed' : 'pending' },
-    ];
+    return STANDARD_PIPELINE.map((s, i) => {
+      const ts = fmt(firstTimestampFor(rawStatusFor[i]));
+      return {
+        label: s.label,
+        sub: i < currentIndex ? (ts || 'Completed') : i === currentIndex ? (detourSub || ts || 'In Progress') : 'Pending',
+        status: i < currentIndex ? 'completed' : i === currentIndex ? 'active' : 'pending',
+      };
+    });
+  };
+
+  // Fixed 5-slot pipeline using ONLY the standard status vocabulary
+  // (Phase 3) -- Submitted / Editorial Review / Peer Review / Accepted /
+  // Published. "In Revision" is a detour, not a forward pipeline stage, so
+  // when the manuscript is currently IN REVISION the stage it detoured
+  // from (Editorial Review or Peer Review, based on the latest revision's
+  // origin) is shown as the active node with an "In Revision" sub-label,
+  // rather than inventing a 6th slot. Rejected manuscripts show Rejected on
+  // whichever stage they were rejected from.
+  const STANDARD_PIPELINE: { key: string; label: string }[] = [
+    { key: 'SUBMITTED', label: 'Submitted' },
+    { key: 'EDITORIAL REVIEW', label: 'Editorial Review' },
+    { key: 'PEER REVIEW', label: 'Peer Review' },
+    { key: 'ACCEPTED', label: 'Accepted' },
+    { key: 'PUBLISHED', label: 'Published' },
+  ];
+  const getWorkflowStepperSlots = (details: AuthorManuscriptDetails | null): { label: string; sub: string; status: 'completed' | 'active' | 'pending' }[] => {
+    if (!details) return [];
+    const { manuscript, revisions, reviewerAssignments } = details;
+    const latestRevision = getLatestRevision(revisions);
+    const label = getManuscriptStatusLabel(manuscript, latestRevision);
+
+    if (manuscript.status === 'REJECTED') {
+      // Rejection can happen from either the screening or peer-review
+      // track -- any reviewer ever having been assigned means it got at
+      // least as far as Peer Review before being rejected (a straight
+      // reject creates no manuscript_revisions row to check origin on).
+      const rejectedFromPeerReview = (reviewerAssignments?.length ?? 0) > 0;
+      const idx = rejectedFromPeerReview ? 2 : 1;
+      return STANDARD_PIPELINE.map((s, i) => ({
+        label: s.label,
+        sub: i < idx ? 'Completed' : i === idx ? 'Rejected' : 'Not Reached',
+        status: i < idx ? 'completed' : i === idx ? 'active' : 'pending',
+      }));
+    }
+
+    let currentIndex = STANDARD_PIPELINE.findIndex((s) => s.key === label);
+    let detourSub: string | null = null;
+    if (label === 'IN REVISION') {
+      currentIndex = latestRevision?.origin === 'PEER_REVIEW' ? 2 : 1;
+      detourSub = 'In Revision';
+    }
+    if (currentIndex < 0) currentIndex = 0;
+    // Accepted/Published are terminal for this node, not "in progress".
+    const isTerminalNode = STANDARD_PIPELINE[currentIndex]?.key === 'ACCEPTED' || STANDARD_PIPELINE[currentIndex]?.key === 'PUBLISHED';
+
+    return STANDARD_PIPELINE.map((s, i) => ({
+      label: s.label,
+      sub: i < currentIndex ? 'Completed' : i === currentIndex ? (detourSub || (isTerminalNode ? s.label : 'In Progress')) : 'Pending',
+      status: i < currentIndex ? 'completed' : i === currentIndex ? 'active' : 'pending',
+    }));
   };
 
   const isSubmissionDashboard = (activeTab === 'SUBMISSION' || activeTab === 'overview') && viewState === 'DASHBOARD';
@@ -1090,10 +1018,18 @@ export default function OjsSubmissionDetail({
                       <span className="text-slate-800 text-[10px] font-semibold uppercase tracking-wider block">Status</span>
                       <span className="bg-[#e6f7ef] text-[#008751] border border-emerald-500/30 px-3 py-1 rounded-full text-[12px] font-bold inline-flex items-center gap-1 shadow-3xs">
                         <span className="w-2 h-2 rounded-full bg-[#008751]" />
-                        {manuscriptDetails?.manuscript.status
-                          ? getWorkflowStageLabel(manuscriptDetails.manuscript.status, getLatestRevision(manuscriptDetails.revisions))
+                        {manuscriptDetails?.manuscript
+                          ? getManuscriptStatusLabel(manuscriptDetails.manuscript, getLatestRevision(manuscriptDetails.revisions))
                           : (paper.raw?.status || 'SUBMITTED').replace(/_/g, ' ')}
                       </span>
+                      {(() => {
+                        const revisionMeta = manuscriptDetails ? getRevisionMeta(getLatestRevision(manuscriptDetails.revisions)) : null;
+                        return revisionMeta ? (
+                          <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wide block mt-0.5">
+                            Revision {revisionMeta.revisionNumber}{revisionMeta.revisionType ? ` — ${revisionMeta.revisionType}` : ''}
+                          </span>
+                        ) : null;
+                      })()}
                     </div>
 
                     {/* Document icon with check */}
@@ -1112,7 +1048,7 @@ export default function OjsSubmissionDetail({
                 {manuscriptDetails?.manuscript.status && ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED'].includes(manuscriptDetails.manuscript.status) && (() => {
                   const status = manuscriptDetails.manuscript.status;
                   const latestRevision = getLatestRevision(manuscriptDetails.revisions);
-                  const meta = getManuscriptStatusMeta(status, latestRevision);
+                  const meta = getManuscriptStatusMeta(manuscriptDetails.manuscript, latestRevision);
                   const decisionLetterEntry = manuscriptDetails.statusHistory?.find(h => h.to_status === status && h.note);
                   const isAccepted = status === 'ACCEPTED';
                   const isRejected = status === 'REJECTED';

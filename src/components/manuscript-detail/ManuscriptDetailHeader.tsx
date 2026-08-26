@@ -1,29 +1,21 @@
-import { ManuscriptRow } from '../../lib/workflow';
+import { ManuscriptRow, RevisionRow } from '../../lib/workflow';
 import { Download, MoreVertical, RefreshCw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { getManuscriptStatusLabel, getRevisionMeta, STANDARD_STATUS_COLORS } from '../../lib/manuscriptStatusLabel';
 
 interface Props {
   manuscript: ManuscriptRow;
   onRefresh: () => void;
+  latestRevision?: RevisionRow | null;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  DRAFT: 'bg-slate-100 text-slate-700',
-  SUBMITTED: 'bg-amber-100 text-amber-700',
-  EDITOR_REVIEW: 'bg-blue-100 text-blue-700',
-  UNDER_REVIEW: 'bg-purple-100 text-purple-700',
-  REVISION_REQUESTED: 'bg-orange-100 text-orange-700',
-  AWAITING_DECISION: 'bg-sky-100 text-sky-700',
-  ACCEPTED: 'bg-emerald-100 text-emerald-700',
-  PUBLISHED: 'bg-green-100 text-green-700',
-  REJECTED: 'bg-red-100 text-red-700',
-};
-
-export default function ManuscriptDetailHeader({ manuscript, onRefresh }: Props) {
+export default function ManuscriptDetailHeader({ manuscript, onRefresh, latestRevision }: Props) {
   const formatDate = (date: string | null) => {
     if (!date) return '--';
     return new Date(date).toLocaleString();
   };
+  const statusLabel = getManuscriptStatusLabel(manuscript, latestRevision);
+  const revisionMeta = getRevisionMeta(latestRevision);
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-6">
@@ -36,9 +28,14 @@ export default function ManuscriptDetailHeader({ manuscript, onRefresh }: Props)
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`px-3 py-1 rounded-full font-bold text-sm uppercase tracking-wide ${STATUS_COLORS[manuscript.status] || STATUS_COLORS.DRAFT}`}>
-            {manuscript.status.replace(/_/g, ' ')}
+          <span className={`px-3 py-1 rounded-full font-bold text-sm uppercase tracking-wide border ${STANDARD_STATUS_COLORS[statusLabel as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT}`}>
+            {statusLabel}
           </span>
+          {revisionMeta && (
+            <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-bold text-xs uppercase tracking-wide">
+              Revision {revisionMeta.revisionNumber}{revisionMeta.revisionType ? ` — ${revisionMeta.revisionType}` : ''}
+            </span>
+          )}
           <button
             onClick={onRefresh}
             className="p-2 hover:bg-slate-100 rounded-lg transition"

@@ -6,6 +6,7 @@ import { ArrowLeft, Download, MoreVertical, Loader2 } from 'lucide-react';
 import ManuscriptDetailHeader from './manuscript-detail/ManuscriptDetailHeader';
 import WorkflowStatusTracker from './manuscript-detail/WorkflowStatusTracker';
 import ManuscriptDetailTabs from './manuscript-detail/ManuscriptDetailTabs';
+import { getLatestRevision } from '../lib/manuscriptStatusLabel';
 
 interface CoordinatorManuscriptDetailProps {
   manuscript: ManuscriptRow;
@@ -207,7 +208,7 @@ export default function CoordinatorManuscriptDetail({ manuscript, showAllFiles =
       )}
 
       {/* Manuscript header */}
-      <ManuscriptDetailHeader manuscript={manuscript} onRefresh={loadData} />
+      <ManuscriptDetailHeader manuscript={manuscript} onRefresh={loadData} latestRevision={getLatestRevision(data.revisions)} />
 
       {/* Workflow status tracker */}
       <WorkflowStatusTracker

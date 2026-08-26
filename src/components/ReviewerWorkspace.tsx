@@ -11,7 +11,7 @@ import { NavGroup, NavItem } from './SidebarNavGroup';
 import FilePreviewModal from './FilePreviewModal';
 import {
   Loader2, Check, X as XIcon, ChevronDown, User, AlertTriangle, ClipboardList, CheckCircle2, XCircle,
-  FileText, Lock, Eye, History, Star, BarChart3, Download, ClipboardCheck, ShieldAlert
+  FileText, Lock, Eye, History, Star, BarChart3, Download, ClipboardCheck
 } from 'lucide-react';
 
 const PEER_REVIEW_QUESTIONS: { id: string; label: string; question: string }[] = [
@@ -32,18 +32,6 @@ interface ReviewerWorkspaceProps {
   onUpdateManuscript?: (m: any) => void;
   currentUser?: { name: string; email: string; role: Role } | null;
 }
-
-const STATUS_STYLES: Record<ManuscriptStatus, string> = {
-  DRAFT: 'bg-slate-100 text-slate-600 border-slate-200',
-  SUBMITTED: 'bg-amber-50 text-amber-700 border-amber-200',
-  EDITOR_REVIEW: 'bg-blue-50 text-blue-700 border-blue-200',
-  UNDER_REVIEW: 'bg-purple-50 text-purple-700 border-purple-200',
-  REVISION_REQUESTED: 'bg-orange-50 text-orange-700 border-orange-200',
-  AWAITING_DECISION: 'bg-sky-50 text-sky-700 border-sky-200',
-  ACCEPTED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  PUBLISHED: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-  REJECTED: 'bg-red-50 text-red-700 border-red-200',
-};
 
 interface Row { manuscript: ManuscriptRow; assignment: ReviewerAssignmentRow; priorRounds: ReviewerAssignmentRow[]; }
 
@@ -361,7 +349,7 @@ function ManuscriptList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mb-4 pb-4 border-t border-slate-100 pt-4">
                 <div>
                   <p className="text-slate-500 font-semibold mb-1">Manuscript Status</p>
-                  <p className="text-slate-900 font-bold">{manuscript.status?.replace(/_/g, ' ')}</p>
+                  <p className="text-slate-900 font-bold">{getManuscriptStatusLabel(manuscript)}</p>
                 </div>
                 <div>
                   <p className="text-slate-500 font-semibold mb-1">Double-Blind Status</p>
@@ -380,14 +368,21 @@ function ManuscriptList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
 
             {/* Action Buttons Column */}
             <div className="flex flex-col gap-2 min-w-max">
-              <button
-                onClick={(e) => handleDownload(e, manuscript.id)}
-                disabled={downloading === manuscript.id}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all disabled:opacity-50 whitespace-nowrap flex items-center gap-1.5"
-              >
-                {downloading === manuscript.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                Download Manuscript
-              </button>
+              {/* No manuscript access before the reviewer accepts the
+                  invitation -- see Phase 2 spec ("Reviewer login shows
+                  manuscript info only... before accepting"). Found live: this
+                  download button ignored that and was clickable while still
+                  INVITED. */}
+              {assignment.status !== 'INVITED' && (
+                <button
+                  onClick={(e) => handleDownload(e, manuscript.id)}
+                  disabled={downloading === manuscript.id}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all disabled:opacity-50 whitespace-nowrap flex items-center gap-1.5"
+                >
+                  {downloading === manuscript.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  Download Manuscript
+                </button>
+              )}
               {(assignment.status === 'INVITED' || assignment.status === 'ACCEPTED') && (
                 <button
                   onClick={() => onOpen(manuscript.id)}
@@ -528,7 +523,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
             <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
               <div>
                 <p className="text-xs text-slate-500 font-semibold">Manuscript Status</p>
-                <p className="text-sm font-bold text-slate-900">{getManuscriptStatusLabel(manuscript.status)}</p>
+                <p className="text-sm font-bold text-slate-900">{getManuscriptStatusLabel(manuscript)}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500 font-semibold">Submitted</p>
@@ -687,12 +682,6 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
                 </div>
               </div>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <label className="block text-xs font-bold text-blue-900 mb-2 flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5" /> Confidential Editor Comments</label>
-                <div className="p-3 bg-white rounded border border-blue-200 text-xs text-slate-900 min-h-20">
-                  {assignment.comments_to_editor || 'No confidential comments provided'}
-                </div>
-              </div>
             </div>
 
             <p className="text-xs text-slate-500 italic mt-4">This review is locked and cannot be edited. Contact the coordinator if you need to make changes.</p>
@@ -720,7 +709,6 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
   );
   const [recommendation, setRecommendation] = useState<ReviewerRecommendation | null>(null);
   const [commentsToAuthor, setCommentsToAuthor] = useState('');
-  const [commentsToEditor, setCommentsToEditor] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -743,7 +731,6 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
       if (draft.responses) setResponses(draft.responses);
       if (draft.recommendation) setRecommendation(draft.recommendation);
       if (typeof draft.commentsToAuthor === 'string') setCommentsToAuthor(draft.commentsToAuthor);
-      if (typeof draft.commentsToEditor === 'string') setCommentsToEditor(draft.commentsToEditor);
       if (draft.lastSavedAt) setLastSaveTime(new Date(draft.lastSavedAt).toLocaleTimeString());
     } catch {
       // Corrupted/unreadable draft -- ignore and start from a blank form.
@@ -758,7 +745,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
     setError('');
     try {
       const savedAt = new Date().toISOString();
-      localStorage.setItem(draftKey, JSON.stringify({ responses, recommendation, commentsToAuthor, commentsToEditor, lastSavedAt: savedAt }));
+      localStorage.setItem(draftKey, JSON.stringify({ responses, recommendation, commentsToAuthor, lastSavedAt: savedAt }));
       setLastSaveTime(new Date(savedAt).toLocaleTimeString());
       setSuccess('Draft saved successfully');
       setTimeout(() => setSuccess(''), 2000);
@@ -772,11 +759,11 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
   // Auto-save every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      if (commentsToAuthor || commentsToEditor) saveDraft();
+      if (commentsToAuthor) saveDraft();
     }, 30000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [responses, recommendation, commentsToAuthor, commentsToEditor, assignmentId]);
+  }, [responses, recommendation, commentsToAuthor, assignmentId]);
 
   const unanswered = PEER_REVIEW_QUESTIONS.filter(q => responses[q.id].answer === null);
   const missingReasons = PEER_REVIEW_QUESTIONS.filter(q => responses[q.id].answer !== null && !responses[q.id].reason.trim());
@@ -803,7 +790,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
         answer: responses[q.id].answer as boolean,
         reason: responses[q.id].reason.trim(),
       }));
-      await submitPeerReview(assignmentId, payload, commentsToAuthor, recommendation as ReviewerRecommendation, commentsToEditor);
+      await submitPeerReview(assignmentId, payload, commentsToAuthor, recommendation as ReviewerRecommendation);
       try { localStorage.removeItem(draftKey); } catch { /* non-fatal */ }
       setSuccess('Review submitted successfully!');
       setTimeout(() => onSubmitted(), 1500);
@@ -906,18 +893,6 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
               rows={5}
               placeholder="Provide detailed feedback for the author..."
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
-            />
-          </div>
-
-          <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
-            <p className="text-xs font-bold text-emerald-900 mb-1">📋 Confidential Comments to Editor (Optional)</p>
-            <p className="text-xs text-emerald-800">Private feedback regarding manuscript novelty or scientific validity. Locked strictly to editors.</p>
-            <textarea
-              value={commentsToEditor}
-              onChange={(e) => setCommentsToEditor(e.target.value)}
-              rows={3}
-              placeholder="Private notes for editors only..."
-              className="w-full border border-emerald-300 rounded-lg px-3 py-2 text-xs font-sans mt-2 bg-white focus:border-emerald-400 focus:outline-none"
             />
           </div>
 

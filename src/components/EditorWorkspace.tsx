@@ -7,7 +7,7 @@ import {
   getManuscript, getContributors, getDiscussions, getReviewerNeedingReplacement, getPendingEditorSuggestions
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
-import { getManuscriptStatusLabel, getLatestRevision } from '../lib/manuscriptStatusLabel';
+import { getManuscriptStatusLabel, getLatestRevision, getRevisionMeta, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
 import {
   getEditorAssignedManuscripts,
   subscribeToEditorAssignments,
@@ -32,7 +32,7 @@ import {
   formatDateTime,
   addSuggestedReviewer
 } from '../lib/editorWorkspace';
-import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send } from 'lucide-react';
+import { Loader2, ArrowLeft, ArrowRight, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send } from 'lucide-react';
 import RevisionReview from './RevisionReview';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
@@ -74,23 +74,20 @@ const STATUS_STYLES: Record<ManuscriptStatus, string> = {
   REJECTED: 'bg-red-50 text-red-700 border-red-200',
 };
 
-function StatusBadge({ status, latestRevision }: { status: ManuscriptStatus; latestRevision?: RevisionRow | null }) {
-  // A distinct "Revision Submitted" state -- the Coordinator has forwarded a
-  // resubmitted revision and it's sitting with the Editor (latestRevision
-  // .status = 'UNDER_REVIEW'). Called out separately from the generic
-  // EDITOR REVIEW badge so it's obvious at a glance which rows open the
-  // dedicated EditorRevisionReview page when clicked.
-  const isRevisionSubmitted = latestRevision?.status === 'UNDER_REVIEW' && latestRevision?.origin !== 'PEER_REVIEW';
-  const isRevisionWithReviewers = latestRevision?.status === 'UNDER_REVIEW' && latestRevision?.origin === 'PEER_REVIEW';
-  const label = isRevisionSubmitted
-    ? `REVISION ${latestRevision!.revision_number} SUBMITTED`
-    : isRevisionWithReviewers
-    ? `REVISION ${latestRevision!.revision_number} WITH REVIEWERS`
-    : getManuscriptStatusLabel(status, latestRevision);
-  const style = isRevisionSubmitted ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : STATUS_STYLES[status];
+function StatusBadge({ manuscript, latestRevision }: { manuscript: ManuscriptRow; latestRevision?: RevisionRow | null }) {
+  const label = getManuscriptStatusLabel(manuscript, latestRevision);
+  const revisionMeta = getRevisionMeta(latestRevision);
+  const style = STANDARD_STATUS_COLORS[label as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT;
   return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${style}`}>
-      {label}
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${style}`}>
+        {label}
+      </span>
+      {revisionMeta && (
+        <span className="inline-flex items-center px-2 py-1 rounded-full border border-slate-200 bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-wide">
+          Rev {revisionMeta.revisionNumber}{revisionMeta.revisionType ? ` — ${revisionMeta.revisionType}` : ''}
+        </span>
+      )}
     </span>
   );
 }
@@ -492,7 +489,7 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
             return (
               <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id)}>
                 <td className="px-4 py-3 font-bold text-slate-800">{details.manuscript.title}</td>
-                <td className="px-4 py-3"><StatusBadge status={details.manuscript.status} latestRevision={latestRevision} /></td>
+                <td className="px-4 py-3"><StatusBadge manuscript={details.manuscript} latestRevision={latestRevision} /></td>
                 <td className="px-4 py-3 text-xs font-bold text-slate-600">{details.assignment.status}</td>
                 <td className={`px-4 py-3 text-right font-bold text-xs ${isRevisionSubmitted ? 'text-indigo-600' : 'text-[#008751]'}`}>
                   {isRevisionSubmitted ? 'Review Revision →' : 'Open →'}
@@ -551,6 +548,10 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [error, setError] = useState('');
   const [sidebarSection, setSidebarSection] = useState<'dashboard' | 'evaluation_timeline' | 'title_abstract' | 'authors' | 'manuscript' | 'references' | 'supplementary' | 'cover_letter' | 'discussions' | 'editor_evaluation' | 'reviews' | 'decision' | 'suggestions' | 'review_history' | 'metadata' | 'revisions' | 'production' | 'galley_files'>('dashboard');
   const [activeTab, setActiveTab] = useState<'files' | 'evaluation' | 'decision' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments'>('files');
+  // True for one render after confirming "Move to Next Stage" on a
+  // resubmitted revision -- shows a short transition banner on the
+  // reviewer-selection screen so the jump there doesn't feel abrupt.
+  const [justMovedToNextStage, setJustMovedToNextStage] = useState(false);
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [decisionError, setDecisionError] = useState('');
   const [editorComments, setEditorComments] = useState('');
@@ -792,6 +793,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
             manuscriptId={manuscript.id}
             revisions={details.revisions || []}
             onSubmitSuccess={onChanged}
+            onMoveToNextStage={() => {
+              onChanged();
+              setJustMovedToNextStage(true);
+              setSidebarSection('dashboard');
+              setActiveTab('suggestions');
+            }}
           />
         </div>
       </div>
@@ -1074,6 +1081,10 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                         <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
                           Waiting for all peer reviews to be submitted before you can make the final decision.
                         </div>
+                      ) : isPeerReviewRound && hasRequiredReviews && !manuscript.reviews_released_at ? (
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
+                          All reviews are in, but the Coordinator hasn't sent them to you yet.
+                        </div>
                       ) : recommendationIsCurrent ? (
                         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
                           <p className="text-sm font-bold text-emerald-900">
@@ -1236,6 +1247,22 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
 
             {activeTab === 'suggestions' && (
               <div className="space-y-6">
+                {justMovedToNextStage && (
+                  <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
+                    <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm shrink-0">
+                      <CheckCircle className="w-4 h-4" /> Revision Approved
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <p className="text-sm text-emerald-800 font-bold">Now select 2 reviewers to continue.</p>
+                    <button
+                      type="button"
+                      onClick={() => setJustMovedToNextStage(false)}
+                      className="ml-auto text-emerald-600 hover:text-emerald-800 shrink-0"
+                    >
+                      <XIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
                 {manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT' && (
                   <EditorReviewerSelection
                     manuscriptId={manuscript.id}
@@ -1824,6 +1851,10 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                       ) : isPeerReviewRound && !hasRequiredReviews ? (
                         <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
                           Waiting for all peer reviews to be submitted before you can make the final decision.
+                        </div>
+                      ) : isPeerReviewRound && hasRequiredReviews && !manuscript.reviews_released_at ? (
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
+                          All reviews are in, but the Coordinator hasn't sent them to you yet.
                         </div>
                       ) : recommendationIsCurrent ? (
                         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">

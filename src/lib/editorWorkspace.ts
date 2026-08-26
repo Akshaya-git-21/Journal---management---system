@@ -69,12 +69,16 @@ export async function getEditorAssignedManuscripts(editorId: string): Promise<Ed
     if (assignError) throw new Error(assignError.message);
     if (!assignments || assignments.length === 0) return [];
 
-    const details: EditorManuscriptDetails[] = [];
-
-    for (const assignment of assignments) {
+    // Each assignment's own data is independent of every other assignment's,
+    // so fetch them all concurrently instead of one at a time -- with a
+    // couple dozen assignments (each doing ~8 queries), the old sequential
+    // for-loop took several seconds per refresh, which made the UI look
+    // stuck on the old screen after a successful action even though the
+    // write had already succeeded and a refetch was already in flight.
+    const settled = await Promise.all(assignments.map(async (assignment): Promise<EditorManuscriptDetails | null> => {
       try {
         const manuscript = await getManuscript(assignment.manuscript_id);
-        if (!manuscript) continue;
+        if (!manuscript) return null;
 
         const [
           contributors,
@@ -124,7 +128,7 @@ export async function getEditorAssignedManuscripts(editorId: string): Promise<Ed
           });
         }
 
-        details.push({
+        return {
           manuscript,
           assignment: assignment as EditorAssignmentRow,
           contributors,
@@ -136,14 +140,14 @@ export async function getEditorAssignedManuscripts(editorId: string): Promise<Ed
           editorReviewerActions,
           files: (filesData || []) as ManuscriptFileRow[],
           profiles
-        });
+        };
       } catch (error) {
         console.error(`Error fetching details for manuscript ${assignment.manuscript_id}:`, error);
-        continue;
+        return null;
       }
-    }
+    }));
 
-    return details;
+    return settled.filter((d): d is EditorManuscriptDetails => d !== null);
   } catch (error) {
     console.error('Error fetching editor manuscripts:', error);
     throw error;

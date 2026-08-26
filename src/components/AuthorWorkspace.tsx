@@ -9,7 +9,7 @@ import {
   submitManuscript
 } from '../lib/workflow';
 import { supabase, upsertManuscriptToDb, ensureAuthorProfile } from '../lib/supabase';
-import { getManuscriptStatusLabel } from '../lib/manuscriptStatusLabel';
+import { getManuscriptStatusLabel, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
 import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
@@ -23,18 +23,6 @@ interface AuthorWorkspaceProps {
   currentUser?: { name: string; email: string; role: Role; id?: string } | null;
   onSignOut?: () => void;
 }
-
-const STATUS_STYLES: Record<ManuscriptStatus, string> = {
-  DRAFT: 'bg-slate-100 text-slate-600 border-slate-200',
-  SUBMITTED: 'bg-amber-50 text-amber-700 border-amber-200',
-  EDITOR_REVIEW: 'bg-blue-50 text-blue-700 border-blue-200',
-  UNDER_REVIEW: 'bg-purple-50 text-purple-700 border-purple-200',
-  REVISION_REQUESTED: 'bg-orange-50 text-orange-700 border-orange-200',
-  AWAITING_DECISION: 'bg-sky-50 text-sky-700 border-sky-200',
-  ACCEPTED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  PUBLISHED: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-  REJECTED: 'bg-red-50 text-red-700 border-red-200',
-};
 
 const WORKFLOW_STAGES = ['SUBMITTED', 'EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED'];
 const PROGRESS_STEPS = ['Intake', 'Evaluation', 'Revision', 'Production', 'Published'];
@@ -82,7 +70,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       console.log('[LOAD] Querying manuscripts table where author_id =', userData.user.id);
       const { data, error: queryError } = await supabase
         .from('manuscripts')
-        .select('*')
+        .select('*, display_status')
         .eq('author_id', userData.user.id)
         .order('submitted_at', { ascending: false });
 
@@ -110,12 +98,16 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
     }
   };
 
-  // Filter manuscripts by sidebar category, then by search
+  // Filter manuscripts by sidebar category, then by search. Keyed off the
+  // standardized display status (getManuscriptStatusLabel), not the raw
+  // manuscripts.status column -- e.g. "review" must not include a manuscript
+  // that's technically UNDER_REVIEW but hasn't actually reached Peer Review
+  // yet (only one reviewer has accepted so far).
   const STATUS_FILTER_PREDICATES: Record<typeof statusFilter, (m: ManuscriptRow) => boolean> = {
     active: (m) => !['REJECTED', 'PUBLISHED'].includes(m.status),
-    review: (m) => m.status === 'UNDER_REVIEW',
-    revisions: (m) => m.status === 'REVISION_REQUESTED',
-    accepted: (m) => m.status === 'ACCEPTED',
+    review: (m) => ['EDITORIAL REVIEW', 'PEER REVIEW'].includes(getManuscriptStatusLabel(m)),
+    revisions: (m) => getManuscriptStatusLabel(m) === 'IN REVISION',
+    accepted: (m) => ['ACCEPTED', 'PROOFREADING'].includes(getManuscriptStatusLabel(m)),
     rejected: (m) => m.status === 'REJECTED',
     published: (m) => m.status === 'PUBLISHED',
   };
@@ -140,16 +132,17 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
     setCurrentPage(1);
   }, [searchTerm, statusFilter]);
 
-  // Calculate status counts
+  // Calculate status counts -- bucketed by the standardized display status,
+  // not the raw manuscripts.status column (see STATUS_FILTER_PREDICATES).
   const statusCounts = {
-    submitted: items.filter((m) => m.status === 'SUBMITTED').length,
-    underReview: items.filter((m) => m.status === 'UNDER_REVIEW').length,
-    revisionRequested: items.filter((m) => m.status === 'REVISION_REQUESTED').length,
-    awaitingDecision: items.filter((m) => m.status === 'AWAITING_DECISION').length,
-    accepted: items.filter((m) => m.status === 'ACCEPTED').length,
+    submitted: items.filter((m) => getManuscriptStatusLabel(m) === 'SUBMITTED').length,
+    editorialReview: items.filter((m) => getManuscriptStatusLabel(m) === 'EDITORIAL REVIEW').length,
+    peerReview: items.filter((m) => getManuscriptStatusLabel(m) === 'PEER REVIEW').length,
+    underReview: items.filter((m) => ['EDITORIAL REVIEW', 'PEER REVIEW'].includes(getManuscriptStatusLabel(m))).length,
+    revisionRequested: items.filter((m) => getManuscriptStatusLabel(m) === 'IN REVISION').length,
+    accepted: items.filter((m) => ['ACCEPTED', 'PROOFREADING'].includes(getManuscriptStatusLabel(m))).length,
     published: items.filter((m) => m.status === 'PUBLISHED').length,
     rejected: items.filter((m) => m.status === 'REJECTED').length,
-    revisionProcessing: items.filter((m) => ['UNDER_REVIEW', 'AWAITING_DECISION', 'EDITOR_REVIEW'].includes(m.status)).length
   };
 
   // Setup subscriptions
@@ -544,9 +537,9 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
                 {[
                   { label: 'Submitted', count: statusCounts.submitted },
-                  { label: 'Under Review', count: statusCounts.underReview },
-                  { label: 'Awaiting Decision', count: statusCounts.awaitingDecision },
-                  { label: 'Revisions', count: statusCounts.revisionRequested }
+                  { label: 'Editorial Review', count: statusCounts.editorialReview },
+                  { label: 'Peer Review', count: statusCounts.peerReview },
+                  { label: 'In Revision', count: statusCounts.revisionRequested }
                 ].map((item) => (
                   <div key={item.label} className="rounded-lg bg-white border border-slate-200 p-4 shadow-sm">
                     <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">{item.label}</p>
@@ -624,8 +617,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                             </td>
                             <td className="px-6 py-4 text-slate-600 text-sm whitespace-nowrap">{formatDate(m.submitted_at)}</td>
                             <td className="px-6 py-4">
-                              <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase ${STATUS_STYLES[m.status]}`}>
-                                {getManuscriptStatusLabel(m.status)}
+                              <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase ${STANDARD_STATUS_COLORS[getManuscriptStatusLabel(m) as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT}`}>
+                                {getManuscriptStatusLabel(m)}
                               </span>
                             </td>
                             <td className="px-6 py-4">

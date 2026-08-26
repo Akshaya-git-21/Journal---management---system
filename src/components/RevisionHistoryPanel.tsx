@@ -166,6 +166,28 @@ export default function RevisionHistoryPanel({ manuscriptId, profiles = {} }: Pr
                   <p className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3 whitespace-pre-wrap">{rev.decision_letter}</p>
                 </div>
               )}
+              {rev.author_response && (
+                <div>
+                  <p className="font-bold text-slate-700 uppercase text-[10px] mb-1">Author's Response</p>
+                  <p className="text-sm text-slate-700 bg-blue-50 border border-blue-200 rounded-lg p-3 whitespace-pre-wrap">{rev.author_response}</p>
+                </div>
+              )}
+              {rev.editor_comments && (
+                <div>
+                  <p className="font-bold text-slate-700 uppercase text-[10px] mb-1">Editor Comments</p>
+                  <p className="text-sm text-slate-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3 whitespace-pre-wrap">{rev.editor_comments}</p>
+                </div>
+              )}
+              {rev.editor_decision && (
+                <div>
+                  <p className="font-bold text-slate-700 uppercase text-[10px] mb-1">Editor Decision</p>
+                  <p className="text-sm font-bold text-slate-900">
+                    {rev.origin === 'EDITOR_SCREENING'
+                      ? (rev.editor_decision === 'REJECT' ? 'Reject Submission' : rev.editor_decision === 'ACCEPT' ? 'Move to Next Stage' : 'Return to Author')
+                      : rev.editor_decision.replace(/_/g, ' ')}
+                  </p>
+                </div>
+              )}
               {(() => {
                 // Reviewer reports from the round that led to THIS revision
                 // (Phase 2 Checkpoint C) -- kept visually distinct from the

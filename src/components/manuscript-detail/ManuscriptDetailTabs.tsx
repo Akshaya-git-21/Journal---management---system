@@ -89,6 +89,7 @@ export default function ManuscriptDetailTabs({
             profiles={data.profiles}
             revisions={data.revisions || []}
             onWorkflowChange={() => { onDataChange(); onWorkflowChange(); }}
+            onGoToTab={setActiveTab}
           />
         )}
         {activeTab === 'manuscript' && (

@@ -1,5 +1,6 @@
 import { useState, useEffect, ChangeEvent, DragEvent } from 'react';
-import { getRevisions, getRevisionFiles, uploadRevisionFile, deleteManuscriptFile, submitRevision, getReviewerAssignments, ManuscriptFileRow, RevisionRow, ReviewerAssignmentRow } from '../lib/workflow';
+import { getRevisions, getRevisionFiles, uploadRevisionFile, deleteManuscriptFile, submitRevision, getReviewerAssignments, getAuthorEditorNotes, ManuscriptFileRow, RevisionRow, ReviewerAssignmentRow } from '../lib/workflow';
+import { supabase } from '../lib/supabase';
 import { Loader2, Upload, CheckCircle, X, FileText } from 'lucide-react';
 
 interface AuthorRevisionRequestProps {
@@ -121,9 +122,25 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   const [draftSaved, setDraftSaved] = useState(false);
   const [manualChecklist, setManualChecklist] = useState({ addressedComments: false, confirmedDetails: false });
   const [reviewerComments, setReviewerComments] = useState<ReviewerAssignmentRow[]>([]);
+  const [editorNotes, setEditorNotes] = useState<{ screening_comments: string | null; action_reason: string | null } | null>(null);
 
   useEffect(() => {
     loadRevisions();
+    loadEditorAssignment();
+  }, [manuscriptId]);
+
+  // Live updates: the Editor's comments / Return to Author reason (on
+  // editor_assignments) and the revision itself (decision letter, status)
+  // can change while the Author already has this screen open -- refetch on
+  // any change instead of requiring a manual reload.
+  useEffect(() => {
+    const channel = supabase
+      .channel(`author-revision:${manuscriptId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'editor_assignments', filter: `manuscript_id=eq.${manuscriptId}` }, loadEditorAssignment)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_revisions', filter: `manuscript_id=eq.${manuscriptId}` }, loadRevisions)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manuscriptId]);
 
   useEffect(() => {
@@ -155,6 +172,14 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
       console.error('Failed to load revisions:', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadEditorAssignment = async () => {
+    try {
+      setEditorNotes(await getAuthorEditorNotes(manuscriptId));
+    } catch (e) {
+      console.error('Failed to load editor notes:', e);
     }
   };
 
@@ -248,7 +273,16 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   if (!selectedRevision) return null;
 
   const isMinor = selectedRevision.decision_type === 'MINOR_REVISION';
-  const decisionLabel = isMinor ? 'Minor Revision' : selectedRevision.decision_type === 'MAJOR_REVISION' ? 'Major Revision' : 'Revision';
+  // A screening-stage "Return to Author" is always stored internally as a
+  // MAJOR_REVISION decision_type (see EditorEvaluationFormTab.tsx's
+  // ACTION_META) -- show the Editor's real action name instead of that raw
+  // value. Peer-review-origin revisions genuinely do carry a Minor/Major
+  // Revision severity choice from the Editor, so those keep their literal
+  // label.
+  const isScreeningOrigin = !selectedRevision.origin || selectedRevision.origin === 'EDITOR_SCREENING';
+  const decisionLabel = isScreeningOrigin
+    ? 'Return to Author'
+    : isMinor ? 'Minor Revision' : selectedRevision.decision_type === 'MAJOR_REVISION' ? 'Major Revision' : 'Revision';
   const isSubmitted = selectedRevision.status === 'REVISION_SUBMITTED';
 
   return (
@@ -286,24 +320,68 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
           </span>
         </div>
         <p className="text-sm text-slate-600 mt-3">
-          Your manuscript requires {isMinor ? 'minor' : 'major'} revisions. Please address the editor's comments and upload the revised files below.
+          {isScreeningOrigin
+            ? "The Editor has returned your manuscript for revision. Please address the comments below and upload the revised files."
+            : `Your manuscript requires ${isMinor ? 'minor' : 'major'} revisions. Please address the editor's comments and upload the revised files below.`}
         </p>
       </div>
 
-      {/* Editor's Decision */}
-      <div className="bg-white border border-slate-200 rounded-lg p-6">
-        <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor's Decision</h3>
-        <p className={`text-base font-bold mb-2 ${isMinor ? 'text-amber-700' : 'text-red-700'}`}>{decisionLabel}</p>
-        <p className="text-sm text-slate-700 italic leading-relaxed">
-          "{selectedRevision.decision_letter ? (showDecisionLetter || selectedRevision.decision_letter.length <= 160 ? selectedRevision.decision_letter : selectedRevision.decision_letter.slice(0, 160) + '…') : 'No letter provided.'}"
-        </p>
-        {selectedRevision.decision_letter && selectedRevision.decision_letter.length > 160 && (
-          <button
-            onClick={() => setShowDecisionLetter(v => !v)}
-            className="text-xs font-bold text-blue-600 hover:text-blue-700 mt-2"
-          >
-            {showDecisionLetter ? 'Show less' : 'View decision letter'}
-          </button>
+      {/* Editor's Decision -- Editor Comments (general notes) and the
+          Return to Author Reason are shown as their own labeled fields
+          (sourced live from editor_assignments, kept in sync by the
+          realtime subscription above) rather than folded into one quoted
+          "decision letter" -- lets the Author tell the Editor's own words
+          apart from anything the Coordinator added when forwarding it. */}
+      <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
+        <div>
+          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Editor's Decision</h3>
+          <p className={`text-base font-bold ${isMinor ? 'text-amber-700' : 'text-red-700'}`}>{decisionLabel}</p>
+        </div>
+
+        {isScreeningOrigin && editorNotes?.screening_comments && (
+          <div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Editor Comments</p>
+            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{editorNotes.screening_comments}</p>
+          </div>
+        )}
+
+        {isScreeningOrigin && editorNotes?.action_reason && (
+          <div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Return to Author Reason</p>
+            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{editorNotes.action_reason}</p>
+          </div>
+        )}
+
+        {!isScreeningOrigin && selectedRevision.editor_comments && (
+          <div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Editor Comments</p>
+            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{selectedRevision.editor_comments}</p>
+          </div>
+        )}
+
+        {/* The Coordinator's note to author is pre-filled from the Return
+            to Author Reason (see DecisionTab.tsx) but can be edited before
+            sending -- only show it as its own block when it actually
+            diverges from that reason, so the common case doesn't repeat
+            the same text twice. */}
+        {selectedRevision.decision_letter && selectedRevision.decision_letter.trim() !== (editorNotes?.action_reason || '').trim() && (
+          <div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Note from Coordinator</p>
+            <p className="text-sm text-slate-700 italic leading-relaxed">
+              "{showDecisionLetter || selectedRevision.decision_letter.length <= 160 ? selectedRevision.decision_letter : selectedRevision.decision_letter.slice(0, 160) + '…'}"
+            </p>
+            {selectedRevision.decision_letter.length > 160 && (
+              <button
+                onClick={() => setShowDecisionLetter(v => !v)}
+                className="text-xs font-bold text-blue-600 hover:text-blue-700 mt-2"
+              >
+                {showDecisionLetter ? 'Show less' : 'View full note'}
+              </button>
+            )}
+          </div>
+        )}
+        {!isScreeningOrigin && !selectedRevision.decision_letter && !selectedRevision.editor_comments && (
+          <p className="text-sm text-slate-500 italic">No letter provided.</p>
         )}
       </div>
 
@@ -429,7 +507,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
                 className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-3 rounded-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                Send to Coordinator
+                Send to Editor
               </button>
             </div>
             {!canSubmit && (

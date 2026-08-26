@@ -41,7 +41,7 @@ export function getRevisionDecisionLabel(recommendation: ReviewerRecommendation,
     case 'MINOR_REVISION': return `Minor Revision ${currentRevisionNumber + 1}`;
     case 'MAJOR_REVISION': return `Major Revision ${currentRevisionNumber + 1}`;
     case 'REJECT': return 'Reject';
-    default: return recommendation.replace(/_/g, ' ');
+    default: return recommendation ? recommendation.replace(/_/g, ' ') : 'Pending';
   }
 }
 

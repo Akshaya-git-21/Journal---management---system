@@ -33,6 +33,7 @@ export interface EditorAssignmentRow {
   screening_responses: ScreeningResponse[];
   screening_comments: string | null;
   action_reason: string | null;
+  peer_review_comments: string | null;
   assessment_status: 'NOT_STARTED' | 'SUBMITTED';
   assessment_submitted_at: string | null;
   recommendation: ReviewerRecommendation | null;
@@ -319,6 +320,12 @@ export const coordinatorSendRevisionToEditor = (manuscriptId: string) =>
 export const coordinatorSendRevisionToReviewers = (manuscriptId: string) =>
   rpcOrThrow(supabase.rpc('coordinator_send_revision_to_reviewers', { p_manuscript_id: manuscriptId }));
 
+/** Coordinator-only: releases a completed round of peer reviews to the
+ * Editor -- the Editor's decision screen stays locked until this is called.
+ * See coordinator_send_reviews_to_editor() in 0041_coordinator_releases_reviews_to_editor.sql. */
+export const coordinatorSendReviewsToEditor = (manuscriptId: string) =>
+  rpcOrThrow(supabase.rpc('coordinator_send_reviews_to_editor', { p_manuscript_id: manuscriptId }));
+
 /** Reviewer-only: accept/decline a review invitation. Declining requires a
  * reason (see respond_to_review_invite() in 0028_reviewer_peer_review_questionnaire.sql)
  * and feeds the existing 0027 replacement-deadline mechanism unchanged. */
@@ -395,6 +402,18 @@ export async function getEditorAssignments(manuscriptId: string): Promise<Editor
   const { data, error } = await supabase.from('editor_assignments').select('*').eq('manuscript_id', manuscriptId).order('assigned_at', { ascending: false });
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+/** Author-only: the Editor's screening comments and Return to Author /
+ * Rejection reason for their own manuscript -- editor_assignments has no
+ * SELECT policy for the Author at all (it also carries an Editor-to-
+ * Coordinator private note), so this reads through a narrow RPC instead of
+ * the raw table. See get_author_editor_notes() in
+ * 0037_author_editor_notes.sql. */
+export async function getAuthorEditorNotes(manuscriptId: string): Promise<{ screening_comments: string | null; action_reason: string | null; recommendation: string | null } | null> {
+  const { data, error } = await supabase.rpc('get_author_editor_notes', { p_manuscript_id: manuscriptId });
+  if (error) throw new Error(error.message);
+  return data?.[0] ?? null;
 }
 
 export async function getReviewerAssignments(manuscriptId: string): Promise<ReviewerAssignmentRow[]> {
@@ -483,6 +502,17 @@ export interface ManuscriptRow {
   cover_letter: string;
   language: string;
   status: ManuscriptStatus;
+  /** Computed column (see 0036_standard_display_status.sql) -- the single
+   * standardized user-facing status (SUBMITTED / EDITORIAL REVIEW /
+   * IN REVISION / PEER REVIEW / ACCEPTED / REJECTED / PROOFREADING /
+   * PUBLISHED). Always render this, not `status`, in the UI -- see
+   * lib/manuscriptStatusLabel.ts. */
+  display_status?: string | null;
+  /** Set by coordinator_send_reviews_to_editor() (0041) once the
+   * Coordinator forwards a completed round of peer reviews -- the Editor's
+   * decision screen stays locked until this is set, cleared automatically
+   * whenever a fresh round of reviews starts being collected. */
+  reviews_released_at?: string | null;
   author_id: string;
   author_name: string;
   author_email: string;
@@ -575,18 +605,19 @@ export interface RevisionRow {
   coordinator_decision_at: string | null;
   coordinator_note: string | null;
   origin: 'EDITOR_SCREENING' | 'PEER_REVIEW';
+  author_response: string | null;
 }
 
 /** RLS scopes this to whatever the caller is allowed to see: their own
  * manuscripts (Author), assigned ones (Editor/Reviewer), or all (Coordinator). */
 export async function listManuscripts(): Promise<ManuscriptRow[]> {
-  const { data, error } = await supabase.from('manuscripts').select('*').order('created_at', { ascending: false });
+  const { data, error } = await supabase.from('manuscripts').select('*, display_status').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return data ?? [];
 }
 
 export async function getManuscript(id: string): Promise<ManuscriptRow | null> {
-  const { data, error } = await supabase.from('manuscripts').select('*').eq('id', id).maybeSingle();
+  const { data, error } = await supabase.from('manuscripts').select('*, display_status').eq('id', id).maybeSingle();
   if (error) throw new Error(error.message);
   return data;
 }

@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, StatusHistoryRow, ProfileRow, ScreeningResponse } from '../../../lib/workflow';
 import { publishDecision, sendToPublisher, listActiveProfilesByRole } from '../../../lib/workflow';
 import { createAndActivatePublisherAccount } from '../../../lib/auth';
-import { AlertCircle, Users, Scale, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, Send, X, Copy, Loader2, Building2, UserPlus, ChevronLeft, CheckCircle2, CheckCircle, XCircle, ClipboardList } from 'lucide-react';
-import { computeMajorityDecision, getRevisionDecisionLabel } from '../../../lib/decisionUtils';
-import { getManuscriptStatusMeta, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
+import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, Send, X, Copy, Loader2, Building2, UserPlus, ChevronLeft, CheckCircle2, CheckCircle, XCircle, ClipboardList } from 'lucide-react';
+import { getRevisionDecisionLabel } from '../../../lib/decisionUtils';
+import { getManuscriptStatusMeta, getManuscriptStatusLabel, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 
 interface Props {
   manuscript: ManuscriptRow;
@@ -38,7 +38,18 @@ const DECISION_LABELS: Record<string, string> = {
   SPLIT: 'Split decision',
 };
 
-function DecisionPill({ decision, size = 'sm' }: { decision: string | null; size?: 'sm' | 'lg' }) {
+// Screening-stage Editor decision: only Reject Submission / Return to
+// Author / Move to Next Stage exist (see EditorEvaluationFormTab.tsx's
+// ACTION_META) -- MAJOR_REVISION is how "Return to Author" is stored, not
+// a real "Major Revision" decision type at this stage.
+const SCREENING_DECISION_LABELS: Record<string, string> = {
+  ACCEPT: 'Move to Next Stage',
+  MAJOR_REVISION: 'Return to Author',
+  MINOR_REVISION: 'Return to Author',
+  REJECT: 'Reject Submission',
+};
+
+function DecisionPill({ decision, size = 'sm', screeningStage = false }: { decision: string | null; size?: 'sm' | 'lg'; screeningStage?: boolean }) {
   if (!decision) return <span className="text-xs text-slate-400 italic">Pending</span>;
   const style =
     decision === 'ACCEPT' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
@@ -46,9 +57,10 @@ function DecisionPill({ decision, size = 'sm' }: { decision: string | null; size
     decision === 'SPLIT' ? 'bg-slate-100 text-slate-600 border-slate-200' :
     decision === 'MAJOR_REVISION' ? 'bg-orange-100 text-orange-800 border-orange-300' :
     'bg-amber-100 text-amber-800 border-amber-300';
+  const labels = screeningStage ? SCREENING_DECISION_LABELS : DECISION_LABELS;
   return (
     <span className={`font-bold rounded-full border ${style} ${size === 'lg' ? 'text-sm px-4 py-1.5' : 'text-xs px-2.5 py-1'}`}>
-      {DECISION_LABELS[decision] || decision.replace(/_/g, ' ')}
+      {labels[decision] || decision.replace(/_/g, ' ')}
     </span>
   );
 }
@@ -82,7 +94,6 @@ export function DecisionTab({
   const hasRequiredReviews = activeReviewerAssignments.length > 0 && activeReviewerAssignments.every(r => r.status === 'SUBMITTED');
 
   const activeEditor = editorAssignments.find(a => a.status === 'ACCEPTED') || editorAssignments[0];
-  const majority = computeMajorityDecision(reviewerAssignments);
   const latestRevision = getLatestRevision(revisions);
   const sortedRevisions = [...revisions].sort((a, b) => a.revision_number - b.revision_number);
   const firstSubmissionRevision = sortedRevisions[0] || null;
@@ -125,6 +136,18 @@ export function DecisionTab({
     latestReviewSubmittedAt && activeEditor.recommendation_submitted_at > latestReviewSubmittedAt
   );
   const pendingPeerReviewConfirm = isPeerReviewRound && manuscript.status === 'AWAITING_DECISION' && editorDecisionIsFreshForPeerReview;
+  // The VERY FIRST screening-stage decision (Reject Submission / Return to
+  // Author / Move to Next Stage) -- no revision has ever been created yet
+  // (sortedRevisions.length === 0, so pendingRevisionConfirm can't apply)
+  // and no reviewer has ever been assigned (reviewerAssignments.length ===
+  // 0, so pendingPeerReviewConfirm/isPeerReviewRound can't apply either).
+  // Without this, the Coordinator fell through to the free 4-button picker
+  // below even though the Editor already decided -- same confirm-only
+  // pattern as the other two rounds, just never extended to this one.
+  const pendingScreeningConfirm = !!(
+    sortedRevisions.length === 0 && reviewerAssignments.length === 0 &&
+    manuscript.status === 'AWAITING_DECISION' && activeEditor?.recommendation
+  );
   // The backend (publish_decision RPC) only accepts a decision once the
   // manuscript has actually reached AWAITING_DECISION -- checking just
   // hasEditorEvaluation/hasRequiredReviews let the form render as "ready"
@@ -133,8 +156,19 @@ export function DecisionTab({
   // "Manuscript is not awaiting a decision".
   const canDecide = manuscript.status === 'AWAITING_DECISION' &&
     (pendingRevisionConfirm || (hasEditorEvaluation && (reviewerAssignments.length === 0 || hasRequiredReviews)));
+
+  // Pre-fill the note-to-author with the Editor's own Return to
+  // Author / Rejection reason so it reaches the Author by default -- the
+  // Coordinator can still edit it, but the Editor's actual words are what
+  // gets sent unless the Coordinator deliberately changes them.
+  useEffect(() => {
+    if (pendingScreeningConfirm && !letter && activeEditor?.action_reason) {
+      setLetter(activeEditor.action_reason);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingScreeningConfirm, activeEditor?.action_reason]);
   const decided = ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
-  const statusMeta = getManuscriptStatusMeta(manuscript.status, latestRevision);
+  const statusMeta = getManuscriptStatusMeta(manuscript, latestRevision);
   const finalDecisionLabel =
     manuscript.status === 'ACCEPTED' ? 'ACCEPT' :
     manuscript.status === 'REJECTED' ? 'REJECT' :
@@ -176,7 +210,11 @@ export function DecisionTab({
 
   return (
     <div className="space-y-6">
-      {/* 1. Reviewer Decisions -- original round peer review only. */}
+      {/* 1. Reviewer Decisions -- original round peer review only. Nothing
+          to show at the screening stage (before any reviewer is ever
+          assigned), so this card doesn't render at all rather than showing
+          an empty "No reviewers assigned yet" placeholder. */}
+      {reviewerAssignments.length > 0 && (
       <div className="bg-blue-50/60 border-2 border-blue-100 rounded-2xl overflow-hidden">
         <button
           type="button"
@@ -190,24 +228,21 @@ export function DecisionTab({
         </button>
         {reviewerDecisionsExpanded && (
           <div className="px-6 pb-6">
-            {reviewerAssignments.length === 0 ? (
-              <p className="text-sm text-blue-700/70">No reviewers assigned yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {reviewerAssignments.map(r => (
-                  <div key={r.id} className="flex items-center justify-between bg-white border border-blue-200 rounded-lg p-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{profiles[r.reviewer_id]?.name || 'Reviewer'}</p>
-                      <p className="text-xs text-slate-500">{r.status === 'SUBMITTED' ? 'Review submitted' : r.status.replace(/_/g, ' ')}</p>
-                    </div>
-                    <DecisionPill decision={r.status === 'SUBMITTED' ? (r.recommendation || null) : null} />
+            <div className="space-y-2">
+              {reviewerAssignments.map(r => (
+                <div key={r.id} className="flex items-center justify-between bg-white border border-blue-200 rounded-lg p-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{profiles[r.reviewer_id]?.name || 'Reviewer'}</p>
+                    <p className="text-xs text-slate-500">{r.status === 'SUBMITTED' ? 'Review submitted' : r.status.replace(/_/g, ' ')}</p>
                   </div>
-                ))}
-              </div>
-            )}
+                  <DecisionPill decision={r.status === 'SUBMITTED' ? (r.recommendation || null) : null} />
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
+      )}
 
       {/* 1b. Initial Editorial Screening summary -- shown once, for the
           round-1 gate only (no revisions yet), so the Coordinator can see
@@ -248,7 +283,7 @@ export function DecisionTab({
             {activeEditor.action_reason && (
               <div>
                 <p className="text-xs font-bold uppercase tracking-wide text-amber-700 mb-1">
-                  {activeEditor.recommendation === 'REJECT' ? 'Rejection Reason' : 'Revision Reason'}
+                  {activeEditor.recommendation === 'REJECT' ? 'Rejection Reason' : 'Return to Author Reason'}
                 </p>
                 <p className="text-sm text-slate-800 whitespace-pre-wrap bg-amber-50 border border-amber-200 rounded-lg p-3">{activeEditor.action_reason}</p>
               </div>
@@ -257,36 +292,6 @@ export function DecisionTab({
         </div>
       )}
 
-      {/* 2. Editor Decision -- original round only. Once a revision cycle
-          exists, editor_assignments.recommendation has been overwritten by
-          that cycle's decision, so the original round's outcome is only
-          reliably available via the First Submission Decision card below
-          (derived from the immutable revision row it produced). */}
-      {sortedRevisions.length === 0 && (
-        <div className="bg-teal-50/60 border-2 border-teal-100 rounded-2xl p-6 flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-black text-teal-900 flex items-center gap-2 mb-1">
-              <UserCheck className="w-4 h-4" /> Editor Decision
-            </h3>
-            <p className="text-xs text-teal-700/70">{activeEditor ? profiles[activeEditor.editor_id]?.name || 'Editor' : 'No editor assigned'}</p>
-            {activeEditor?.assessment_status === 'SUBMITTED' && !activeEditor.recommendation && (
-              <p className="text-xs text-amber-600 mt-1">Evaluation submitted — recommendation not yet given</p>
-            )}
-          </div>
-          <DecisionPill decision={activeEditor?.recommendation || null} />
-        </div>
-      )}
-
-      {/* 3. Majority Reviewer Decision */}
-      <div className="bg-indigo-50/60 border-2 border-indigo-100 rounded-2xl p-6 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-black text-indigo-900 flex items-center gap-2">
-            <Scale className="w-4 h-4" /> Majority Reviewer Decision
-          </h3>
-          <p className="text-xs text-indigo-700/70 mt-1">Automatically calculated from submitted reviewer recommendations</p>
-        </div>
-        <DecisionPill decision={majority} size="lg" />
-      </div>
 
       {/* 4. First Submission Decision -- the Coordinator's decision on the
           ORIGINAL submission. If it required a revision, that decision is
@@ -308,7 +313,9 @@ export function DecisionTab({
               <h3 className="text-sm font-black text-violet-900">First Submission Decision</h3>
             </div>
             <span className="font-bold rounded-full border bg-violet-100 text-violet-800 border-violet-300 text-sm px-4 py-1.5">
-              {getRevisionDecisionLabel(firstSubmissionRevision.decision_type as any, 0)}
+              {firstSubmissionRevision.origin === 'EDITOR_SCREENING'
+                ? 'Return to Author'
+                : getRevisionDecisionLabel(firstSubmissionRevision.decision_type as any, 0)}
             </span>
           </button>
           {firstSubmissionExpanded && (
@@ -389,26 +396,6 @@ export function DecisionTab({
                     </div>
                   )}
                 </div>
-
-                <div className="bg-emerald-50/60 border border-emerald-100 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold uppercase tracking-wide text-emerald-700/70 flex items-center gap-1.5">
-                      <Gavel className="w-3.5 h-3.5" /> Coordinator Decision
-                    </p>
-                    {rev.coordinator_decision ? (
-                      <span className="font-bold rounded-full border bg-emerald-100 text-emerald-800 border-emerald-300 text-xs px-2.5 py-1">
-                        {getRevisionDecisionLabel(rev.coordinator_decision as any, rev.revision_number)}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-slate-400 italic">
-                        {rev.editor_decision ? 'Awaiting coordinator confirmation' : 'Awaiting editor decision'}
-                      </span>
-                    )}
-                  </div>
-                  {rev.coordinator_note && (
-                    <p className="text-sm text-slate-800 whitespace-pre-wrap bg-white border border-emerald-200 rounded-lg p-3">{rev.coordinator_note}</p>
-                  )}
-                </div>
               </div>
             )}
           </div>
@@ -424,7 +411,7 @@ export function DecisionTab({
       <div className="bg-emerald-50/60 border-2 border-emerald-200 rounded-2xl p-6 space-y-6">
         <div>
           <h3 className="text-sm font-black text-emerald-900 flex items-center gap-2">
-            <Gavel className="w-4 h-4" /> Coordinator Final Decision
+            <Gavel className="w-4 h-4" /> Editor Decision
           </h3>
           <p className="text-xs text-emerald-700/70 mt-1">
             To be chosen by the Coordinator below — this becomes the manuscript's official final decision.
@@ -440,8 +427,8 @@ export function DecisionTab({
                 Waiting for: {[
                   !hasEditorEvaluation && 'Editor evaluation',
                   reviewerAssignments.length > 0 && !hasRequiredReviews && `${reviewerAssignments.filter(r => r.status !== 'SUBMITTED').length} reviewer report(s)`,
-                  hasEditorEvaluation && (reviewerAssignments.length === 0 || hasRequiredReviews) && manuscript.status !== 'AWAITING_DECISION' && `manuscript to reach Awaiting Decision (currently ${manuscript.status.replace(/_/g, ' ')})`,
-                ].filter(Boolean).join(', ') || 'the manuscript to reach Awaiting Decision'}
+                  hasEditorEvaluation && (reviewerAssignments.length === 0 || hasRequiredReviews) && manuscript.status !== 'AWAITING_DECISION' && `manuscript to be ready for a decision (currently ${getManuscriptStatusLabel(manuscript)})`,
+                ].filter(Boolean).join(', ') || 'the manuscript to be ready for a decision'}
               </p>
             </div>
           </div>
@@ -481,11 +468,14 @@ export function DecisionTab({
           </>
         ) : pendingPeerReviewConfirm && activeEditor?.recommendation ? (
           <>
-            <div className="bg-white border-2 border-emerald-200 rounded-xl p-4">
+            <div className="bg-white border-2 border-emerald-200 rounded-xl p-4 space-y-2">
               <p className="text-xs font-bold uppercase tracking-wide text-emerald-700/70 mb-1">Editor's Decision (Peer Review)</p>
               <p className="text-lg font-black text-slate-900">
                 {DECISION_LABELS[activeEditor.recommendation] || activeEditor.recommendation.replace(/_/g, ' ')}
               </p>
+              {activeEditor.peer_review_comments && (
+                <p className="text-sm text-slate-700 whitespace-pre-wrap bg-emerald-50 border border-emerald-200 rounded-lg p-3">{activeEditor.peer_review_comments}</p>
+              )}
             </div>
 
             <div>
@@ -513,6 +503,34 @@ export function DecisionTab({
                 : activeEditor.recommendation === 'REJECT'
                 ? 'Confirm Rejection'
                 : 'Send Back to Author for Revision 1'}
+            </button>
+          </>
+        ) : pendingScreeningConfirm && activeEditor?.recommendation ? (
+          <>
+            {/* Comments / Return to Author Reason are already shown above in
+                the Initial Editorial Screening card, and that's what gets
+                sent to the Author (letter state is pre-filled from
+                activeEditor.action_reason by the useEffect above). Just a
+                compact "Decision: X" line plus the confirm action here. */}
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-emerald-700/70">Decision</p>
+              <p className="text-base font-black text-slate-900">
+                {SCREENING_DECISION_LABELS[activeEditor.recommendation] || activeEditor.recommendation.replace(/_/g, ' ')}
+              </p>
+            </div>
+
+            {error && <p className="text-xs text-red-600">{error}</p>}
+
+            <button
+              onClick={() => submitPublishDecision(activeEditor.recommendation as 'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION' | 'REJECT')}
+              disabled={loading}
+              className="w-full px-4 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition"
+            >
+              {loading ? 'Sending...' : activeEditor.recommendation === 'ACCEPT'
+                ? 'Move to Peer Review — Confirm'
+                : activeEditor.recommendation === 'REJECT'
+                ? 'Confirm Rejection'
+                : 'Return Back to Author'}
             </button>
           </>
         ) : isPeerReviewRound ? (

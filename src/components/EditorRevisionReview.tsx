@@ -4,7 +4,6 @@ import {
   ReviewerRecommendation
 } from '../lib/workflow';
 import { getLatestRevision } from '../lib/manuscriptStatusLabel';
-import { getRevisionDecisionLabel } from '../lib/decisionUtils';
 import { Loader2, FileText, Eye, Download, CheckCircle, Send } from 'lucide-react';
 import FilePreviewModal from './FilePreviewModal';
 
@@ -13,6 +12,12 @@ interface Props {
   manuscriptId: string;
   revisions: RevisionRow[];
   onSubmitSuccess: () => void;
+  /** Called instead of onSubmitSuccess specifically when the Editor confirms
+   * "Move to Next Stage" -- lets the parent jump straight to the existing
+   * reviewer-selection screen instead of dropping the Editor back at a
+   * generic dashboard they'd have to navigate away from manually. Falls
+   * back to onSubmitSuccess if not provided. */
+  onMoveToNextStage?: () => void;
 }
 
 const DEFAULT_CHECKLIST: string[] = [
@@ -23,12 +28,20 @@ const DEFAULT_CHECKLIST: string[] = [
   'Editor comments have been provided.',
 ];
 
-const DECISIONS: ReviewerRecommendation[] = ['ACCEPT', 'MINOR_REVISION', 'MAJOR_REVISION'];
-const DECISION_STYLE: Record<string, string> = {
-  ACCEPT: 'bg-emerald-700 hover:bg-emerald-800',
-  MINOR_REVISION: 'bg-amber-700 hover:bg-amber-800',
-  MAJOR_REVISION: 'bg-red-700 hover:bg-red-800',
+// Same 3 actions as the original screening round (EditorEvaluationFormTab.tsx's
+// ACTION_META) -- Reject / Return to Author (always MAJOR_REVISION under the
+// hood) / Move to Next Stage (ACCEPT, which now stays at EDITOR_REVIEW so the
+// existing reviewer-selection flow picks it up -- see
+// 0038_revision_loop_accept_and_author_response.sql). Replaces the previous
+// Accept/Minor/Major triad, which had no Reject option and no path to
+// reviewer selection at all.
+type RevisionAction = 'REJECT' | 'RETURN_TO_AUTHOR' | 'NEXT_STAGE';
+const ACTION_META: Record<RevisionAction, { title: string; confirmLabel: string; recommendation: ReviewerRecommendation; style: string }> = {
+  REJECT: { title: 'Reject', confirmLabel: 'Confirm Rejection', recommendation: 'REJECT', style: 'bg-red-700 hover:bg-red-800' },
+  RETURN_TO_AUTHOR: { title: 'Return to Author', confirmLabel: 'Confirm Return to Author', recommendation: 'MAJOR_REVISION', style: 'bg-amber-700 hover:bg-amber-800' },
+  NEXT_STAGE: { title: 'Move to Next Stage', confirmLabel: 'Confirm & Move to Next Stage', recommendation: 'ACCEPT', style: 'bg-emerald-700 hover:bg-emerald-800' },
 };
+const ACTIONS: RevisionAction[] = ['REJECT', 'RETURN_TO_AUTHOR', 'NEXT_STAGE'];
 
 /**
  * Dedicated full-page screen for an editor re-reviewing a resubmitted
@@ -48,6 +61,7 @@ export default function EditorRevisionReview({
   manuscriptId,
   revisions,
   onSubmitSuccess,
+  onMoveToNextStage,
 }: Props) {
   const latestRevision = getLatestRevision(revisions);
   const [files, setFiles] = useState<ManuscriptFileRow[]>([]);
@@ -56,7 +70,7 @@ export default function EditorRevisionReview({
 
   const [comments, setComments] = useState('');
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
-  const [selectedDecision, setSelectedDecision] = useState<ReviewerRecommendation | null>(null);
+  const [selectedAction, setSelectedAction] = useState<RevisionAction | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -80,20 +94,27 @@ export default function EditorRevisionReview({
 
   if (!latestRevision) return null;
 
-  const isMinor = latestRevision.decision_type === 'MINOR_REVISION';
-  const kind = isMinor ? 'Minor Revision' : latestRevision.decision_type === 'MAJOR_REVISION' ? 'Major Revision' : 'Revision';
+  // The screening-stage revision loop always returns a manuscript with
+  // MAJOR_REVISION as its decision_type (Return to Author has no
+  // minor/major severity distinction -- see EditorEvaluationFormTab.tsx's
+  // ACTION_META), so show that action name rather than the raw value.
+  const kind = 'Return to Author';
 
   const toggleChecklistItem = (id: string) => {
     setChecklist((prev) => prev.map((item) => (item.id === id ? { ...item, checked: !item.checked } : item)));
   };
 
   const handleConfirm = async () => {
-    if (!selectedDecision) return;
+    if (!selectedAction) return;
     setSubmitting(true);
     setError('');
     try {
-      await submitEditorRecommendation(manuscriptId, selectedDecision, comments.trim(), checklist);
-      onSubmitSuccess();
+      await submitEditorRecommendation(manuscriptId, ACTION_META[selectedAction].recommendation, comments.trim(), checklist);
+      if (selectedAction === 'NEXT_STAGE') {
+        (onMoveToNextStage || onSubmitSuccess)();
+      } else {
+        onSubmitSuccess();
+      }
     } catch (e: any) {
       setError(e.message || 'Failed to submit decision');
     } finally {
@@ -109,7 +130,7 @@ export default function EditorRevisionReview({
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Revision Review</p>
           <h1 className="text-xl font-black text-slate-900 mb-3">{manuscriptTitle}</h1>
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <span className={`text-sm font-bold ${isMinor ? 'text-amber-700' : 'text-red-700'}`}>{kind}</span>
+            <span className="text-sm font-bold text-amber-700">{kind}</span>
             <span className="text-sm font-semibold text-slate-500">Revision #{latestRevision.revision_number}</span>
           </div>
           <div className="flex items-center justify-between flex-wrap gap-2 mt-1">
@@ -162,6 +183,22 @@ export default function EditorRevisionReview({
           )}
         </div>
 
+        {/* 2b. Author's Response -- the note the author typed when
+            submitting this revision (manuscript_revisions.author_response,
+            see 0038_revision_loop_accept_and_author_response.sql). Kept
+            separate from the Editor's own comments below. Always shown
+            (not hidden when empty) so it's clear this field exists even
+            when this particular author left it blank -- their "Response to
+            Editor" note is optional on the submission side. */}
+        <div className="bg-white border border-slate-200 rounded-lg p-6">
+          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Author's Response</h3>
+          {latestRevision.author_response ? (
+            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{latestRevision.author_response}</p>
+          ) : (
+            <p className="text-sm text-slate-400 italic">The author did not provide a response note with this revision.</p>
+          )}
+        </div>
+
         {/* 3. Editor Comments */}
         <div className="bg-white border border-slate-200 rounded-lg p-6">
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor Comments</h3>
@@ -203,34 +240,37 @@ export default function EditorRevisionReview({
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {DECISIONS.map((d) => {
-              const label = getRevisionDecisionLabel(d, latestRevision.revision_number);
-              const isSelected = selectedDecision === d;
+            {ACTIONS.map((act) => {
+              const meta = ACTION_META[act];
+              const isSelected = selectedAction === act;
               return (
                 <button
-                  key={d}
+                  key={act}
                   type="button"
                   disabled={submitting}
-                  onClick={() => setSelectedDecision(d)}
-                  className={`px-4 py-3 rounded-lg font-bold text-sm text-white transition disabled:opacity-50 flex items-center justify-center gap-2 ${DECISION_STYLE[d]} ${isSelected ? 'ring-2 ring-offset-2 ring-slate-900' : ''}`}
+                  onClick={() => setSelectedAction(act)}
+                  className={`px-4 py-3 rounded-lg font-bold text-sm text-white transition disabled:opacity-50 flex items-center justify-center gap-2 ${meta.style} ${isSelected ? 'ring-2 ring-offset-2 ring-slate-900' : ''}`}
                 >
                   {isSelected && <CheckCircle className="w-4 h-4" />}
-                  {label}
+                  {meta.title}
                 </button>
               );
             })}
           </div>
 
-          {selectedDecision && (
+          {selectedAction && (
             <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
               <p className="text-xs text-slate-600">
-                Confirm <span className="font-bold">{getRevisionDecisionLabel(selectedDecision, latestRevision.revision_number)}</span> and submit this decision to the Coordinator?
+                Confirm <span className="font-bold">{ACTION_META[selectedAction].title}</span>
+                {selectedAction === 'NEXT_STAGE'
+                  ? ' and move to reviewer selection?'
+                  : ' and submit this decision to the Coordinator?'}
               </p>
               <div className="flex gap-2 shrink-0">
                 <button
                   type="button"
                   disabled={submitting}
-                  onClick={() => setSelectedDecision(null)}
+                  onClick={() => setSelectedAction(null)}
                   className="px-3 py-2 border border-slate-300 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-50 disabled:opacity-50 transition"
                 >
                   Cancel
@@ -242,7 +282,7 @@ export default function EditorRevisionReview({
                   className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition flex items-center gap-2"
                 >
                   {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                  Submit Decision
+                  {ACTION_META[selectedAction].confirmLabel}
                 </button>
               </div>
             </div>

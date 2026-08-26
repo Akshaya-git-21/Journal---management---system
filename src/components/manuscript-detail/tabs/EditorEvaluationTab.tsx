@@ -159,17 +159,27 @@ export function EditorEvaluationTab({
       {assessment.action_reason && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6">
           <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">
-            {assessment.recommendation === 'REJECT' ? 'Rejection Reason' : 'Revision Reason'}
+            {assessment.recommendation === 'REJECT' ? 'Rejection Reason' : 'Return to Author Reason'}
           </p>
           <p className="text-sm text-slate-800 whitespace-pre-wrap">{assessment.action_reason}</p>
         </div>
       )}
 
-      {/* Recommendation */}
+      {/* Recommendation -- this tab only ever shows the screening-stage
+          evaluation (see ManuscriptDetailTabs.tsx: "Initial Editorial
+          Screening"), so the recommendation is always one of the Editor's
+          3 screening actions (EditorEvaluationFormTab.tsx's ACTION_META):
+          Reject Submission / Return to Author / Move to Next Stage. Show
+          that action name, not the raw MAJOR_REVISION/ACCEPT recommendation
+          value the RPC stores it as. */}
       {assessment.recommendation && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6">
-          <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-1">Editor Recommendation</p>
-          <p className="text-2xl font-black text-emerald-700">{assessment.recommendation.replace(/_/g, ' ')}</p>
+          <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-1">Editor Decision</p>
+          <p className="text-2xl font-black text-emerald-700">
+            {assessment.recommendation === 'REJECT' ? 'Reject Submission'
+              : assessment.recommendation === 'ACCEPT' ? 'Move to Next Stage'
+              : 'Return to Author'}
+          </p>
         </div>
       )}
     </div>

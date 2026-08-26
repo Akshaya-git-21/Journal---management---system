@@ -3,6 +3,7 @@ import { AuthorManuscriptDetails } from '../lib/authorManuscriptDetails';
 import { FileText, Users, Layers, AlertCircle, Eye, Download } from 'lucide-react';
 import DiscussionsTab from './DiscussionsTab';
 import FilePreviewModal from './FilePreviewModal';
+import { getManuscriptStatusLabel, getLatestRevision } from '../lib/manuscriptStatusLabel';
 
 interface RevisionFileEntry {
   id: string;
@@ -409,7 +410,7 @@ export default function ViewSubmissionContent({
         <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 rounded-lg p-4">
           <p className="text-sm font-semibold text-slate-900 mb-2">{m?.title || 'Untitled Manuscript'}</p>
           <p className="text-xs text-slate-600">Manuscript ID: {m?.id}</p>
-          <p className="text-xs text-slate-600 mt-1">Status: <span className="font-semibold text-emerald-700">{m?.status || 'Not submitted'}</span></p>
+          <p className="text-xs text-slate-600 mt-1">Status: <span className="font-semibold text-emerald-700">{m ? getManuscriptStatusLabel(m, getLatestRevision(manuscriptDetails.revisions)) : 'Not submitted'}</span></p>
           <p className="text-xs text-slate-600 mt-1">Submitted: {m?.submitted_at ? new Date(m.submitted_at).toLocaleDateString() : 'Not yet submitted'}</p>
         </div>
         <p className="text-sm text-slate-600 leading-relaxed">

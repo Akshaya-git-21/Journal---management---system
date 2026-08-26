@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, listActiveProfilesByRole, assignEditor, coordinatorSendRevisionToEditor, coordinatorSendRevisionToReviewers } from '../../../lib/workflow';
-import { getWorkflowStageLabel, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, listActiveProfilesByRole, assignEditor, coordinatorSendRevisionToEditor, coordinatorSendRevisionToReviewers, coordinatorSendReviewsToEditor } from '../../../lib/workflow';
+import { getManuscriptStatusLabel, getRevisionMeta, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 import { CheckCircle2, Circle, AlertCircle, FileText, Loader2 } from 'lucide-react';
 import { AssignmentConfirmationDialog } from '../../AssignmentConfirmationDialog';
 
@@ -12,6 +12,7 @@ interface Props {
   profiles: Record<string, ProfileRow>;
   revisions?: RevisionRow[];
   onWorkflowChange?: () => void;
+  onGoToTab?: (tab: string) => void;
 }
 
 export function OverviewTab({
@@ -21,7 +22,8 @@ export function OverviewTab({
   suggestedReviewers,
   profiles,
   revisions = [],
-  onWorkflowChange
+  onWorkflowChange,
+  onGoToTab
 }: Props) {
   const activeEditor = editorAssignments.find(a => a.status === 'ACCEPTED') || editorAssignments[0];
   const evaluationSubmitted = activeEditor?.assessment_status === 'SUBMITTED';
@@ -74,6 +76,27 @@ export function OverviewTab({
   const isPeerReviewRevision = latestRevision?.origin === 'PEER_REVIEW';
   const readyToSendToEditor = manuscript.status === 'REVISION_REQUESTED' && latestRevision?.status === 'REVISION_SUBMITTED' && !isPeerReviewRevision;
   const readyToSendToReviewers = manuscript.status === 'REVISION_REQUESTED' && latestRevision?.status === 'REVISION_SUBMITTED' && isPeerReviewRevision;
+  // The Editor's decision screen (EditorWorkspace.tsx) stays locked until
+  // the Coordinator explicitly forwards a completed round of reviews -- see
+  // coordinator_send_reviews_to_editor() in
+  // 0041_coordinator_releases_reviews_to_editor.sql. Only relevant for the
+  // peer-review round(s), not the screening round (which has no reviewers).
+  const activeReviewerAssignments = reviewerAssignments.filter(r => r.status !== 'DECLINED');
+  const allReviewsIn = activeReviewerAssignments.length > 0 && activeReviewerAssignments.every(r => r.status === 'SUBMITTED');
+  const readyToSendReviewsToEditor = manuscript.status === 'AWAITING_DECISION' && allReviewsIn && !manuscript.reviews_released_at;
+
+  const handleSendReviewsToEditor = async () => {
+    setSendingToEditor(true);
+    setSendToEditorError('');
+    try {
+      await coordinatorSendReviewsToEditor(manuscript.id);
+      onWorkflowChange?.();
+    } catch (e: any) {
+      setSendToEditorError(e.message || 'Failed to send reviews to editor');
+    } finally {
+      setSendingToEditor(false);
+    }
+  };
 
   const handleSendRevisionToEditor = async () => {
     setSendingToEditor(true);
@@ -165,7 +188,18 @@ export function OverviewTab({
             </div>
             <div>
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Recommendation</p>
-              <p className="text-sm font-bold text-emerald-700">{activeEditor.recommendation?.replace(/_/g, ' ') || 'Pending'}</p>
+              <p className="text-sm font-bold text-emerald-700">
+                {!activeEditor.recommendation ? 'Pending'
+                  : reviewerAssignments.length === 0
+                  // Screening round: the only 3 outcomes are the Editor's
+                  // named actions (EditorEvaluationFormTab.tsx ACTION_META) --
+                  // MAJOR_REVISION here always means "Return to Author", not
+                  // a literal revision-type decision.
+                  ? (activeEditor.recommendation === 'REJECT' ? 'Reject Submission'
+                    : activeEditor.recommendation === 'ACCEPT' ? 'Move to Next Stage'
+                    : 'Return to Author')
+                  : activeEditor.recommendation.replace(/_/g, ' ')}
+              </p>
             </div>
           </div>
         </div>
@@ -177,9 +211,35 @@ export function OverviewTab({
         <div className="space-y-4">
           <div>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Status</p>
-            <p className="text-lg font-bold text-slate-900">{getWorkflowStageLabel(manuscript.status, latestRevision)}</p>
+            <p className="text-lg font-bold text-slate-900">{getManuscriptStatusLabel(manuscript, latestRevision)}</p>
+            {(() => {
+              const revisionMeta = getRevisionMeta(latestRevision);
+              return revisionMeta ? (
+                <p className="text-xs font-bold text-slate-500 mt-1">
+                  Revision: {revisionMeta.revisionNumber}{revisionMeta.revisionType ? ` (${revisionMeta.revisionType})` : ''}
+                </p>
+              ) : null;
+            })()}
             <p className="text-sm text-slate-600 mt-1">{getStatusDescription()}</p>
           </div>
+
+          {readyToSendReviewsToEditor && (
+            <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+              <p className="text-sm font-bold text-teal-900 mb-1">All reviews are in — ready to send to the editor</p>
+              <p className="text-xs text-teal-800 mb-3">Every reviewer has submitted. Forward the reviews to the Editor so they can make a decision.</p>
+              {sendToEditorError && (
+                <p className="text-xs text-red-700 mb-2">{sendToEditorError}</p>
+              )}
+              <button
+                onClick={handleSendReviewsToEditor}
+                disabled={sendingToEditor}
+                className="w-full bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-sm font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+              >
+                {sendingToEditor && <Loader2 className="w-4 h-4 animate-spin" />}
+                Send Reviews to Editor
+              </button>
+            </div>
+          )}
 
           {readyToSendToEditor && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
@@ -387,7 +447,10 @@ export function OverviewTab({
           </div>
         ) : (
           <div className="flex gap-2">
-            <button className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition">
+            <button
+              onClick={() => onGoToTab?.(getNextActionTab(manuscript.status, activeEditor, evaluationSubmitted))}
+              className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition"
+            >
               {getNextActionButton(manuscript.status, activeEditor, reviewerAssignments, evaluationSubmitted)}
             </button>
           </div>
@@ -434,6 +497,25 @@ function getNextAction(status: string, editor: any, reviewers: any[], evaluation
       return 'Waiting for author to submit revised manuscript.';
     default:
       return 'Manuscript processing is complete.';
+  }
+}
+
+/** Which detail tab the "Next Action Required" button should jump to --
+ * mirrors getNextActionButton()'s own status/editor logic so the label and
+ * the destination always agree. */
+function getNextActionTab(status: string, editor: any, evaluationSubmitted: boolean): string {
+  switch (status) {
+    case 'EDITOR_REVIEW':
+      if (!editor || editor.status !== 'ACCEPTED' || !evaluationSubmitted) return 'evaluation';
+      return 'review-board';
+    case 'UNDER_REVIEW':
+      return 'reviewers';
+    case 'AWAITING_DECISION':
+      return 'decision';
+    case 'REVISION_REQUESTED':
+      return 'files';
+    default:
+      return 'manuscript';
   }
 }
 
