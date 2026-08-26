@@ -1040,6 +1040,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   const activeReviews = (reviewerAssignments || []).filter(r => r.status !== 'DECLINED');
                   const hasRequiredReviews = activeReviews.length > 0 && activeReviews.every(r => r.status === 'SUBMITTED');
                   const isPeerReviewRound = !isRevisionDecision && manuscript.status === 'AWAITING_DECISION' && (reviewerAssignments?.length || 0) > 0;
+                  // A re-review round (isRevisionDecision on a PEER_REVIEW-
+                  // origin revision) goes through the same Coordinator
+                  // release gate as the original peer-review round -- see
+                  // coordinator_send_reviews_to_editor() in
+                  // 0041_coordinator_releases_reviews_to_editor.sql.
+                  const needsReviewerGate = isPeerReviewRound || (isRevisionDecision && latestRevision?.origin === 'PEER_REVIEW');
                   const latestReviewSubmittedAt = activeReviews.reduce<string | null>((latest, r) => (
                     r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
                   ), null);
@@ -1077,11 +1083,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
                           You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
                         </div>
-                      ) : isPeerReviewRound && !hasRequiredReviews ? (
+                      ) : needsReviewerGate && !hasRequiredReviews ? (
                         <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
                           Waiting for all peer reviews to be submitted before you can make the final decision.
                         </div>
-                      ) : isPeerReviewRound && hasRequiredReviews && !manuscript.reviews_released_at ? (
+                      ) : needsReviewerGate && hasRequiredReviews && !manuscript.reviews_released_at ? (
                         <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
                           All reviews are in, but the Coordinator hasn't sent them to you yet.
                         </div>
@@ -1811,6 +1817,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   const activeReviews = (reviewerAssignments || []).filter(r => r.status !== 'DECLINED');
                   const hasRequiredReviews = activeReviews.length > 0 && activeReviews.every(r => r.status === 'SUBMITTED');
                   const isPeerReviewRound = !isRevisionDecision && manuscript.status === 'AWAITING_DECISION' && (reviewerAssignments?.length || 0) > 0;
+                  // A re-review round (isRevisionDecision on a PEER_REVIEW-
+                  // origin revision) goes through the same Coordinator
+                  // release gate as the original peer-review round -- see
+                  // coordinator_send_reviews_to_editor() in
+                  // 0041_coordinator_releases_reviews_to_editor.sql.
+                  const needsReviewerGate = isPeerReviewRound || (isRevisionDecision && latestRevision?.origin === 'PEER_REVIEW');
                   const latestReviewSubmittedAt = activeReviews.reduce<string | null>((latest, r) => (
                     r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
                   ), null);
@@ -1848,11 +1860,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
                           You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
                         </div>
-                      ) : isPeerReviewRound && !hasRequiredReviews ? (
+                      ) : needsReviewerGate && !hasRequiredReviews ? (
                         <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
                           Waiting for all peer reviews to be submitted before you can make the final decision.
                         </div>
-                      ) : isPeerReviewRound && hasRequiredReviews && !manuscript.reviews_released_at ? (
+                      ) : needsReviewerGate && hasRequiredReviews && !manuscript.reviews_released_at ? (
                         <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
                           All reviews are in, but the Coordinator hasn't sent them to you yet.
                         </div>
