@@ -3,6 +3,16 @@ import { Bell } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getMyNotifications, markNotificationRead, NotificationRow } from '../lib/workflow';
 
+/** Fired on `window` when a notification naming a manuscript is clicked --
+ * EditorWorkspace/CoordinatorWorkspace listen for this to jump straight to
+ * that manuscript (and, where the notification type implies one, a specific
+ * tab) instead of leaving the user to hunt for it in their queue. Kept as a
+ * plain window event rather than prop-drilling because NotificationBell is
+ * mounted by RoleSelector as a sibling of the role workspace, not a parent
+ * -- there's no shared state to lift this into without a larger refactor. */
+export const JMS_OPEN_MANUSCRIPT_EVENT = 'jms:open-manuscript';
+export interface JmsOpenManuscriptDetail { manuscriptId: string; notificationType: string }
+
 /**
  * Minimal read/mark-read UI for the existing workflow_notifications backend.
  * Does not change when/how notifications are generated -- it only surfaces
@@ -38,13 +48,20 @@ export default function NotificationBell({ dark = true }: { dark?: boolean }) {
 
   const unreadCount = notifications.filter((n) => !n.read_at).length;
 
-  const handleMarkRead = async (n: NotificationRow) => {
-    if (n.read_at) return;
-    try {
-      await markNotificationRead(n.id);
-      setNotifications((prev) => prev.map((row) => (row.id === n.id ? { ...row, read_at: new Date().toISOString() } : row)));
-    } catch {
-      // Non-fatal -- leave it unread rather than mislead the user.
+  const handleOpen = async (n: NotificationRow) => {
+    if (!n.read_at) {
+      try {
+        await markNotificationRead(n.id);
+        setNotifications((prev) => prev.map((row) => (row.id === n.id ? { ...row, read_at: new Date().toISOString() } : row)));
+      } catch {
+        // Non-fatal -- leave it unread rather than mislead the user.
+      }
+    }
+    if (n.manuscript_id) {
+      window.dispatchEvent(new CustomEvent<JmsOpenManuscriptDetail>(JMS_OPEN_MANUSCRIPT_EVENT, {
+        detail: { manuscriptId: n.manuscript_id, notificationType: n.type },
+      }));
+      setOpen(false);
     }
   };
 
@@ -77,7 +94,7 @@ export default function NotificationBell({ dark = true }: { dark?: boolean }) {
               {notifications.slice(0, 30).map((n) => (
                 <button
                   key={n.id}
-                  onClick={() => handleMarkRead(n)}
+                  onClick={() => handleOpen(n)}
                   className={`w-full text-left px-4 py-3 hover:bg-slate-50 transition ${!n.read_at ? 'bg-emerald-50/40' : ''}`}
                 >
                   <div className="flex items-start gap-2">

@@ -28,20 +28,31 @@ const DEFAULT_CHECKLIST: string[] = [
   'Editor comments have been provided.',
 ];
 
-// Same 3 actions as the original screening round (EditorEvaluationFormTab.tsx's
-// ACTION_META) -- Reject / Return to Author (always MAJOR_REVISION under the
-// hood) / Move to Next Stage (ACCEPT, which now stays at EDITOR_REVIEW so the
-// existing reviewer-selection flow picks it up -- see
-// 0038_revision_loop_accept_and_author_response.sql). Replaces the previous
-// Accept/Minor/Major triad, which had no Reject option and no path to
-// reviewer selection at all.
-type RevisionAction = 'REJECT' | 'RETURN_TO_AUTHOR' | 'NEXT_STAGE';
+// For a peer-review-origin revision, the Editor's first look at a
+// resubmission has exactly 3 options -- Reject / Accept Submission / Move
+// to Reviewer -- per the approved workflow spec. "Return to Author" (another
+// revision round) isn't offered here: that determination happens later, at
+// the Peer Review Decision screen (DecisionTab.tsx-embedded, Accept/Minor/
+// Major/Reject) once the reviewers' re-check actually comes back -- not at
+// this first checkpoint. Screening-origin revisions (no reviewers involved
+// at all) keep Return to Author here instead of Move to Reviewer, since
+// that's still their only path to another round -- see the ACTIONS
+// selection below.
+//
+// SEND_TO_REVIEWER is offered only when this revision came from a
+// peer-review round (screening-origin revisions never had reviewers to send
+// back to) -- the Editor asks the same reviewers to re-check the revision
+// instead of deciding unilaterally. Recommendation 'ADDITIONAL_REVIEW' hands
+// the manuscript to the Coordinator, who actually invites the reviewers
+// (coordinator_send_revision_to_reviewers) -- see
+// 0043_editor_initiated_reviewer_recheck.sql.
+type RevisionAction = 'REJECT' | 'RETURN_TO_AUTHOR' | 'NEXT_STAGE' | 'SEND_TO_REVIEWER';
 const ACTION_META: Record<RevisionAction, { title: string; confirmLabel: string; recommendation: ReviewerRecommendation; style: string }> = {
   REJECT: { title: 'Reject', confirmLabel: 'Confirm Rejection', recommendation: 'REJECT', style: 'bg-red-700 hover:bg-red-800' },
   RETURN_TO_AUTHOR: { title: 'Return to Author', confirmLabel: 'Confirm Return to Author', recommendation: 'MAJOR_REVISION', style: 'bg-amber-700 hover:bg-amber-800' },
-  NEXT_STAGE: { title: 'Move to Next Stage', confirmLabel: 'Confirm & Move to Next Stage', recommendation: 'ACCEPT', style: 'bg-emerald-700 hover:bg-emerald-800' },
+  NEXT_STAGE: { title: 'Accept Submission', confirmLabel: 'Confirm & Accept Submission', recommendation: 'ACCEPT', style: 'bg-emerald-700 hover:bg-emerald-800' },
+  SEND_TO_REVIEWER: { title: 'Move to Reviewer', confirmLabel: 'Confirm & Send to Reviewer', recommendation: 'ADDITIONAL_REVIEW', style: 'bg-blue-700 hover:bg-blue-800' },
 };
-const ACTIONS: RevisionAction[] = ['REJECT', 'RETURN_TO_AUTHOR', 'NEXT_STAGE'];
 
 /**
  * Dedicated full-page screen for an editor re-reviewing a resubmitted
@@ -94,6 +105,10 @@ export default function EditorRevisionReview({
 
   if (!latestRevision) return null;
 
+  const ACTIONS: RevisionAction[] = latestRevision.origin === 'PEER_REVIEW'
+    ? ['REJECT', 'NEXT_STAGE', 'SEND_TO_REVIEWER']
+    : ['REJECT', 'RETURN_TO_AUTHOR', 'NEXT_STAGE'];
+
   // The screening-stage revision loop always returns a manuscript with
   // MAJOR_REVISION as its decision_type (Return to Author has no
   // minor/major severity distinction -- see EditorEvaluationFormTab.tsx's
@@ -110,7 +125,13 @@ export default function EditorRevisionReview({
     setError('');
     try {
       await submitEditorRecommendation(manuscriptId, ACTION_META[selectedAction].recommendation, comments.trim(), checklist);
-      if (selectedAction === 'NEXT_STAGE') {
+      // "Accept Submission" only actually opens reviewer *selection* for a
+      // screening-origin revision (no reviewers exist yet). A peer-review-
+      // origin revision already has its 2 reviewers -- Accept there goes
+      // straight to the Coordinator's final Accept/Reject confirm, same as
+      // every other decision here -- see 0043_editor_initiated_reviewer_
+      // recheck.sql's ACCEPT-on-PEER_REVIEW-origin handling.
+      if (selectedAction === 'NEXT_STAGE' && latestRevision.origin !== 'PEER_REVIEW') {
         (onMoveToNextStage || onSubmitSuccess)();
       } else {
         onSubmitSuccess();
@@ -262,7 +283,7 @@ export default function EditorRevisionReview({
             <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
               <p className="text-xs text-slate-600">
                 Confirm <span className="font-bold">{ACTION_META[selectedAction].title}</span>
-                {selectedAction === 'NEXT_STAGE'
+                {selectedAction === 'NEXT_STAGE' && latestRevision.origin !== 'PEER_REVIEW'
                   ? ' and move to reviewer selection?'
                   : ' and submit this decision to the Coordinator?'}
               </p>

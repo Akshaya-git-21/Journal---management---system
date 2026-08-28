@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, listActiveProfilesByRole, assignEditor, coordinatorSendRevisionToEditor, coordinatorSendRevisionToReviewers, coordinatorSendReviewsToEditor } from '../../../lib/workflow';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, listActiveProfilesByRole, assignEditor, coordinatorSendRevisionToEditor, coordinatorSendReviewsToEditor } from '../../../lib/workflow';
 import { getManuscriptStatusLabel, getRevisionMeta, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 import { CheckCircle2, Circle, AlertCircle, FileText, Loader2 } from 'lucide-react';
 import { AssignmentConfirmationDialog } from '../../AssignmentConfirmationDialog';
@@ -70,12 +70,15 @@ export function OverviewTab({
 
   const [sendingToEditor, setSendingToEditor] = useState(false);
   const [sendToEditorError, setSendToEditorError] = useState('');
-  // A revision that originated from a peer-review decision (Phase 2
-  // Checkpoint C) routes back to the same Reviewers, not the Editor -- see
-  // coordinator_send_revision_to_reviewers() in 0031_reviewer_revision_loop.sql.
-  const isPeerReviewRevision = latestRevision?.origin === 'PEER_REVIEW';
-  const readyToSendToEditor = manuscript.status === 'REVISION_REQUESTED' && latestRevision?.status === 'REVISION_SUBMITTED' && !isPeerReviewRevision;
-  const readyToSendToReviewers = manuscript.status === 'REVISION_REQUESTED' && latestRevision?.status === 'REVISION_SUBMITTED' && isPeerReviewRevision;
+  // Every resubmitted revision goes to the Editor first, regardless of
+  // origin -- coordinator_send_revision_to_editor() is origin-agnostic. It's
+  // the Editor's own call (via EditorRevisionReview.tsx's "Move to
+  // Reviewer" action) whether a peer-review-origin revision needs another
+  // look from the reviewers; the Coordinator then carries that out from the
+  // Decision tab once the Editor asks for it -- see
+  // coordinator_send_revision_to_reviewers() in
+  // 0043_editor_initiated_reviewer_recheck.sql.
+  const readyToSendToEditor = manuscript.status === 'REVISION_REQUESTED' && latestRevision?.status === 'REVISION_SUBMITTED';
   // The Editor's decision screen (EditorWorkspace.tsx) stays locked until
   // the Coordinator explicitly forwards a completed round of reviews -- see
   // coordinator_send_reviews_to_editor() in
@@ -106,19 +109,6 @@ export function OverviewTab({
       onWorkflowChange?.();
     } catch (e: any) {
       setSendToEditorError(e.message || 'Failed to send revision to editor');
-    } finally {
-      setSendingToEditor(false);
-    }
-  };
-
-  const handleSendRevisionToReviewers = async () => {
-    setSendingToEditor(true);
-    setSendToEditorError('');
-    try {
-      await coordinatorSendRevisionToReviewers(manuscript.id);
-      onWorkflowChange?.();
-    } catch (e: any) {
-      setSendToEditorError(e.message || 'Failed to send revision to reviewers');
     } finally {
       setSendingToEditor(false);
     }
@@ -255,24 +245,6 @@ export function OverviewTab({
               >
                 {sendingToEditor && <Loader2 className="w-4 h-4 animate-spin" />}
                 Send to Editor for Revision Review
-              </button>
-            </div>
-          )}
-
-          {readyToSendToReviewers && (
-            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-              <p className="text-sm font-bold text-purple-900 mb-1">Revision {revisionN} is ready for reviewer re-review</p>
-              <p className="text-xs text-purple-800 mb-3">This revision came from a peer-review decision -- send it to the same reviewers to re-review, instead of the Editor.</p>
-              {sendToEditorError && (
-                <p className="text-xs text-red-700 mb-2">{sendToEditorError}</p>
-              )}
-              <button
-                onClick={handleSendRevisionToReviewers}
-                disabled={sendingToEditor}
-                className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
-              >
-                {sendingToEditor && <Loader2 className="w-4 h-4 animate-spin" />}
-                Send to Reviewers for Re-review
               </button>
             </div>
           )}

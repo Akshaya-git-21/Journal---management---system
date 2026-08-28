@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Role, ManuscriptStatus, ReviewerRecommendation } from '../types';
 import {
-  ManuscriptRow, ReviewerAssignmentRow, ManuscriptFileRow, ScreeningResponse,
+  ManuscriptRow, ReviewerAssignmentRow, ManuscriptFileRow, ScreeningResponse, RevisionRow,
   listManuscripts, getReviewerAssignments, subscribeToManuscripts,
-  respondToReviewInvite, submitPeerReview, getManuscriptFiles
+  respondToReviewInvite, submitPeerReview, getManuscriptFiles, getRevisions, getRevisionFiles
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
 import { getManuscriptStatusLabel } from '../lib/manuscriptStatusLabel';
@@ -336,7 +336,7 @@ function ManuscriptList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
                   assignment.status === 'SUBMITTED' ? 'bg-emerald-100 text-emerald-700' :
                   'bg-red-100 text-red-700'
                 }`}>
-                  {assignment.status === 'INVITED' ? 'ASSIGNMENT STATUS: INVITED' :
+                  {assignment.status === 'INVITED' ? (assignment.revision_number > 0 ? `ASSIGNMENT STATUS: REVISION ${assignment.revision_number} - RE-REVIEW` : 'ASSIGNMENT STATUS: INVITED') :
                    assignment.status === 'ACCEPTED' ? 'ASSIGNMENT STATUS: ACCEPTED FOR REVIEW' :
                    assignment.status === 'SUBMITTED' ? 'REVIEW SUBMITTED' :
                    'DECLINED'}
@@ -622,7 +622,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
       )}
 
       {assignment.status === 'ACCEPTED' && (
-        <ReviewForm manuscript={manuscript} assignmentId={assignment.id} onSubmitted={onChanged} />
+        <ReviewForm manuscript={manuscript} assignmentId={assignment.id} onSubmitted={onChanged} isReReview={assignment.revision_number > 0} revisionNumber={assignment.revision_number} />
       )}
 
       {assignment.status === 'SUBMITTED' && (
@@ -703,7 +703,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
   );
 }
 
-function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: ManuscriptRow; assignmentId: string; onSubmitted: () => void }) {
+function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisionNumber }: { manuscript: ManuscriptRow; assignmentId: string; onSubmitted: () => void; isReReview: boolean; revisionNumber: number }) {
   const [responses, setResponses] = useState<Record<string, { answer: boolean | null; reason: string }>>(
     () => Object.fromEntries(PEER_REVIEW_QUESTIONS.map(q => [q.id, { answer: null, reason: '' }]))
   );
@@ -714,6 +714,34 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
   const [success, setSuccess] = useState('');
   const [showModal, setShowModal] = useState(true);
   const [lastSaveTime, setLastSaveTime] = useState<string | null>(null);
+
+  // Re-review context: which revision this round is re-checking, its
+  // uploaded files, and the author's response note -- so the reviewer can
+  // see what changed instead of re-reviewing blind. Only fetched for a
+  // re-review round (isReReview); the original round has no revision yet.
+  const [revision, setRevision] = useState<RevisionRow | null>(null);
+  const [revisionFiles, setRevisionFiles] = useState<ManuscriptFileRow[]>([]);
+  const [loadingRevision, setLoadingRevision] = useState(isReReview);
+
+  useEffect(() => {
+    if (!isReReview) return;
+    let isMounted = true;
+    setLoadingRevision(true);
+    getRevisions(manuscript.id)
+      .then(async (revs) => {
+        const rev = revs.find((r) => r.revision_number === revisionNumber) || null;
+        if (!isMounted) return;
+        setRevision(rev);
+        if (rev) {
+          const files = await getRevisionFiles(rev.id);
+          if (isMounted) setRevisionFiles(files);
+        }
+      })
+      .catch((e) => console.error('Failed to load revision context:', e))
+      .finally(() => { if (isMounted) setLoadingRevision(false); });
+    return () => { isMounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReReview, manuscript.id, revisionNumber]);
 
   const setAnswer = (id: string, answer: boolean) => setResponses(prev => ({ ...prev, [id]: { ...prev[id], answer } }));
   const setReason = (id: string, reason: string) => setResponses(prev => ({ ...prev, [id]: { ...prev[id], reason } }));
@@ -767,7 +795,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
 
   const unanswered = PEER_REVIEW_QUESTIONS.filter(q => responses[q.id].answer === null);
   const missingReasons = PEER_REVIEW_QUESTIONS.filter(q => responses[q.id].answer !== null && !responses[q.id].reason.trim());
-  const questionnaireComplete = unanswered.length === 0 && missingReasons.length === 0;
+  const questionnaireComplete = isReReview || (unanswered.length === 0 && missingReasons.length === 0);
 
   const validateForm = (): string | null => {
     if (!questionnaireComplete) return 'Please answer all 10 questions and provide a reason for each.';
@@ -785,7 +813,10 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
 
     setBusy(true); setError('');
     try {
-      const payload: ScreeningResponse[] = PEER_REVIEW_QUESTIONS.map(q => ({
+      // Re-review rounds skip the full questionnaire (see below) -- the
+      // reviewer already answered it for the original submission, and is
+      // only re-checking whether their prior concerns were addressed.
+      const payload: ScreeningResponse[] = isReReview ? [] : PEER_REVIEW_QUESTIONS.map(q => ({
         question_id: q.id,
         answer: responses[q.id].answer as boolean,
         reason: responses[q.id].reason.trim(),
@@ -828,10 +859,18 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
 
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3.5 text-xs text-amber-800">
             <p className="font-bold mb-1 flex items-center gap-1.5"><AlertTriangle className="w-4 h-4" /> Your Expert Evaluation is Desired</p>
-            <p>Please answer each questionnaire item and explain your reasoning. This review is a recommendation only -- the Editor makes the final editorial decision.</p>
+            <p>{isReReview
+              ? 'You already answered the full questionnaire for the original submission -- just confirm whether this revision addresses your prior concerns. This review is a recommendation only -- the Editor makes the final editorial decision.'
+              : 'Please answer each questionnaire item and explain your reasoning. This review is a recommendation only -- the Editor makes the final editorial decision.'}</p>
           </div>
 
-          {/* Questionnaire */}
+          {/* Questionnaire -- only for the original round. A re-review round
+              (isReReview) only asks whether the revision addressed what was
+              already flagged, so it skips straight to Comments + Recommendation
+              below -- same simplification the Editor's own re-review screen
+              (EditorRevisionReview.tsx) already uses instead of repeating its
+              full first-round evaluation form. */}
+          {!isReReview && (
           <div>
             <h3 className="font-black text-sm text-slate-900 mb-4">REVIEW QUESTIONNAIRE</h3>
             <div className="space-y-5">
@@ -882,6 +921,55 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
               </p>
             )}
           </div>
+          )}
+
+          {/* Re-review context: Revision N files + Author's Response */}
+          {isReReview && (
+            <div className="border-t border-slate-200 pt-6 space-y-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">
+                  Revision {revisionNumber} — Updated File{revisionFiles.length !== 1 ? 's' : ''}
+                </h3>
+                {loadingRevision ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-500 py-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading revision files...
+                  </div>
+                ) : revisionFiles.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-1">No files were uploaded for this revision.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {revisionFiles.map((f) => (
+                      <div key={f.id} className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                          <p className="text-xs font-semibold text-slate-900 truncate">{f.file_name}</p>
+                        </div>
+                        {f.public_url && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <a href={f.public_url} target="_blank" rel="noreferrer" className="p-1.5 hover:bg-slate-100 rounded transition" title="View">
+                              <Eye className="w-4 h-4 text-slate-600" />
+                            </a>
+                            <a href={f.public_url} download={f.file_name} className="p-1.5 hover:bg-slate-100 rounded transition" title="Download">
+                              <Download className="w-4 h-4 text-slate-600" />
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Author's Response</h3>
+                {revision?.author_response ? (
+                  <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">{revision.author_response}</p>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">The author did not provide a response note with this revision.</p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Comments to Author */}
           <div className="border-t border-slate-200 pt-6">
@@ -905,7 +993,10 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted }: { manuscript: Man
                 { value: 'ACCEPT', label: 'Accept', desc: 'Suitable for immediate publication as is', dot: 'bg-emerald-500' },
                 { value: 'MINOR_REVISION', label: 'Accept with Minor Revision', desc: 'Requires minor refinements or polishing', dot: 'bg-amber-500' },
                 { value: 'MAJOR_REVISION', label: 'Accept with Major Revision', desc: 'Requires substantial conceptual refinements', dot: 'bg-orange-500' },
-                { value: 'REJECT', label: 'Reject', desc: 'Not suitable for presentation or publication', dot: 'bg-red-500' },
+                // Reject only applies to the original round -- a re-review
+                // round is purely "did this revision address what I flagged",
+                // so only Accept/Minor/Major make sense there.
+                ...(isReReview ? [] : [{ value: 'REJECT', label: 'Reject', desc: 'Not suitable for presentation or publication', dot: 'bg-red-500' }]),
               ].map((option) => (
                 <label key={option.value} className={`flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all ${
                   recommendation === option.value

@@ -331,28 +331,38 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
           (sourced live from editor_assignments, kept in sync by the
           realtime subscription above) rather than folded into one quoted
           "decision letter" -- lets the Author tell the Editor's own words
-          apart from anything the Coordinator added when forwarding it. */}
+          apart from anything the Coordinator added when forwarding it.
+
+          editor_assignments only ever holds the ORIGINAL screening round's
+          comments/reason (see submit_editor_recommendation's
+          is_revision_loop_round branch in
+          0040_peer_review_editor_comments.sql -- action_reason is left
+          untouched on every later round). From round 2 onward the Editor's
+          comment for THAT round lives on the revision row itself
+          (manuscript_revisions.editor_comments), so use editorNotes only
+          for revision #1 and the revision's own field for every later
+          round -- otherwise every round would show round 1's stale text. */}
       <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
         <div>
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Editor's Decision</h3>
           <p className={`text-base font-bold ${isMinor ? 'text-amber-700' : 'text-red-700'}`}>{decisionLabel}</p>
         </div>
 
-        {isScreeningOrigin && editorNotes?.screening_comments && (
+        {isScreeningOrigin && selectedRevision.revision_number === 1 && editorNotes?.screening_comments && (
           <div>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Editor Comments</p>
             <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{editorNotes.screening_comments}</p>
           </div>
         )}
 
-        {isScreeningOrigin && editorNotes?.action_reason && (
+        {isScreeningOrigin && selectedRevision.revision_number === 1 && editorNotes?.action_reason && (
           <div>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Return to Author Reason</p>
             <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{editorNotes.action_reason}</p>
           </div>
         )}
 
-        {!isScreeningOrigin && selectedRevision.editor_comments && (
+        {((isScreeningOrigin && selectedRevision.revision_number > 1) || !isScreeningOrigin) && selectedRevision.editor_comments && (
           <div>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Editor Comments</p>
             <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{selectedRevision.editor_comments}</p>
@@ -380,7 +390,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
             )}
           </div>
         )}
-        {!isScreeningOrigin && !selectedRevision.decision_letter && !selectedRevision.editor_comments && (
+        {((isScreeningOrigin && selectedRevision.revision_number > 1) || !isScreeningOrigin) && !selectedRevision.decision_letter && !selectedRevision.editor_comments && (
           <p className="text-sm text-slate-500 italic">No letter provided.</p>
         )}
       </div>

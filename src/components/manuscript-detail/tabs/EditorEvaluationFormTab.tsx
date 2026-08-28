@@ -10,6 +10,12 @@ interface Props {
   suggestedReviewers?: unknown;
   revisions?: RevisionRow[];
   onSubmitSuccess: () => void;
+  /** Called instead of onSubmitSuccess specifically when the Editor confirms
+   * "Move to Next Stage" -- lets the parent jump straight to the reviewer
+   * selection screen instead of leaving the Editor on this now-submitted
+   * form. Falls back to onSubmitSuccess if not provided. Mirrors
+   * EditorRevisionReview.tsx's onMoveToNextStage. */
+  onMoveToNextStage?: () => void;
 }
 
 const QUESTIONS: { id: string; label: string; question: string }[] = [
@@ -39,6 +45,7 @@ export function EditorEvaluationFormTab({
   assignment,
   revisions = [],
   onSubmitSuccess,
+  onMoveToNextStage,
 }: Props) {
   const latestRevision = getLatestRevision(revisions);
   const isRevisionReview = latestRevision?.status === 'UNDER_REVIEW';
@@ -85,7 +92,11 @@ export function EditorEvaluationFormTab({
         meta.needsReason ? actionReason.trim() : undefined
       );
       setPendingAction(null);
-      onSubmitSuccess();
+      if (action === 'NEXT_STAGE') {
+        (onMoveToNextStage || onSubmitSuccess)();
+      } else {
+        onSubmitSuccess();
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to submit');
     } finally {

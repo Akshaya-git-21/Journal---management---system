@@ -29,8 +29,7 @@ import {
   categorizeError,
   validateAssignmentData,
   formatDate,
-  formatDateTime,
-  addSuggestedReviewer
+  formatDateTime
 } from '../lib/editorWorkspace';
 import { Loader2, ArrowLeft, ArrowRight, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send } from 'lucide-react';
 import RevisionReview from './RevisionReview';
@@ -41,6 +40,20 @@ import { ReviewerReplacementAlert } from './ReviewerReplacementAlert';
 import EditorEvaluationSidebar from './EditorEvaluationSidebar';
 import FilePreviewModal from './FilePreviewModal';
 import EditorRevisionReview from './EditorRevisionReview';
+import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
+
+/** Which Editor tab a given notification type should land on -- e.g.
+ * REVIEWS_READY_FOR_DECISION means the Coordinator just released both peer
+ * reviews, so clicking that notification should open straight to the
+ * Reviewers tab where those reviews are shown, not the manuscript's default
+ * Files tab. Falls back to the default tab for any type with no specific
+ * landing spot (assignment invites, decision-published, etc.). */
+const NOTIFICATION_TAB_MAP: Record<string, 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments'> = {
+  REVIEWS_READY_FOR_DECISION: 'reviews',
+  REVIEWS_COMPLETE: 'reviews',
+  PEER_REVIEW_STARTED: 'reviews',
+  REVIEWER_DECLINED: 'reviews',
+};
 
 const PEER_REVIEW_QUESTION_LABELS: Record<string, string> = {
   focus_scope_relevance: 'Focus, Scope, and Relevance',
@@ -96,6 +109,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   const [rows, setRows] = useState<EditorManuscriptDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
+  const [pendingTab, setPendingTab] = useState<'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     submissions: true,
@@ -181,6 +195,23 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
     };
   }, [currentUser?.email]);
 
+  // Clicking a manuscript-linked notification (NotificationBell, mounted by
+  // the sibling RoleSelector shell) jumps straight to that manuscript and,
+  // for notification types with an obvious landing tab, opens on it -- e.g.
+  // "reviews are ready for your decision" opens on Reviewers instead of the
+  // default Files tab, so the Editor doesn't have to go hunt for it.
+  useEffect(() => {
+    const onOpenManuscript = (e: Event) => {
+      const detail = (e as CustomEvent<JmsOpenManuscriptDetail>).detail;
+      if (!detail) return;
+      setSelectedManuscriptId(detail.manuscriptId);
+      setShowAcceptModal(false);
+      setPendingTab(NOTIFICATION_TAB_MAP[detail.notificationType] ?? null);
+    };
+    window.addEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
+    return () => window.removeEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
+  }, []);
+
   const selected = rows.find((r) => r.manuscript.id === selectedManuscriptId) || null;
   const toggleSection = (section: string) => {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
@@ -235,6 +266,8 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
       }}
       onChanged={load}
       currentUser={currentUser}
+      initialTab={pendingTab}
+      onInitialTabConsumed={() => setPendingTab(null)}
     />;
   }
 
@@ -449,7 +482,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
                 </button>
               </div>
             ) : (
-              <AssignmentListWithPagination rows={filteredRows} onOpen={setSelectedManuscriptId} />
+              <AssignmentListWithPagination rows={filteredRows} onOpen={(id, tab) => { setSelectedManuscriptId(id); setPendingTab(tab ?? null); }} />
             )}
 
         </div>
@@ -458,7 +491,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   );
 }
 
-function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onOpen: (id: string) => void }) {
+function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onOpen: (id: string, tab?: 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments') => void }) {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -486,13 +519,25 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
           {paginatedRows.map((details) => {
             const latestRevision = getLatestRevision(details.revisions);
             const isRevisionSubmitted = latestRevision?.status === 'UNDER_REVIEW';
+            // Same idea as the "Review Revision" callout above -- both
+            // reviewers are in, so there's something new to act on here
+            // (see the Reviewers tab), not just "open and look around".
+            const reviewsReady = !isRevisionSubmitted && details.manuscript.status === 'AWAITING_DECISION'
+              && details.reviewers.length > 0 && details.reviewers.every((rv) => rv.status === 'SUBMITTED');
             return (
-              <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id)}>
-                <td className="px-4 py-3 font-bold text-slate-800">{details.manuscript.title}</td>
+              <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id, reviewsReady ? 'reviews' : undefined)}>
+                <td className="px-4 py-3 font-bold text-slate-800">
+                  {details.manuscript.title}
+                  {reviewsReady && (
+                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold uppercase tracking-wide align-middle">
+                      Reviewers Submitted
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3"><StatusBadge manuscript={details.manuscript} latestRevision={latestRevision} /></td>
                 <td className="px-4 py-3 text-xs font-bold text-slate-600">{details.assignment.status}</td>
-                <td className={`px-4 py-3 text-right font-bold text-xs ${isRevisionSubmitted ? 'text-indigo-600' : 'text-[#008751]'}`}>
-                  {isRevisionSubmitted ? 'Review Revision →' : 'Open →'}
+                <td className={`px-4 py-3 text-right font-bold text-xs ${isRevisionSubmitted ? 'text-indigo-600' : reviewsReady ? 'text-emerald-600' : 'text-[#008751]'}`}>
+                  {isRevisionSubmitted ? 'Review Revision →' : reviewsReady ? 'Reviews Ready →' : 'Open →'}
                 </td>
               </tr>
             );
@@ -541,13 +586,26 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
     </div>
   );
 }
-function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details: EditorManuscriptDetails; onBack: () => void; onChanged: () => void; currentUser?: { name: string; email: string; role: Role } | null }) {
+function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab, onInitialTabConsumed }: { details: EditorManuscriptDetails; onBack: () => void; onChanged: () => void; currentUser?: { name: string; email: string; role: Role } | null; initialTab?: 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | null; onInitialTabConsumed?: () => void }) {
   const { manuscript, assignment, reviewers: initialReviewerAssignments } = details;
   const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>(initialReviewerAssignments || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [sidebarSection, setSidebarSection] = useState<'dashboard' | 'evaluation_timeline' | 'title_abstract' | 'authors' | 'manuscript' | 'references' | 'supplementary' | 'cover_letter' | 'discussions' | 'editor_evaluation' | 'reviews' | 'decision' | 'suggestions' | 'review_history' | 'metadata' | 'revisions' | 'production' | 'galley_files'>('dashboard');
-  const [activeTab, setActiveTab] = useState<'files' | 'evaluation' | 'decision' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments'>('files');
+  const [activeTab, setActiveTab] = useState<'files' | 'evaluation' | 'decision' | 'reviews' | 'revisions' | 'comments'>(initialTab || 'files');
+
+  // A notification click can request a specific tab (see EditorWorkspace's
+  // JMS_OPEN_MANUSCRIPT_EVENT listener) -- apply it once on mount and let
+  // the parent clear the request so navigating away and back doesn't keep
+  // forcing the same tab.
+  useEffect(() => {
+    if (initialTab) {
+      setSidebarSection('dashboard');
+      setActiveTab(initialTab);
+      onInitialTabConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // True for one render after confirming "Move to Next Stage" on a
   // resubmitted revision -- shows a short transition banner on the
   // reviewer-selection screen so the jump there doesn't feel abrupt.
@@ -557,11 +615,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   const [editorComments, setEditorComments] = useState('');
   const [activePublication, setActivePublication] = useState<'title' | 'contributors' | 'metadata' | 'references' | 'galleries' | 'jats' | 'permissions' | 'issue'>('title');
   const [currentPage] = useState(1);
-  const [showAddReviewerForm, setShowAddReviewerForm] = useState(false);
-  const [newReviewerForm, setNewReviewerForm] = useState({ name: '', email: '', note: '' });
   const [addingReviewer, setAddingReviewer] = useState(false);
-  const [savingReviewer, setSavingReviewer] = useState(false);
-  const [saveReviewerError, setSaveReviewerError] = useState('');
 
   // Phase 2: Reviewer Management (display only — assignment happens via Coordinator Review Board)
 
@@ -583,12 +637,16 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
   // Once the Coordinator forwards a resubmitted revision (manuscript_revisions
   // .status = 'UNDER_REVIEW'), show the dedicated revision-review page instead
   // of the regular tabbed manuscript view -- see EditorRevisionReview.tsx.
-  // Only for EDITOR_SCREENING-origin revisions, though: a PEER_REVIEW-origin
-  // revision at UNDER_REVIEW means Reviewers are re-reviewing it (Phase 2
-  // Checkpoint C), not the Editor -- the Editor shouldn't see a "decide now"
-  // page until those re-reviews are actually in.
+  // Both "sent to Editor" (coordinator_send_revision_to_editor) and "sent to
+  // Reviewers for re-check" (coordinator_send_revision_to_reviewers) leave
+  // the revision at UNDER_REVIEW, so origin alone can't tell them apart --
+  // only manuscripts.status does: EDITOR_REVIEW means it's with the Editor
+  // (either origin, now that revisions of both origins route through the
+  // Editor first -- see 0043_editor_initiated_reviewer_recheck.sql), UNDER_
+  // REVIEW means the Reviewers are re-checking it and the Editor shouldn't
+  // see a "decide now" page until those re-reviews are actually in.
   const latestRevisionForReview = getLatestRevision(details.revisions);
-  const isRevisionReviewPage = latestRevisionForReview?.status === 'UNDER_REVIEW' && latestRevisionForReview?.origin !== 'PEER_REVIEW';
+  const isRevisionReviewPage = latestRevisionForReview?.status === 'UNDER_REVIEW' && manuscript.status === 'EDITOR_REVIEW';
 
   const [previewFile, setPreviewFile] = useState<any>(null);
 
@@ -797,7 +855,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               onChanged();
               setJustMovedToNextStage(true);
               setSidebarSection('dashboard');
-              setActiveTab('suggestions');
+              setActiveTab('reviews');
             }}
           />
         </div>
@@ -914,15 +972,13 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   {[
                     { id: 'files', label: 'Files for Review (1)' },
                     { id: 'evaluation', label: 'Editor Evaluation (2)' },
-                    { id: 'reviews', label: 'Reviews (3)' },
-                    { id: 'suggestions', label: 'Suggestions (4)' },
-                    { id: 'history', label: 'Review History (5)' },
-                    { id: 'revisions', label: 'Revisions (6)' },
-                    { id: 'comments', label: 'Collaboration (7)' }
+                    { id: 'reviews', label: 'Reviewers (3)' },
+                    { id: 'revisions', label: 'Revisions (4)' },
+                    { id: 'comments', label: 'Collaboration (5)' }
                   ].map((tab) => (
                     <button
                       key={tab.id}
-                      onClick={() => setActiveTab(tab.id as 'files' | 'evaluation' | 'decision' | 'reviews' | 'suggestions' | 'history' | 'revisions' | 'comments')}
+                      onClick={() => setActiveTab(tab.id as 'files' | 'evaluation' | 'decision' | 'reviews' | 'revisions' | 'comments')}
                       className={`px-1 py-4 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
                         activeTab === tab.id
                           ? 'text-[#008751] border-[#008751]'
@@ -1018,14 +1074,226 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                 suggestedReviewers={details.suggestedReviewers}
                 revisions={details.revisions || []}
                 onSubmitSuccess={onChanged}
+                onMoveToNextStage={() => {
+                  onChanged();
+                  setJustMovedToNextStage(true);
+                  setActiveTab('reviews');
+                }}
               />
             )}
 
-            {sidebarSection === 'dashboard' && activeTab === 'decision' && (
+            {sidebarSection === 'dashboard' && activeTab === 'reviews' && (() => {
+              const pendingReplacements = getPendingEditorSuggestions(details.suggestedReviewers || [], details.editorReviewerActions || []);
+              // Only show this card once real reviewer assignments exist --
+              // before that, a pending selection is already shown by
+              // EditorReviewerSelection's own "Reviewers Selected" card
+              // below, so repeating it here as "Pending Invitation" would
+              // just be the same 2 names twice.
+              if ((reviewerAssignments?.length || 0) === 0) return null;
+              const totalCount = (reviewerAssignments?.length || 0) + pendingReplacements.length;
+              return (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">PEER REVIEWS ({totalCount})</h3>
+                {totalCount > 0 ? (
+                  <div className="space-y-6">
+                    {(() => {
+                      // Group by revision round so re-review comments are
+                      // read together under their own "Revision N" heading
+                      // instead of interleaved with the original round.
+                      const grouped = new Map<number, typeof reviewerAssignments>();
+                      (reviewerAssignments || []).forEach((ra) => {
+                        const key = ra.revision_number || 0;
+                        if (!grouped.has(key)) grouped.set(key, []);
+                        grouped.get(key)!.push(ra);
+                      });
+                      const groupKeys = Array.from(grouped.keys()).sort((a, b) => a - b);
+                      return groupKeys.map((revNum) => (
+                        <div key={revNum} className="space-y-4">
+                          <h4 className="text-xs font-black text-purple-700 uppercase tracking-wide">
+                            {revNum > 0 ? `Revision ${revNum} Comments` : 'Original Review Comments'}
+                          </h4>
+                          {grouped.get(revNum)!.map((ra) => (
+                      <div key={ra.id} className="border border-slate-200 rounded-lg p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {details.profiles.get(ra.reviewer_id)?.name || 'Unknown Reviewer'}
+                            </p>
+                            <p className="text-xs text-slate-600">{details.profiles.get(ra.reviewer_id)?.email}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className={`inline-flex text-xs font-bold px-2 py-1 rounded ${
+                              ra.status === 'SUBMITTED'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : ra.status === 'ACCEPTED'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {ra.status || 'Pending'}
+                            </span>
+                            {ra.submitted_at && (
+                              <p className="text-xs text-slate-500 mt-1">{formatDate(ra.submitted_at)}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {ra.status === 'SUBMITTED' && (
+                          <div className="mt-3 space-y-3">
+                            <p className="text-sm text-slate-700"><span className="font-semibold">Recommendation:</span> {ra.recommendation?.replace(/_/g, ' ') || 'N/A'}</p>
+
+                            {(ra.screening_responses?.length ?? 0) > 0 && (
+                              <div className="space-y-1.5">
+                                {ra.screening_responses.map((r, qIdx) => (
+                                  <div key={r.question_id} className="border border-slate-200 rounded p-2.5 bg-slate-50">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <p className="text-xs font-bold text-slate-800">{qIdx + 1}. {PEER_REVIEW_QUESTION_LABELS[r.question_id] || r.question_id}</p>
+                                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${r.answer ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                        {r.answer ? 'Yes' : 'No'}
+                                      </span>
+                                    </div>
+                                    {r.reason && <p className="text-xs text-slate-600">{r.reason}</p>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {ra.comments_to_author && (
+                              <div className="bg-slate-50 rounded p-3 text-sm text-slate-700">
+                                <p className="font-semibold text-xs uppercase tracking-wide text-slate-500 mb-1">Comments to Author</p>
+                                {ra.comments_to_author}
+                              </div>
+                            )}
+                            {ra.comments_to_editor && (
+                              <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-slate-700">
+                                <p className="font-semibold text-xs uppercase tracking-wide text-blue-700 mb-1">Confidential Comments to Editor</p>
+                                {ra.comments_to_editor}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {ra.status === 'ACCEPTED' && (
+                          <p className="text-xs text-slate-500 italic mt-3">Awaiting review submission...</p>
+                        )}
+                      </div>
+                          ))}
+                        </div>
+                      ));
+                    })()}
+
+                    {/* Replacement reviewers the Editor has selected but the
+                        Coordinator hasn't invited yet -- see
+                        ReviewerReplacementAlert.tsx / editor_select_replacement_reviewer(). */}
+                    {pendingReplacements.map((s) => (
+                      <div key={s.id} className="border border-amber-200 bg-amber-50/50 rounded-lg p-4">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <p className="font-semibold text-slate-900">{s.name}</p>
+                            <p className="text-xs text-slate-600">{s.email}</p>
+                          </div>
+                          <span className="inline-flex text-xs font-bold px-2 py-1 rounded bg-amber-100 text-amber-700">
+                            Pending Invitation
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 italic mt-3">Selected as a replacement reviewer -- awaiting the Coordinator to send the invitation.</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet. Reviewer assignment is handled by the Coordinator.</div>
+                )}
+              </div>
+              );
+            })()}
+
+            {sidebarSection === 'dashboard' && activeTab === 'reviews' && (() => {
+              const editorAlreadySelected = (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR');
+              const authorSuggestions = (details.suggestedReviewers || []).filter(s => s.suggested_by !== 'EDITOR');
+              return (
+              <div className="space-y-6">
+                {justMovedToNextStage && !editorAlreadySelected && (
+                  <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
+                    <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm shrink-0">
+                      <CheckCircle className="w-4 h-4" /> Revision Approved
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <p className="text-sm text-emerald-800 font-bold">Now select 2 reviewers to continue.</p>
+                    <button
+                      type="button"
+                      onClick={() => setJustMovedToNextStage(false)}
+                      className="ml-auto text-emerald-600 hover:text-emerald-800 shrink-0"
+                    >
+                      <XIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+                {manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT' && (
+                  <EditorReviewerSelection
+                    manuscriptId={manuscript.id}
+                    suggestedReviewers={details.suggestedReviewers || []}
+                    onSubmitSuccess={onChanged}
+                  />
+                )}
+
+                {/* List of reviewers the Author suggested -- the Editor's own
+                    selections are already shown above by EditorReviewerSelection's
+                    "Reviewers Selected" card, so repeating them here would just
+                    be the same 2 names twice. */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-black text-slate-900 mb-4">REVIEWER SUGGESTIONS BY AUTHOR ({authorSuggestions.length})</h3>
+                  {authorSuggestions.length > 0 ? (
+                    <div className="space-y-3">
+                      {authorSuggestions.map((reviewer) => {
+                        const isAssigned = reviewerAssignments?.some(r => details.profiles.get(r.reviewer_id)?.email === reviewer.email);
+                        return (
+                          <div key={reviewer.id} className={`border rounded-lg p-4 ${isAssigned ? 'bg-emerald-50 border-emerald-200' : 'border-slate-200'}`}>
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex-1">
+                                <p className="font-semibold text-slate-900">{reviewer.name}</p>
+                                <p className="text-xs text-slate-600">{reviewer.email}</p>
+                                {reviewer.note && (
+                                  <p className="text-xs text-slate-500 mt-1">Note: {reviewer.note}</p>
+                                )}
+                                <span className="inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                                  Suggested by author
+                                </span>
+                              </div>
+                              {isAssigned && (
+                                <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded">✓ Assigned</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-slate-400 text-sm">No suggested reviewers yet.</div>
+                  )}
+                </div>
+              </div>
+              );
+            })()}
+
+            {/* Editor decision form -- lives here (below the peer reviews) rather than a separate tab so the Editor writes their comments and decides right next to what they just read. */}
+            {sidebarSection === 'dashboard' && activeTab === 'reviews' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
                 {(() => {
                   const latestRevision = getLatestRevision(details.revisions);
-                  const isRevisionDecision = latestRevision?.status === 'UNDER_REVIEW';
+                  // Same ambiguity as isRevisionReviewPage above: revision.
+                  // status = 'UNDER_REVIEW' means EITHER "the Editor is
+                  // actively deciding this round" (manuscript EDITOR_REVIEW)
+                  // OR "the Reviewers are re-checking it after the Editor
+                  // asked for that" (manuscript UNDER_REVIEW/AWAITING_DECISION
+                  // once they've submitted -- see coordinator_send_revision_
+                  // to_reviewers in 0043_editor_initiated_reviewer_recheck.sql,
+                  // which reuses this same revision status for both entry
+                  // points). Only the first case is really "the Editor is
+                  // deciding this revision cycle" for freshness-comparison
+                  // purposes below -- the second needs to fall through to
+                  // isPeerReviewRound instead, so recommendationIsCurrent
+                  // compares against the fresh reviewer submissions, not the
+                  // revision's original requested_at.
+                  const isRevisionDecision = latestRevision?.status === 'UNDER_REVIEW' && manuscript.status === 'EDITOR_REVIEW';
                   const nextRevisionNumber = (latestRevision?.revision_number || 0) + 1;
 
                   // Peer-review round: reviews already pushed the manuscript to
@@ -1066,7 +1334,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   return (
                     <>
                       <h3 className="text-sm font-black text-slate-900">
-                        {isRevisionDecision ? `Editor Decision — Revision ${latestRevision!.revision_number}` : isPeerReviewRound ? 'Peer Review Decision' : 'Editor Recommendation'}
+                        {isRevisionDecision
+                          ? `Editor Decision — Revision ${latestRevision!.revision_number}`
+                          : isPeerReviewRound
+                          ? (latestRevision && latestRevision.revision_number > 0 ? `Peer Review Decision — Revision ${latestRevision.revision_number}` : 'Peer Review Decision')
+                          : 'Editor Recommendation'}
                       </h3>
 
                       {(assignment.strengths || assignment.weaknesses || assignment.mandatory_revisions || assignment.comments_to_coordinator) && (
@@ -1151,271 +1423,6 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                 })()}
               </div>
             )}
-
-            {sidebarSection === 'dashboard' && activeTab === 'reviews' && (() => {
-              const pendingReplacements = getPendingEditorSuggestions(details.suggestedReviewers || [], details.editorReviewerActions || []);
-              const totalCount = (reviewerAssignments?.length || 0) + pendingReplacements.length;
-              return (
-              <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <h3 className="text-sm font-black text-slate-900 mb-4">PEER REVIEWS ({totalCount})</h3>
-                {totalCount > 0 ? (
-                  <div className="space-y-4">
-                    {reviewerAssignments?.map((ra) => (
-                      <div key={ra.id} className="border border-slate-200 rounded-lg p-4">
-                        <div className="flex items-start justify-between mb-3">
-                          <div>
-                            <p className="font-semibold text-slate-900">
-                              {details.profiles.get(ra.reviewer_id)?.name || 'Unknown Reviewer'}
-                            </p>
-                            <p className="text-xs text-slate-600">{details.profiles.get(ra.reviewer_id)?.email}</p>
-                          </div>
-                          <div className="text-right">
-                            <span className={`inline-flex text-xs font-bold px-2 py-1 rounded ${
-                              ra.status === 'SUBMITTED'
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : ra.status === 'ACCEPTED'
-                                ? 'bg-amber-100 text-amber-700'
-                                : 'bg-slate-100 text-slate-700'
-                            }`}>
-                              {ra.status || 'Pending'}
-                            </span>
-                            {ra.submitted_at && (
-                              <p className="text-xs text-slate-500 mt-1">{formatDate(ra.submitted_at)}</p>
-                            )}
-                          </div>
-                        </div>
-
-                        {ra.status === 'SUBMITTED' && (
-                          <div className="mt-3 space-y-3">
-                            <p className="text-sm text-slate-700"><span className="font-semibold">Recommendation:</span> {ra.recommendation?.replace(/_/g, ' ') || 'N/A'}</p>
-
-                            {(ra.screening_responses?.length ?? 0) > 0 && (
-                              <div className="space-y-1.5">
-                                {ra.screening_responses.map((r, qIdx) => (
-                                  <div key={r.question_id} className="border border-slate-200 rounded p-2.5 bg-slate-50">
-                                    <div className="flex items-center justify-between mb-1">
-                                      <p className="text-xs font-bold text-slate-800">{qIdx + 1}. {PEER_REVIEW_QUESTION_LABELS[r.question_id] || r.question_id}</p>
-                                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${r.answer ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                        {r.answer ? 'Yes' : 'No'}
-                                      </span>
-                                    </div>
-                                    {r.reason && <p className="text-xs text-slate-600">{r.reason}</p>}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {ra.comments_to_author && (
-                              <div className="bg-slate-50 rounded p-3 text-sm text-slate-700">
-                                <p className="font-semibold text-xs uppercase tracking-wide text-slate-500 mb-1">Comments to Author</p>
-                                {ra.comments_to_author}
-                              </div>
-                            )}
-                            {ra.comments_to_editor && (
-                              <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-slate-700">
-                                <p className="font-semibold text-xs uppercase tracking-wide text-blue-700 mb-1">Confidential Comments to Editor</p>
-                                {ra.comments_to_editor}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {ra.status === 'ACCEPTED' && (
-                          <p className="text-xs text-slate-500 italic mt-3">Awaiting review submission...</p>
-                        )}
-                      </div>
-                    ))}
-
-                    {/* Replacement reviewers the Editor has selected but the
-                        Coordinator hasn't invited yet -- see
-                        ReviewerReplacementAlert.tsx / editor_select_replacement_reviewer(). */}
-                    {pendingReplacements.map((s) => (
-                      <div key={s.id} className="border border-amber-200 bg-amber-50/50 rounded-lg p-4">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <p className="font-semibold text-slate-900">{s.name}</p>
-                            <p className="text-xs text-slate-600">{s.email}</p>
-                          </div>
-                          <span className="inline-flex text-xs font-bold px-2 py-1 rounded bg-amber-100 text-amber-700">
-                            Pending Invitation
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 italic mt-3">Selected as a replacement reviewer -- awaiting the Coordinator to send the invitation.</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet. Reviewer assignment is handled by the Coordinator.</div>
-                )}
-              </div>
-              );
-            })()}
-
-            {activeTab === 'suggestions' && (
-              <div className="space-y-6">
-                {justMovedToNextStage && (
-                  <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
-                    <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm shrink-0">
-                      <CheckCircle className="w-4 h-4" /> Revision Approved
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <p className="text-sm text-emerald-800 font-bold">Now select 2 reviewers to continue.</p>
-                    <button
-                      type="button"
-                      onClick={() => setJustMovedToNextStage(false)}
-                      className="ml-auto text-emerald-600 hover:text-emerald-800 shrink-0"
-                    >
-                      <XIcon className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-                {manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT' && (
-                  <EditorReviewerSelection
-                    manuscriptId={manuscript.id}
-                    suggestedReviewers={details.suggestedReviewers || []}
-                    onSubmitSuccess={onChanged}
-                  />
-                )}
-
-                {/* Add Reviewer Suggestions Form */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                  <h3 className="text-sm font-black text-slate-900 mb-3">Reviewer Suggestions (Optional)</h3>
-                  <p className="text-xs text-slate-600 mb-4">Suggesting reviewers is optional -- you may submit your evaluation with none, one, or several.</p>
-
-                  {showAddReviewerForm ? (
-                    <div className="space-y-4 mb-4">
-                      <input
-                        type="text"
-                        placeholder="Reviewer Name"
-                        value={newReviewerForm.name}
-                        onChange={(e) => setNewReviewerForm({ ...newReviewerForm, name: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                      <input
-                        type="email"
-                        placeholder="Email Address"
-                        value={newReviewerForm.email}
-                        onChange={(e) => setNewReviewerForm({ ...newReviewerForm, email: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                      <textarea
-                        placeholder="Optional Note"
-                        value={newReviewerForm.note}
-                        onChange={(e) => setNewReviewerForm({ ...newReviewerForm, note: e.target.value })}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                        rows={2}
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            setNewReviewerForm({ name: '', email: '', note: '' });
-                            setShowAddReviewerForm(false);
-                          }}
-                          className="flex-1 px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-200 transition"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={async () => {
-                            if (!newReviewerForm.name || !newReviewerForm.email) return;
-                            setSavingReviewer(true);
-                            setSaveReviewerError('');
-                            try {
-                              await addSuggestedReviewer(manuscript.id, newReviewerForm);
-                              onChanged();
-                              showNotification('success', 'Reviewer suggestion saved');
-                              setNewReviewerForm({ name: '', email: '', note: '' });
-                              setShowAddReviewerForm(false);
-                            } catch (e: any) {
-                              setSaveReviewerError(e.message || 'Failed to save reviewer suggestion');
-                            } finally {
-                              setSavingReviewer(false);
-                            }
-                          }}
-                          disabled={!newReviewerForm.name || !newReviewerForm.email || savingReviewer}
-                          className="flex-1 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition disabled:opacity-50"
-                        >
-                          {savingReviewer ? 'Saving...' : 'Add Reviewer'}
-                        </button>
-                      </div>
-                      {saveReviewerError && (
-                        <p className="text-xs text-red-600 mt-2">{saveReviewerError}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowAddReviewerForm(true)}
-                      className="w-full border-2 border-dashed border-slate-300 rounded-lg py-3 text-slate-600 hover:text-slate-900 hover:border-slate-400 text-sm font-semibold transition"
-                    >
-                      + Add Another Reviewer
-                    </button>
-                  )}
-
-                  <p className="text-xs text-slate-500 text-center mt-4">Suggestions are saved immediately -- this is optional, you may submit without any.</p>
-                </div>
-
-                {/* List of Suggested Reviewers */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                  <h3 className="text-sm font-black text-slate-900 mb-4">REVIEWER SUGGESTIONS ({details.suggestedReviewers?.length || 0})</h3>
-                  {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
-                    <div className="space-y-3">
-                      {details.suggestedReviewers.map((reviewer) => {
-                        const isAssigned = reviewerAssignments?.some(r => details.profiles.get(r.reviewer_id)?.email === reviewer.email);
-                        return (
-                          <div key={reviewer.id} className={`border rounded-lg p-4 ${isAssigned ? 'bg-emerald-50 border-emerald-200' : 'border-slate-200'}`}>
-                            <div className="flex items-start justify-between mb-2">
-                              <div className="flex-1">
-                                <p className="font-semibold text-slate-900">{reviewer.name}</p>
-                                <p className="text-xs text-slate-600">{reviewer.email}</p>
-                                {reviewer.note && (
-                                  <p className="text-xs text-slate-500 mt-1">Note: {reviewer.note}</p>
-                                )}
-                                <span className={`inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                  reviewer.suggested_by === 'EDITOR'
-                                    ? 'bg-teal-50 text-teal-700 border border-teal-200'
-                                    : 'bg-purple-50 text-purple-700 border border-purple-200'
-                                }`}>
-                                  Suggested by {reviewer.suggested_by === 'EDITOR' ? 'you' : 'author'}
-                                </span>
-                              </div>
-                              {isAssigned && (
-                                <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded">✓ Assigned</span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-slate-400 text-sm">No suggested reviewers yet.</div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'history' && (() => {
-              const realHistory = (details.statusHistory || []).filter(item => item.from_status !== item.to_status);
-              return (
-                <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                  <h3 className="text-sm font-black text-slate-900 mb-4">REVIEW HISTORY ({realHistory.length})</h3>
-                  {realHistory.length > 0 ? (
-                    <div className="space-y-4">
-                      {realHistory.map((item, idx) => (
-                        <div key={idx} className="border border-slate-200 rounded p-4">
-                          <div className="flex items-start justify-between mb-2">
-                            <p className="font-semibold text-slate-900">{item.to_status.replace(/_/g, ' ')}</p>
-                            <p className="text-xs text-slate-500">{formatDateTime(item.created_at)}</p>
-                          </div>
-                          {item.note && <p className="text-sm text-slate-600">{item.note}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-slate-400 text-sm">No history available.</div>
-                  )}
-                </div>
-              );
-            })()}
 
             {sidebarSection === 'dashboard' && activeTab === 'revisions' && (
               <div className="space-y-6">
@@ -1725,8 +1732,21 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
                 <h3 className="text-sm font-black text-slate-900 mb-4">PEER REVIEWS ({reviewerAssignments?.length || 0})</h3>
                 {reviewerAssignments && reviewerAssignments.length > 0 ? (
-                  <div className="space-y-4">
-                    {reviewerAssignments.map((ra) => (
+                  <div className="space-y-6">
+                    {(() => {
+                      const grouped = new Map<number, typeof reviewerAssignments>();
+                      reviewerAssignments.forEach((ra) => {
+                        const key = ra.revision_number || 0;
+                        if (!grouped.has(key)) grouped.set(key, []);
+                        grouped.get(key)!.push(ra);
+                      });
+                      const groupKeys = Array.from(grouped.keys()).sort((a, b) => a - b);
+                      return groupKeys.map((revNum) => (
+                        <div key={revNum} className="space-y-4">
+                          <h4 className="text-xs font-black text-purple-700 uppercase tracking-wide">
+                            {revNum > 0 ? `Revision ${revNum} Comments` : 'Original Review Comments'}
+                          </h4>
+                          {grouped.get(revNum)!.map((ra) => (
                       <div key={ra.id} className="border border-slate-200 rounded-lg p-4">
                         <div className="flex items-start justify-between mb-3">
                           <div>
@@ -1790,7 +1810,10 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                           <p className="text-xs text-slate-500 italic mt-3">Awaiting review submission...</p>
                         )}
                       </div>
-                    ))}
+                          ))}
+                        </div>
+                      ));
+                    })()}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet. Reviewer assignment is handled by the Coordinator.</div>
@@ -1802,7 +1825,21 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
                 {(() => {
                   const latestRevision = getLatestRevision(details.revisions);
-                  const isRevisionDecision = latestRevision?.status === 'UNDER_REVIEW';
+                  // Same ambiguity as isRevisionReviewPage above: revision.
+                  // status = 'UNDER_REVIEW' means EITHER "the Editor is
+                  // actively deciding this round" (manuscript EDITOR_REVIEW)
+                  // OR "the Reviewers are re-checking it after the Editor
+                  // asked for that" (manuscript UNDER_REVIEW/AWAITING_DECISION
+                  // once they've submitted -- see coordinator_send_revision_
+                  // to_reviewers in 0043_editor_initiated_reviewer_recheck.sql,
+                  // which reuses this same revision status for both entry
+                  // points). Only the first case is really "the Editor is
+                  // deciding this revision cycle" for freshness-comparison
+                  // purposes below -- the second needs to fall through to
+                  // isPeerReviewRound instead, so recommendationIsCurrent
+                  // compares against the fresh reviewer submissions, not the
+                  // revision's original requested_at.
+                  const isRevisionDecision = latestRevision?.status === 'UNDER_REVIEW' && manuscript.status === 'EDITOR_REVIEW';
                   const nextRevisionNumber = (latestRevision?.revision_number || 0) + 1;
 
                   // Peer-review round: reviews already pushed the manuscript to
@@ -1843,7 +1880,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser }: { details
                   return (
                     <>
                       <h3 className="text-sm font-black text-slate-900">
-                        {isRevisionDecision ? `Editor Decision — Revision ${latestRevision!.revision_number}` : isPeerReviewRound ? 'Peer Review Decision' : 'Editor Recommendation'}
+                        {isRevisionDecision
+                          ? `Editor Decision — Revision ${latestRevision!.revision_number}`
+                          : isPeerReviewRound
+                          ? (latestRevision && latestRevision.revision_number > 0 ? `Peer Review Decision — Revision ${latestRevision.revision_number}` : 'Peer Review Decision')
+                          : 'Editor Recommendation'}
                       </h3>
 
                       {(assignment.strengths || assignment.weaknesses || assignment.mandatory_revisions || assignment.comments_to_coordinator) && (

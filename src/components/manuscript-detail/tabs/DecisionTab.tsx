@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, StatusHistoryRow, ProfileRow, ScreeningResponse } from '../../../lib/workflow';
-import { publishDecision, sendToPublisher, listActiveProfilesByRole } from '../../../lib/workflow';
+import { publishDecision, sendToPublisher, listActiveProfilesByRole, coordinatorSendRevisionToReviewers } from '../../../lib/workflow';
 import { createAndActivatePublisherAccount } from '../../../lib/auth';
 import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, Send, X, Copy, Loader2, Building2, UserPlus, ChevronLeft, CheckCircle2, CheckCircle, XCircle, ClipboardList } from 'lucide-react';
 import { getRevisionDecisionLabel } from '../../../lib/decisionUtils';
@@ -206,6 +206,25 @@ export function DecisionTab({
   const handleConfirmRevisionDecision = () => {
     if (!decidedRevision?.editor_decision) return;
     return submitPublishDecision(decidedRevision.editor_decision as 'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION');
+  };
+
+  // Editor asked for another look from the reviewers instead of deciding
+  // unilaterally (EditorRevisionReview.tsx's "Move to Reviewer" action) --
+  // the Coordinator carries that out here rather than confirming a
+  // publish_decision outcome. See coordinator_send_revision_to_reviewers()
+  // in 0043_editor_initiated_reviewer_recheck.sql.
+  const [sendingToReviewers, setSendingToReviewers] = useState(false);
+  const handleSendRevisionToReviewers = async () => {
+    setSendingToReviewers(true);
+    setError('');
+    try {
+      await coordinatorSendRevisionToReviewers(manuscript.id);
+      onWorkflowChange();
+    } catch (e: any) {
+      setError(e.message || 'Failed to send revision to reviewers');
+    } finally {
+      setSendingToReviewers(false);
+    }
   };
 
   return (
@@ -432,6 +451,26 @@ export function DecisionTab({
               </p>
             </div>
           </div>
+        ) : pendingRevisionConfirm && decidedRevision && decidedRevision.editor_decision === 'ADDITIONAL_REVIEW' ? (
+          <>
+            <div className="bg-white border-2 border-blue-200 rounded-xl p-4 space-y-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-blue-700/70 mb-1">Editor's Decision</p>
+              <p className="text-lg font-black text-slate-900">Editor requests reviewer re-check</p>
+              {decidedRevision.editor_comments && (
+                <p className="text-sm text-slate-700 whitespace-pre-wrap bg-blue-50 border border-blue-200 rounded-lg p-3">{decidedRevision.editor_comments}</p>
+              )}
+            </div>
+
+            {error && <p className="text-xs text-red-600">{error}</p>}
+
+            <button
+              onClick={handleSendRevisionToReviewers}
+              disabled={sendingToReviewers}
+              className="w-full px-4 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition"
+            >
+              {sendingToReviewers ? 'Sending...' : 'Send to Reviewers for Re-review'}
+            </button>
+          </>
         ) : pendingRevisionConfirm && decidedRevision ? (
           <>
             <div className="bg-white border-2 border-emerald-200 rounded-xl p-4">
