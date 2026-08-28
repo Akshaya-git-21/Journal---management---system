@@ -1399,12 +1399,24 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                             <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
                           )}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {[
-                              { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
-                              { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
-                              { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
-                              { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
-                            ].map((opt) => (
+                            {(
+                              // A re-review round's peer review decision is the
+                              // final call on this manuscript (the reviewers
+                              // already re-checked the revision the Editor
+                              // asked them to) -- only Accept/Reject apply,
+                              // not another revision loop.
+                              isPeerReviewRound && latestRevision && latestRevision.revision_number > 0
+                                ? [
+                                    { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                    { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                  ]
+                                : [
+                                    { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                    { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
+                                    { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
+                                    { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                  ]
+                            ).map((opt) => (
                               <button
                                 key={opt.value}
                                 type="button"
@@ -1945,12 +1957,24 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                             <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
                           )}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {[
-                              { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
-                              { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
-                              { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
-                              { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
-                            ].map((opt) => (
+                            {(
+                              // A re-review round's peer review decision is the
+                              // final call on this manuscript (the reviewers
+                              // already re-checked the revision the Editor
+                              // asked them to) -- only Accept/Reject apply,
+                              // not another revision loop.
+                              isPeerReviewRound && latestRevision && latestRevision.revision_number > 0
+                                ? [
+                                    { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                    { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                  ]
+                                : [
+                                    { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                    { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
+                                    { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
+                                    { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                  ]
+                            ).map((opt) => (
                               <button
                                 key={opt.value}
                                 type="button"
