@@ -149,6 +149,19 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
           label: 'Project Coordinator Console',
           focusBorder: 'focus:border-[#008751] focus:ring-[#008751]',
         };
+      case 'GD_MEMBER':
+        return {
+          primary: 'emerald',
+          bg: 'bg-[#008751]',
+          hover: 'hover:bg-[#007043]',
+          ring: 'focus:ring-[#008751]',
+          border: 'border-slate-200',
+          text: 'text-[#008751]',
+          labelText: 'text-[#008751]',
+          labelBg: 'bg-[#f0fdf4] border border-[#bbf7d0]/60',
+          label: 'Production Team Console',
+          focusBorder: 'focus:border-[#008751] focus:ring-[#008751]',
+        };
       default:
         return {
           primary: 'emerald',

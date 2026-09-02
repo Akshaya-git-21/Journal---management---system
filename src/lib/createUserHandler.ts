@@ -1,6 +1,6 @@
 /**
  * Shared, framework-agnostic implementation of the Coordinator "create an
- * Editor/Reviewer account" admin operation. Both the local Express dev
+ * Editor/Reviewer/Publisher/GD Member account" admin operation. Both the local Express dev
  * server (server.ts) and the Vercel serverless function
  * (api/create-user.ts) call this, matching the pattern in
  * passwordResetHandler.ts -- one implementation, two thin adapters.
@@ -15,7 +15,7 @@ export interface CreateUserResult {
   body: { error: string } | { user: unknown };
 }
 
-const ALLOWED_ROLES = ['EDITOR', 'REVIEWER', 'PUBLISHER'];
+const ALLOWED_ROLES = ['EDITOR', 'REVIEWER', 'PUBLISHER', 'GD_MEMBER'];
 
 export async function handleCreateUserRequest(
   authHeader: string | undefined,
@@ -56,7 +56,7 @@ export async function handleCreateUserRequest(
     return { status: 403, body: { error: 'Forbidden: Unable to verify your authorization.' } };
   }
   if (callerProfile.role !== 'COORDINATOR' || callerProfile.status !== 'ACTIVE') {
-    return { status: 403, body: { error: 'Forbidden: Only an active Coordinator can create Editor/Reviewer/Publisher accounts.' } };
+    return { status: 403, body: { error: 'Forbidden: Only an active Coordinator can create Editor/Reviewer/Publisher/GD Member accounts.' } };
   }
 
   try {

@@ -10,6 +10,7 @@ import {
 } from '../lib/workflow';
 import { supabase, upsertManuscriptToDb, ensureAuthorProfile } from '../lib/supabase';
 import { getManuscriptStatusLabel, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
+import { listProduction, subscribeToProduction } from '../lib/production';
 import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
@@ -52,6 +53,20 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   const [submissionsGroupExpanded, setSubmissionsGroupExpanded] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+  // Task 11: manuscript_id -> production_status, for the "PROOFREADING"
+  // label once a proof is with the author (see PROOFREADING_PRODUCTION_STATUSES
+  // in lib/manuscriptStatusLabel.ts). RLS already scopes listProduction() to
+  // rows the author owns, same as their manuscripts themselves.
+  const [productionByManuscript, setProductionByManuscript] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const refetch = () => listProduction().then((rows) => {
+      setProductionByManuscript(Object.fromEntries(rows.map((r) => [r.manuscript_id, r.production_status])));
+    }).catch(() => {});
+    refetch();
+    const unsubscribe = subscribeToProduction(refetch);
+    return unsubscribe;
+  }, []);
 
   // Load manuscripts for current user
   const load = async () => {
@@ -105,9 +120,9 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   // yet (only one reviewer has accepted so far).
   const STATUS_FILTER_PREDICATES: Record<typeof statusFilter, (m: ManuscriptRow) => boolean> = {
     active: (m) => !['REJECTED', 'PUBLISHED'].includes(m.status),
-    review: (m) => ['EDITORIAL REVIEW', 'PEER REVIEW'].includes(getManuscriptStatusLabel(m)),
-    revisions: (m) => getManuscriptStatusLabel(m) === 'IN REVISION',
-    accepted: (m) => ['ACCEPTED', 'PROOFREADING'].includes(getManuscriptStatusLabel(m)),
+    review: (m) => ['EDITORIAL REVIEW', 'PEER REVIEW'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id])),
+    revisions: (m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'IN REVISION',
+    accepted: (m) => ['ACCEPTED', 'PROOFREADING'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id])),
     rejected: (m) => m.status === 'REJECTED',
     published: (m) => m.status === 'PUBLISHED',
   };
@@ -135,12 +150,12 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   // Calculate status counts -- bucketed by the standardized display status,
   // not the raw manuscripts.status column (see STATUS_FILTER_PREDICATES).
   const statusCounts = {
-    submitted: items.filter((m) => getManuscriptStatusLabel(m) === 'SUBMITTED').length,
-    editorialReview: items.filter((m) => getManuscriptStatusLabel(m) === 'EDITORIAL REVIEW').length,
-    peerReview: items.filter((m) => getManuscriptStatusLabel(m) === 'PEER REVIEW').length,
-    underReview: items.filter((m) => ['EDITORIAL REVIEW', 'PEER REVIEW'].includes(getManuscriptStatusLabel(m))).length,
-    revisionRequested: items.filter((m) => getManuscriptStatusLabel(m) === 'IN REVISION').length,
-    accepted: items.filter((m) => ['ACCEPTED', 'PROOFREADING'].includes(getManuscriptStatusLabel(m))).length,
+    submitted: items.filter((m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'SUBMITTED').length,
+    editorialReview: items.filter((m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'EDITORIAL REVIEW').length,
+    peerReview: items.filter((m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'PEER REVIEW').length,
+    underReview: items.filter((m) => ['EDITORIAL REVIEW', 'PEER REVIEW'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]))).length,
+    revisionRequested: items.filter((m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'IN REVISION').length,
+    accepted: items.filter((m) => ['ACCEPTED', 'PROOFREADING'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]))).length,
     published: items.filter((m) => m.status === 'PUBLISHED').length,
     rejected: items.filter((m) => m.status === 'REJECTED').length,
   };
@@ -617,8 +632,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                             </td>
                             <td className="px-6 py-4 text-slate-600 text-sm whitespace-nowrap">{formatDate(m.submitted_at)}</td>
                             <td className="px-6 py-4">
-                              <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase ${STANDARD_STATUS_COLORS[getManuscriptStatusLabel(m) as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT}`}>
-                                {getManuscriptStatusLabel(m)}
+                              <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase ${STANDARD_STATUS_COLORS[getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT}`}>
+                                {getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id])}
                               </span>
                             </td>
                             <td className="px-6 py-4">

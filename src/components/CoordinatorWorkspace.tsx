@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ManuscriptStatus } from '../types';
 import { supabase } from '../lib/supabase';
-import { createEditorAccount, createReviewerAccount, createAndActivatePublisherAccount } from '../lib/auth';
+import { createEditorAccount, createReviewerAccount, createAndActivatePublisherAccount, createAndActivateGDMemberAccount } from '../lib/auth';
 import {
   ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, SuggestedReviewerRow, ProfileRow, AuditLogRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getStatusHistory, getSuggestedReviewers,
@@ -15,9 +15,11 @@ import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
-import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2, LayoutGrid, Cog, Inbox } from 'lucide-react';
+import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2, LayoutGrid, Cog, Inbox, Printer, PackageCheck, FileCheck2, MessageSquareWarning, Send } from 'lucide-react';
 import { NavGroup, NavItem } from './SidebarNavGroup';
 import { AssignmentConfirmationDialog } from './AssignmentConfirmationDialog';
+import ProductionSection from './production/ProductionSection';
+import JournalTemplateSection from './production/JournalTemplateSection';
 
 interface CoordinatorWorkspaceProps {
   manuscripts?: any[];
@@ -70,8 +72,8 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [activityProfiles, setActivityProfiles] = useState<Record<string, ProfileRow>>({});
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('ALL');
-  const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'PUBLISHERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS'>('DASHBOARD');
-  const [expandedNavGroups, setExpandedNavGroups] = useState<Record<string, boolean>>({ workspace: true, people: true, system: true });
+  const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'PUBLISHERS' | 'GD_MEMBERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS' | 'PRODUCTION_QUEUE' | 'IN_PRODUCTION' | 'PROOFS_AWAITING_AUTHOR' | 'CORRECTIONS' | 'READY_FOR_PUBLICATION' | 'PDF_TEMPLATE'>('DASHBOARD');
+  const [expandedNavGroups, setExpandedNavGroups] = useState<Record<string, boolean>>({ workspace: true, people: true, system: true, production: true });
   const toggleNavGroup = (key: string) => setExpandedNavGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedManuscriptForRevision, setSelectedManuscriptForRevision] = useState<ManuscriptRow | null>(null);
@@ -98,6 +100,13 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [publisherInviteOrganization, setPublisherInviteOrganization] = useState('');
   const [publisherInvitePassword, setPublisherInvitePassword] = useState('');
   const [generatedPublisherCredentials, setGeneratedPublisherCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [gdMemberProfiles, setGdMemberProfiles] = useState<ProfileRow[]>([]);
+  const [gdMemberSearch, setGdMemberSearch] = useState('');
+  const [showGDMemberInviteModal, setShowGDMemberInviteModal] = useState(false);
+  const [gdMemberInviteName, setGdMemberInviteName] = useState('');
+  const [gdMemberInviteEmail, setGdMemberInviteEmail] = useState('');
+  const [gdMemberInvitePassword, setGdMemberInvitePassword] = useState('');
+  const [generatedGDMemberCredentials, setGeneratedGDMemberCredentials] = useState<{ email: string; password: string } | null>(null);
   const [selectedEditorForDetails, setSelectedEditorForDetails] = useState<ProfileRow | null>(null);
   const [currentUserToken, setCurrentUserToken] = useState<string>('');
 
@@ -322,14 +331,58 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
     }
   };
 
+  const handleOpenGDMemberInvite = () => {
+    setGdMemberInviteName('');
+    setGdMemberInviteEmail('');
+    setGdMemberInvitePassword(generateTempPassword());
+    setShowGDMemberInviteModal(true);
+  };
+
+  const handleSendGDMemberInvite = async () => {
+    const normalizedName = gdMemberInviteName.trim();
+    if (!normalizedName) {
+      window.alert('Please enter the GD Member name before creating an account.');
+      return;
+    }
+
+    const normalizedEmail = gdMemberInviteEmail.trim().toLowerCase();
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+      window.alert('Please enter a valid email address for the GD Member.');
+      return;
+    }
+
+    const password = gdMemberInvitePassword.trim() || generateTempPassword();
+    if (password.length < 6) {
+      window.alert('Password must be at least 6 characters long.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await createAndActivateGDMemberAccount(normalizedEmail, password, normalizedName);
+
+      setGeneratedGDMemberCredentials({ email: normalizedEmail, password });
+      setShowGDMemberInviteModal(false);
+      setGdMemberInviteName('');
+      setGdMemberInviteEmail('');
+      setGdMemberInvitePassword('');
+      await load();
+    } catch (error: any) {
+      window.alert(error.message || 'Unable to create the GD Member account.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const load = async () => {
     try {
-      const [rows, approvals, editors, reviewers, publishers, activity, overdue] = await Promise.all([
+      const [rows, approvals, editors, reviewers, publishers, gdMembers, activity, overdue] = await Promise.all([
         listManuscripts(),
         listPendingApprovals(),
         listActiveProfilesByRole('EDITOR'),
         listActiveProfilesByRole('REVIEWER'),
         listActiveProfilesByRole('PUBLISHER'),
+        listActiveProfilesByRole('GD_MEMBER'),
         getRecentStatusHistory(8),
         getOverdueReviewerAssignments(),
       ]);
@@ -338,6 +391,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
       setEditorialBoardProfiles(editors);
       setReviewerProfiles(reviewers);
       setPublisherProfiles(publishers);
+      setGdMemberProfiles(gdMembers);
       setReviewerAssignmentCounts(await getReviewerAssignmentCounts(reviewers.map((r) => r.id)));
       setRecentActivity(activity);
       setOverdueReviews(overdue);
@@ -380,6 +434,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const filteredEditors = editorialBoardProfiles.filter((profile) => (profile.name + profile.email + profile.role).toLowerCase().includes(editorSearch.toLowerCase()));
   const filteredReviewers = reviewerProfiles.filter((profile) => (profile.name + profile.email + profile.role).toLowerCase().includes(reviewerSearch.toLowerCase()));
   const filteredPublishers = publisherProfiles.filter((profile) => (profile.name + profile.email + profile.role).toLowerCase().includes(publisherSearch.toLowerCase()));
+  const filteredGDMembers = gdMemberProfiles.filter((profile) => (profile.name + profile.email + profile.role).toLowerCase().includes(gdMemberSearch.toLowerCase()));
   const selected = items.find((m) => m.id === selectedId) || null;
   const totalCount = items.length;
   const stageCounts = {
@@ -396,11 +451,18 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const isEditorialBoardSection = activeSection === 'EDITORIAL_BOARD';
   const isReviewersSection = activeSection === 'REVIEWERS';
   const isPublishersSection = activeSection === 'PUBLISHERS';
+  const isGDMembersSection = activeSection === 'GD_MEMBERS';
   const isReportsSection = activeSection === 'REPORTS';
   const isCommunicationsSection = activeSection === 'COMMUNICATIONS';
   const isSettingsSection = activeSection === 'SETTINGS';
   const isAuditTrailSection = activeSection === 'AUDIT_TRAIL';
   const isPendingApprovalsSection = activeSection === 'PENDING_APPROVALS';
+  const isProductionQueueSection = activeSection === 'PRODUCTION_QUEUE';
+  const isInProductionSection = activeSection === 'IN_PRODUCTION';
+  const isProofsAwaitingAuthorSection = activeSection === 'PROOFS_AWAITING_AUTHOR';
+  const isCorrectionsSection = activeSection === 'CORRECTIONS';
+  const isReadyForPublicationSection = activeSection === 'READY_FOR_PUBLICATION';
+  const isPdfTemplateSection = activeSection === 'PDF_TEMPLATE';
 
   return (
     <div id="coordinator-workspace" className="flex-1 min-h-0 bg-[#00170f] text-[#111827] flex flex-col font-sans">
@@ -423,6 +485,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
               <NavItem icon={<BookOpen className="w-4 h-4" />} label="Editorial Board" active={isEditorialBoardSection} onClick={() => { setActiveSection('EDITORIAL_BOARD'); setSelectedId(null); }} />
               <NavItem icon={<Users className="w-4 h-4" />} label="Reviewers" active={isReviewersSection} onClick={() => { setActiveSection('REVIEWERS'); setSelectedId(null); }} />
               <NavItem icon={<Building2 className="w-4 h-4" />} label="Publishers" active={isPublishersSection} onClick={() => { setActiveSection('PUBLISHERS'); setSelectedId(null); }} />
+              <NavItem icon={<PackageCheck className="w-4 h-4" />} label="GD Members" active={isGDMembersSection} onClick={() => { setActiveSection('GD_MEMBERS'); setSelectedId(null); }} />
             </NavGroup>
 
             <NavGroup title="System" icon={<Cog className="w-4 h-4" />} expanded={expandedNavGroups.system} onToggle={() => toggleNavGroup('system')}>
@@ -430,6 +493,15 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
               <NavItem icon={<MessageCircle className="w-4 h-4" />} label="Communications" active={isCommunicationsSection} onClick={() => { setActiveSection('COMMUNICATIONS'); setSelectedId(null); }} />
               <NavItem icon={<Settings className="w-4 h-4" />} label="Settings" active={isSettingsSection} onClick={() => { setActiveSection('SETTINGS'); setSelectedId(null); }} />
               <NavItem icon={<Activity className="w-4 h-4" />} label="Audit Trail" active={isAuditTrailSection} onClick={() => { setActiveSection('AUDIT_TRAIL'); setSelectedId(null); }} />
+            </NavGroup>
+
+            <NavGroup title="Production" icon={<Printer className="w-4 h-4" />} expanded={expandedNavGroups.production} onToggle={() => toggleNavGroup('production')}>
+              <NavItem icon={<Inbox className="w-4 h-4" />} label="Production Queue" active={isProductionQueueSection} onClick={() => { setActiveSection('PRODUCTION_QUEUE'); setSelectedId(null); }} />
+              <NavItem icon={<PackageCheck className="w-4 h-4" />} label="In Production" active={isInProductionSection} onClick={() => { setActiveSection('IN_PRODUCTION'); setSelectedId(null); }} />
+              <NavItem icon={<Send className="w-4 h-4" />} label="Proofs Awaiting Author" active={isProofsAwaitingAuthorSection} onClick={() => { setActiveSection('PROOFS_AWAITING_AUTHOR'); setSelectedId(null); }} />
+              <NavItem icon={<MessageSquareWarning className="w-4 h-4" />} label="Corrections" active={isCorrectionsSection} onClick={() => { setActiveSection('CORRECTIONS'); setSelectedId(null); }} />
+              <NavItem icon={<FileCheck2 className="w-4 h-4" />} label="Ready for Publication" active={isReadyForPublicationSection} onClick={() => { setActiveSection('READY_FOR_PUBLICATION'); setSelectedId(null); }} />
+              <NavItem icon={<FileText className="w-4 h-4" />} label="PDF Template" active={isPdfTemplateSection} onClick={() => { setActiveSection('PDF_TEMPLATE'); setSelectedId(null); }} />
             </NavGroup>
           </div>
         </aside>
@@ -492,6 +564,15 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
                 onInvitePublisher={handleOpenPublisherInvite}
                 onPublisherDetails={setSelectedEditorForDetails}
               />
+            ) : isGDMembersSection ? (
+              <GDMembersScreen
+                profiles={filteredGDMembers}
+                loading={loading}
+                search={gdMemberSearch}
+                onSearch={setGdMemberSearch}
+                onInviteGDMember={handleOpenGDMemberInvite}
+                onGDMemberDetails={setSelectedEditorForDetails}
+              />
             ) : isReportsSection ? (
               <ReportsAnalyticsScreen totalCount={totalCount} stageCounts={stageCounts} pendingApprovals={pendingApprovals.length} editors={editorialBoardProfiles.length} reviewers={reviewerProfiles.length} />
             ) : isCommunicationsSection ? (
@@ -500,6 +581,18 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
               <NotAvailableScreen title="Settings" text="Journal configuration settings are not connected to a data source yet." />
             ) : isAuditTrailSection ? (
               <AuditTrailScreen manuscripts={items} />
+            ) : isProductionQueueSection ? (
+              <ProductionSection view="QUEUE" />
+            ) : isInProductionSection ? (
+              <ProductionSection view="IN_PRODUCTION" />
+            ) : isProofsAwaitingAuthorSection ? (
+              <ProductionSection view="PROOFS" />
+            ) : isCorrectionsSection ? (
+              <ProductionSection view="CORRECTIONS" />
+            ) : isReadyForPublicationSection ? (
+              <ProductionSection view="READY" />
+            ) : isPdfTemplateSection ? (
+              <JournalTemplateSection canUpload />
             ) : (
               <PendingApprovalsScreen
                 approvals={pendingApprovals}
@@ -586,6 +679,29 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
               </div>
             </div>
           ) : null}
+          {generatedGDMemberCredentials ? (
+            <div className="rounded-3xl border border-teal-100 bg-teal-50 p-5 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-slate-900">Temporary GD Member login</p>
+                  <p className="mt-1 text-sm text-slate-600">Use the generated email and password to login temporarily.</p>
+                </div>
+                <button onClick={() => setGeneratedGDMemberCredentials(null)} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  Dismiss
+                </button>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Email</p>
+                  <p className="mt-2 font-semibold text-slate-900 break-words">{generatedGDMemberCredentials.email}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Password</p>
+                  <p className="mt-2 font-semibold text-slate-900 break-words">{generatedGDMemberCredentials.password}</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
           </main>
           <InviteEditorialMemberModal
             open={showInviteModal}
@@ -630,6 +746,18 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
             onPasswordChange={setPublisherInvitePassword}
             onGeneratePassword={() => setPublisherInvitePassword(generateTempPassword())}
             onSubmit={handleSendPublisherInvite}
+          />
+          <InviteGDMemberModal
+            open={showGDMemberInviteModal}
+            onClose={() => setShowGDMemberInviteModal(false)}
+            name={gdMemberInviteName}
+            email={gdMemberInviteEmail}
+            password={gdMemberInvitePassword}
+            onNameChange={setGdMemberInviteName}
+            onEmailChange={setGdMemberInviteEmail}
+            onPasswordChange={setGdMemberInvitePassword}
+            onGeneratePassword={() => setGdMemberInvitePassword(generateTempPassword())}
+            onSubmit={handleSendGDMemberInvite}
           />
           {selectedEditorForDetails && (
             <EditorDetailsModal
@@ -1701,6 +1829,164 @@ function InvitePublisherModal({ open, onClose, name, email, organization, passwo
             </button>
             <button onClick={onSubmit} className="rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043]">
               Create Publisher Account
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GDMembersScreen({ profiles, loading, search, onSearch, onInviteGDMember, onGDMemberDetails }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInviteGDMember: () => void; onGDMemberDetails: (member: ProfileRow) => void; }) {
+  const totalMembers = profiles.length;
+  const activeMembers = profiles.filter((p) => p.status === 'ACTIVE').length;
+  const pendingInvitations = profiles.filter((p) => p.status === 'PENDING_APPROVAL' || p.status === 'INVITED').length;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900">GD Members</h1>
+          <p className="text-sm text-slate-500 mt-1">Manage internal production/copyediting staff accounts, distinct from Publisher accounts.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button onClick={onInviteGDMember} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] transition">
+            <UserPlus className="w-4 h-4" /> Create GD Member
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200 border-l-4 border-teal-500">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Total GD Members</p>
+          <p className="mt-3 text-3xl font-black text-slate-900">{totalMembers}</p>
+        </div>
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200 border-l-4 border-emerald-500">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Active</p>
+          <p className="mt-3 text-3xl font-black text-slate-900">{activeMembers}</p>
+        </div>
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200 border-l-4 border-amber-500">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Pending</p>
+          <p className="mt-3 text-3xl font-black text-slate-900">{pendingInvitations}</p>
+        </div>
+      </div>
+
+      <div className="rounded-3xl bg-white border border-slate-200 p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Search GD Members</p>
+            <p className="mt-1 text-sm text-slate-600">Find GD Members by name, email, or status.</p>
+          </div>
+          <div className="min-w-[260px]">
+            <input
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder="Search GD Member name or email"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751] focus:ring-2 focus:ring-[#008751]/20"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
+            <tr>
+              <th className="px-4 py-3">GD Member</th>
+              <th className="px-4 py-3">Email</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {loading ? (
+              <tr>
+                <td colSpan={4} className="px-4 py-10 text-center text-slate-400">Loading GD Member profiles...</td>
+              </tr>
+            ) : profiles.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="px-4 py-10 text-center text-slate-400">No GD Members found. Create one to get started.</td>
+              </tr>
+            ) : (
+              profiles.map((profile) => {
+                const status = profile.status === 'ACTIVE' ? 'Active' : profile.status === 'INVITED' || profile.status === 'PENDING_APPROVAL' ? 'Pending' : profile.status === 'DECLINED' ? 'Declined' : 'Active';
+                return (
+                  <tr key={profile.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-4 font-semibold text-slate-900">{profile.name || 'Unknown GD Member'}</td>
+                    <td className="px-4 py-4 text-slate-600">{profile.email}</td>
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${status === 'Active' ? 'bg-emerald-100 text-emerald-700' : status === 'Pending' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
+                        {status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-right">
+                      <button onClick={() => onGDMemberDetails(profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function InviteGDMemberModal({ open, onClose, name, email, password, onNameChange, onEmailChange, onPasswordChange, onGeneratePassword, onSubmit }: { open: boolean; onClose: () => void; name: string; email: string; password: string; onNameChange: (value: string) => void; onEmailChange: (value: string) => void; onPasswordChange: (value: string) => void; onGeneratePassword: () => void; onSubmit: () => void; }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-[30px] overflow-hidden bg-white shadow-2xl border border-slate-200">
+        <div className="relative bg-slate-950 px-8 py-6">
+          <div className="uppercase tracking-[0.35em] text-xs text-emerald-300 font-semibold">Production team</div>
+          <h2 className="mt-3 text-2xl font-black text-white">Create GD Member account</h2>
+          <button onClick={onClose} className="absolute right-5 top-5 rounded-full p-2 text-slate-400 hover:bg-white/10">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="space-y-5 px-8 py-8 bg-slate-50">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold">Name</label>
+            <input
+              value={name}
+              onChange={(e) => onNameChange(e.target.value)}
+              placeholder="Jordan Lee"
+              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold">Username / Email</label>
+            <input
+              value={email}
+              onChange={(e) => onEmailChange(e.target.value)}
+              placeholder="gdmember@example.com"
+              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold">Generate Password</label>
+            <div className="flex gap-2">
+              <input
+                value={password}
+                onChange={(e) => onPasswordChange(e.target.value)}
+                placeholder="Enter or generate a password"
+                className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+              />
+              <button type="button" onClick={onGeneratePassword} className="rounded-2xl border border-slate-300 bg-white px-3 py-3 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                Generate
+              </button>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-teal-100 bg-teal-50 px-4 py-3 text-xs text-teal-800">
+            No email delivery is connected yet. The login credentials will be shown directly in the coordinator dashboard after the account is created.
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <button onClick={onClose} className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+              Cancel
+            </button>
+            <button onClick={onSubmit} className="rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043]">
+              Create Account
             </button>
           </div>
         </div>

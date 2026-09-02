@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { ManuscriptRow, SuggestedReviewerRow, ReviewerAssignmentRow, ProfileRow } from '../../../lib/workflow';
 import {
   coordinatorAcceptSuggestion, coordinatorDeclineSuggestion, coordinatorReplaceSuggestion,
-  coordinatorAssignReviewerDirectly, finalizeReviewerBoard, getEditorReviewerActions,
+  coordinatorAssignReviewerDirectly, getEditorReviewerActions,
   coordinatorFinalizeReviewerSuggestion, approveUserRole, coordinatorReactivateReviewer,
   coordinatorReplaceReviewer, coordinatorSendReviewerInvitations, REPLACEMENT_WINDOW_MS
 } from '../../../lib/workflow';
@@ -46,7 +46,6 @@ export function ReviewBoardTab({
   const [declineReason, setDeclineReason] = useState('');
   const [showReplaceModal, setShowReplaceModal] = useState<string | null>(null);
   const [replacementReviewerId, setReplacementReviewerId] = useState<string | null>(null);
-  const [finalizing, setFinalizing] = useState(false);
   const [sendingInvitations, setSendingInvitations] = useState(false);
   const [showReplaceDeclinedModal, setShowReplaceDeclinedModal] = useState<string | null>(null);
   const [declinedReplacementId, setDeclinedReplacementId] = useState<string | null>(null);
@@ -326,36 +325,6 @@ export function ReviewBoardTab({
     }
   };
 
-  // Handle finalize board
-  const handleFinalize = async () => {
-    if (assignedCount !== 2) {
-      setError(`Must have exactly 2 reviewers assigned. Currently: ${assignedCount}`);
-      return;
-    }
-
-    if (!window.confirm('Confirm finalizing the reviewer board? This will move the manuscript forward (to Peer Review, or straight to Awaiting Decision if both reviews are already in).')) {
-      return;
-    }
-
-    setError('');
-    setFinalizing(true);
-
-    try {
-      await finalizeReviewerBoard(manuscript.id);
-      setSuccess('✓ Reviewer board finalized.');
-      setTimeout(() => {
-        onDataChange();
-        setSuccess('');
-      }, 2000);
-    } catch (e: any) {
-      setError(e.message || 'Failed to finalize reviewer board');
-    } finally {
-      setFinalizing(false);
-    }
-  };
-
-  const canFinalize = assignedCount === 2 && manuscript.status === 'EDITOR_REVIEW';
-
   return (
     <div className="space-y-6">
       {/* Messages */}
@@ -416,7 +385,7 @@ export function ReviewBoardTab({
             className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-sm rounded-lg transition flex items-center justify-center gap-2"
           >
             {sendingInvitations ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            Send Invitation
+            Confirm Reviewer Assignments & Send Invitation
           </button>
           <p className="text-[11px] text-slate-500">
             The manuscript stays in Editorial Review until both reviewers accept — it only moves to Peer Review once both have.
@@ -726,34 +695,6 @@ export function ReviewBoardTab({
             </div>
           )}
         </div>
-      )}
-
-      {/* Finalize Button -- required to move the manuscript out of EDITOR_REVIEW;
-          also the recovery path if reviews were already submitted before this
-          was clicked (fixed server-side to skip straight to Awaiting Decision
-          in that case instead of leaving the manuscript stuck). */}
-      {manuscript.status === 'EDITOR_REVIEW' && (
-        <button
-          onClick={handleFinalize}
-          disabled={!canFinalize || finalizing}
-          className={`w-full px-6 py-3 rounded-lg font-bold text-sm transition flex items-center justify-center gap-2 ${
-            canFinalize
-              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-              : 'bg-slate-200 text-slate-500 cursor-not-allowed'
-          }`}
-        >
-          {finalizing ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Finalizing...
-            </>
-          ) : (
-            <>
-              <CheckCircle className="w-4 h-4" />
-              Confirm Reviewer Assignments & Continue
-            </>
-          )}
-        </button>
       )}
 
       {/* Already Finalized Message */}

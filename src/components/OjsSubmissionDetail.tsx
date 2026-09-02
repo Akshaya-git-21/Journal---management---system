@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { getManuscriptStatusLabel, getManuscriptStatusMeta, getRevisionMeta, getLatestRevision } from '../lib/manuscriptStatusLabel';
 import FilePreviewModal from './FilePreviewModal';
 import SubmissionSidebar from './SubmissionSidebar';
+import AuthorProductionPanel from './production/AuthorProductionPanel';
+import { getProduction, subscribeToProduction } from '../lib/production';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
 import ViewSubmissionContent from './ViewSubmissionContent';
 import {
@@ -122,6 +124,13 @@ export default function OjsSubmissionDetail({
 
   // Real-time data from Supabase
   const [manuscriptDetails, setManuscriptDetails] = useState<AuthorManuscriptDetails | null>(null);
+  // Task 11: once a proof is with the author, the standard "PROOFREADING"
+  // status applies (see PROOFREADING_PRODUCTION_STATUSES in
+  // lib/manuscriptStatusLabel.ts) -- fetched separately from
+  // manuscriptDetails since it lives in manuscript_production, not
+  // manuscripts. RLS already grants authors SELECT on their own manuscript's
+  // production row (0047_production_module.sql).
+  const [productionStatus, setProductionStatus] = useState<string | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(true);
   const [detailsError, setDetailsError] = useState<string>('');
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
@@ -501,6 +510,15 @@ export default function OjsSubmissionDetail({
     };
   }, [paper?.id, currentUser?.email]);
 
+  useEffect(() => {
+    if (!paper?.id) { setProductionStatus(null); return; }
+    let cancelled = false;
+    const refetch = () => getProduction(paper.id).then((p) => { if (!cancelled) setProductionStatus(p?.production_status ?? null); }).catch(() => {});
+    refetch();
+    const unsubscribe = subscribeToProduction(refetch);
+    return () => { cancelled = true; unsubscribe(); };
+  }, [paper?.id]);
+
   // Files uploaded against the current revision cycle (author's revised
   // manuscript / response to reviewers), shown as their own section below
   // the original submission's Uploaded Files. Re-fetches and re-subscribes
@@ -838,7 +856,7 @@ export default function OjsSubmissionDetail({
     if (!details) return [];
     const { manuscript, reviewerAssignments, statusHistory, revisions } = details;
     const latestRevision = getLatestRevision(revisions);
-    const label = getManuscriptStatusLabel(manuscript, latestRevision);
+    const label = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
     const fmt = (iso: string | null) => (iso ? formatDateTime(iso) : '');
 
     // Earliest status_history timestamp for a given raw status, used as
@@ -901,7 +919,7 @@ export default function OjsSubmissionDetail({
     if (!details) return [];
     const { manuscript, revisions, reviewerAssignments } = details;
     const latestRevision = getLatestRevision(revisions);
-    const label = getManuscriptStatusLabel(manuscript, latestRevision);
+    const label = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
 
     if (manuscript.status === 'REJECTED') {
       // Rejection can happen from either the screening or peer-review
@@ -1019,7 +1037,7 @@ export default function OjsSubmissionDetail({
                       <span className="bg-[#e6f7ef] text-[#008751] border border-emerald-500/30 px-3 py-1 rounded-full text-[12px] font-bold inline-flex items-center gap-1 shadow-3xs">
                         <span className="w-2 h-2 rounded-full bg-[#008751]" />
                         {manuscriptDetails?.manuscript
-                          ? getManuscriptStatusLabel(manuscriptDetails.manuscript, getLatestRevision(manuscriptDetails.revisions))
+                          ? getManuscriptStatusLabel(manuscriptDetails.manuscript, getLatestRevision(manuscriptDetails.revisions), productionStatus)
                           : (paper.raw?.status || 'SUBMITTED').replace(/_/g, ' ')}
                       </span>
                       {(() => {
@@ -1048,7 +1066,7 @@ export default function OjsSubmissionDetail({
                 {manuscriptDetails?.manuscript.status && ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED'].includes(manuscriptDetails.manuscript.status) && (() => {
                   const status = manuscriptDetails.manuscript.status;
                   const latestRevision = getLatestRevision(manuscriptDetails.revisions);
-                  const meta = getManuscriptStatusMeta(manuscriptDetails.manuscript, latestRevision);
+                  const meta = getManuscriptStatusMeta(manuscriptDetails.manuscript, latestRevision, productionStatus);
                   const decisionLetterEntry = manuscriptDetails.statusHistory?.find(h => h.to_status === status && h.note);
                   const isAccepted = status === 'ACCEPTED';
                   const isRejected = status === 'REJECTED';
@@ -1059,9 +1077,10 @@ export default function OjsSubmissionDetail({
                       'bg-amber-50 border-amber-200'
                     }`}>
                       <p className={`text-base font-black ${isRejected ? 'text-red-800' : isAccepted ? 'text-emerald-800' : 'text-amber-800'}`}>
-                        {isAccepted ? 'Paper Submission Accepted' : isRejected ? 'Manuscript Rejected' : `Revision Required — ${meta.label}`}
+                        {isAccepted ? 'Manuscript Accepted' : isRejected ? 'Manuscript Rejected' : `Revision Required — ${meta.label}`}
                       </p>
                       <p className="text-sm font-semibold text-slate-700 mt-1">Status: {meta.label}</p>
+                      {isAccepted && <p className="text-sm font-semibold text-slate-700 mt-1">Decision: Accepted</p>}
                       {meta.nextStep && <p className="text-sm text-slate-600 mt-1">Next step: {meta.nextStep}</p>}
                       {decisionLetterEntry?.note && (
                         <p className="text-sm text-slate-700 mt-3 whitespace-pre-wrap border-t border-black/10 pt-3">{decisionLetterEntry.note}</p>
@@ -3118,6 +3137,8 @@ export default function OjsSubmissionDetail({
                   Status Metrics: {paper.stage === 'Revisions Requested' ? 'Active Revisions Phase - Revision File Awaiting Dispatch' : 'Awaiting Reviewer Allocation / Invitation dispatch'}
                 </div>
               </div>
+            ) : activeTab === 'production' ? (
+              <AuthorProductionPanel manuscriptId={paper.id} />
             ) : activeTab === 'COPYEDITING' ? (
               <div className="bg-white border border-slate-200 rounded-xl p-6 text-xs text-left space-y-4 animate-in fade-in duration-100">
                 <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide border-b pb-2.5 font-mono">Workflow: Editorial Copyediting</h2>

@@ -13,6 +13,7 @@ import EditorWorkspace from './components/EditorWorkspace';
 import ReviewerWorkspace from './components/ReviewerWorkspace';
 import PublisherWorkspace from './components/PublisherWorkspace';
 import CoordinatorWorkspace from './components/CoordinatorWorkspace';
+import GDMemberWorkspace from './components/GDMemberWorkspace';
 import AuthPortals from './components/AuthPortals';
 import ResetPasswordScreen from './components/ResetPasswordScreen';
 import { CheckCircle2, LogOut, User, AlertTriangle } from 'lucide-react';
@@ -287,6 +288,7 @@ export default function App() {
                     { role: 'REVIEWER' as Role, label: 'Reviewer' },
                     { role: 'PUBLISHER' as Role, label: 'Publisher' },
                     { role: 'COORDINATOR' as Role, label: 'Coordinator' },
+                    { role: 'GD_MEMBER' as Role, label: 'GD Member' },
                   ]).map(({ role, label }) => (
                     <button
                       key={role}
@@ -344,13 +346,12 @@ export default function App() {
       )}
 
       {currentScreen === 'WORKSPACE' && (() => {
-        // Coordinator uses a fixed dashboard shell (sidebar + internally
-        // scrolling content, like a desktop app) -- everything else uses
-        // ordinary page scrolling. Only Coordinator gets the bounded/
-        // overflow-hidden treatment; forcing it on the others would clip
-        // their content, since they're built assuming the page itself grows
-        // and scrolls (min-h-screen), not a fixed-height shell.
-        const isShell = loggedInUser?.role === 'COORDINATOR';
+        // Coordinator and GD Member use a fixed dashboard shell (sidebar +
+        // internally scrolling content, like a desktop app) -- everything
+        // else uses ordinary page scrolling. Forcing the shell on the others
+        // would clip their content, since they're built assuming the page
+        // itself grows and scrolls (min-h-screen), not a fixed-height shell.
+        const isShell = loggedInUser?.role === 'COORDINATOR' || loggedInUser?.role === 'GD_MEMBER';
         const shellClass = isShell ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-grow flex flex-col';
         return (
         <div className={shellClass}>
@@ -370,7 +371,7 @@ export default function App() {
             <div className={`animate-fade-in duration-300 ${shellClass}`}>
               {/* The workspace rendered is always exactly the authenticated
                   user's own role -- there is no client-side role switch. */}
-              <RequireRole role={loggedInUser?.role} allowed={['AUTHOR', 'EDITOR', 'REVIEWER', 'PUBLISHER', 'COORDINATOR']}>
+              <RequireRole role={loggedInUser?.role} allowed={['AUTHOR', 'EDITOR', 'REVIEWER', 'PUBLISHER', 'COORDINATOR', 'GD_MEMBER']}>
                 {loggedInUser?.role === 'AUTHOR' && (
                   <AuthorWorkspace currentUser={loggedInUser} onSignOut={handleSignOut} />
                 )}
@@ -389,6 +390,10 @@ export default function App() {
 
                 {loggedInUser?.role === 'COORDINATOR' && (
                   <CoordinatorWorkspace />
+                )}
+
+                {loggedInUser?.role === 'GD_MEMBER' && (
+                  <GDMemberWorkspace currentUser={loggedInUser} />
                 )}
               </RequireRole>
             </div>

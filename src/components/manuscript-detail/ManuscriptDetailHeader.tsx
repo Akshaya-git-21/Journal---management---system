@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react';
 import { ManuscriptRow, RevisionRow } from '../../lib/workflow';
 import { Download, MoreVertical, RefreshCw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { getManuscriptStatusLabel, getRevisionMeta, STANDARD_STATUS_COLORS } from '../../lib/manuscriptStatusLabel';
+import { getProduction, subscribeToProduction } from '../../lib/production';
 
 interface Props {
   manuscript: ManuscriptRow;
@@ -9,12 +11,29 @@ interface Props {
   latestRevision?: RevisionRow | null;
 }
 
+// Display-only: the actual "Move to Production" action lives in the
+// Decision tab's Final Decision card (DecisionTab.tsx) -- a single place to
+// avoid two independent buttons racing each other's stale local state.
+// This just mirrors that transition in the status pill, and re-subscribes
+// on every manuscript switch so it can't show a stale ACCEPTED after the
+// Coordinator starts production from the Decision tab.
 export default function ManuscriptDetailHeader({ manuscript, onRefresh, latestRevision }: Props) {
+  const [productionStatus, setProductionStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (manuscript.status !== 'ACCEPTED') { setProductionStatus(null); return; }
+    const refetch = () => getProduction(manuscript.id).then((p) => { if (!cancelled) setProductionStatus(p?.production_status ?? null); }).catch(() => {});
+    refetch();
+    const unsubscribe = subscribeToProduction(refetch);
+    return () => { cancelled = true; unsubscribe(); };
+  }, [manuscript.id, manuscript.status]);
+
   const formatDate = (date: string | null) => {
     if (!date) return '--';
     return new Date(date).toLocaleString();
   };
-  const statusLabel = getManuscriptStatusLabel(manuscript, latestRevision);
+  const statusLabel = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
   const revisionMeta = getRevisionMeta(latestRevision);
 
   return (

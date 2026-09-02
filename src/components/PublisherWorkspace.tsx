@@ -6,6 +6,7 @@ import {
   getEditorAssignments, getReviewerAssignments, getRevisions, getProfilesByIds, listActiveProfilesByRole,
   ManuscriptRow, ContributorRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, ProfileRow
 } from '../lib/workflow';
+import { listProduction, subscribeToProduction, setPublisherTaskStatus, ProductionRow } from '../lib/production';
 import {
   FileText, CheckCircle2, XCircle, AlertTriangle, Hash, BookOpen, Settings, Users, CheckSquare,
   LayoutGrid, ClipboardList, Clock, History, Eye, ExternalLink, BarChart3, Download, ShieldAlert,
@@ -105,23 +106,31 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
   const [wizardStep, setWizardStep] = useState(0);
   const [publishedDetails, setPublishedDetails] = useState<PublishedDetails | null>(null);
   const [loadingPublishedDetails, setLoadingPublishedDetails] = useState(false);
+  const [taskStatusBusy, setTaskStatusBusy] = useState(false);
+  const [taskStatusError, setTaskStatusError] = useState('');
 
   const [editors, setEditors] = useState<ProfileRow[]>([]);
   const [reviewers, setReviewers] = useState<ProfileRow[]>([]);
   const [publishers, setPublishers] = useState<ProfileRow[]>([]);
+  const [production, setProduction] = useState<ProductionRow[]>([]);
+  const [gdMemberProfiles, setGdMemberProfiles] = useState<Record<string, ProfileRow>>({});
 
   const load = async () => {
     try {
-      const [rows, editorRows, reviewerRows, publisherRows] = await Promise.all([
+      const [rows, editorRows, reviewerRows, publisherRows, productionRows] = await Promise.all([
         listManuscripts(),
         listActiveProfilesByRole('EDITOR'),
         listActiveProfilesByRole('REVIEWER'),
         listActiveProfilesByRole('PUBLISHER'),
+        listProduction(),
       ]);
       setManuscripts(rows);
       setEditors(editorRows);
       setReviewers(reviewerRows);
       setPublishers(publisherRows);
+      setProduction(productionRows);
+      const gdIds = Array.from(new Set(productionRows.map((p) => p.assigned_to).filter((v): v is string => !!v)));
+      setGdMemberProfiles(gdIds.length > 0 ? await getProfilesByIds(gdIds) : {});
     } catch (e: any) {
       console.error('Failed to load manuscripts:', e);
     } finally {
@@ -131,11 +140,18 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
 
   useEffect(() => {
     load();
-    const unsubscribe = subscribeToManuscripts(load);
-    return unsubscribe;
+    const unsubA = subscribeToManuscripts(load);
+    const unsubB = subscribeToProduction(load);
+    return () => { unsubA(); unsubB(); };
   }, []);
 
-  const queue = manuscripts.filter((m) => m.production_stage === 'SENT_TO_PUBLISHER');
+  // A manuscript with a GD Member assigned (see assign_gd_member() /
+  // 0051_assign_gd_member.sql) enters the Publisher's Production Queue
+  // immediately, in addition to the legacy "Send to Publisher" trigger --
+  // both paths land in the same queue/wizard below.
+  const gdAssignedManuscriptIds = new Set(production.filter((p) => !!p.assigned_to).map((p) => p.manuscript_id));
+  const productionByManuscript = new Map<string, ProductionRow>(production.map((p) => [p.manuscript_id, p]));
+  const queue = manuscripts.filter((m) => m.production_stage === 'SENT_TO_PUBLISHER' || gdAssignedManuscriptIds.has(m.id));
   const published = manuscripts.filter((m) => m.status === 'PUBLISHED');
   const doiPending = queue.filter((m) => !m.doi);
 
@@ -185,6 +201,20 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
   const authorsLabel = contributors.length > 0
     ? contributors.map((c) => c.name).join(', ')
     : displayManuscript?.author_name || '--';
+
+  const handleSetTaskStatus = async (status: 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETE') => {
+    if (!displayManuscript) return;
+    setTaskStatusBusy(true);
+    setTaskStatusError('');
+    try {
+      await setPublisherTaskStatus(displayManuscript.id, status);
+      await load();
+    } catch (e: any) {
+      setTaskStatusError(e.message || 'Failed to update the production task status.');
+    } finally {
+      setTaskStatusBusy(false);
+    }
+  };
 
   const handleSelectFile = async (file: File) => {
     setFileError('');
@@ -561,6 +591,52 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
                         </button>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Overall Production Task Status -- the Publisher's own coarse
+                    status (Not Started / In Progress / Complete), distinct from
+                    the GD Member's item-by-item checklist (which the Publisher
+                    never sees). Visible to the Coordinator too, as confirmation
+                    production is actually done before moving to the next stage.
+                    See set_publisher_task_status() / 0057_publisher_task_status.sql. */}
+                {productionByManuscript.get(displayManuscript.id) && (
+                  <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.25em] text-slate-400 font-bold">Production Task Status</p>
+                        {/* Read-only -- Publisher can see who's assigned but never
+                            reassign (Coordinator-only, see assign_gd_member() /
+                            0051_assign_gd_member.sql). No dropdown, no button. */}
+                        {productionByManuscript.get(displayManuscript.id)?.assigned_to && (
+                          <p className="mt-1 text-xs text-slate-400">
+                            Assigned GD Member: <span className="font-semibold text-slate-600">
+                              {gdMemberProfiles[productionByManuscript.get(displayManuscript.id)!.assigned_to!]?.name || '--'}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {(['NOT_STARTED', 'IN_PROGRESS', 'COMPLETE'] as const).map((s) => {
+                          const active = productionByManuscript.get(displayManuscript.id)?.publisher_task_status === s;
+                          const labels = { NOT_STARTED: 'Not Started', IN_PROGRESS: 'In Progress', COMPLETE: 'Complete' };
+                          return (
+                            <button
+                              key={s}
+                              type="button"
+                              disabled={taskStatusBusy}
+                              onClick={() => handleSetTaskStatus(s)}
+                              className={`px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wide border transition disabled:opacity-50 ${
+                                active ? 'bg-[#008751] border-[#008751] text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                              }`}
+                            >
+                              {labels[s]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {taskStatusError && <p className="text-xs font-semibold text-red-600">{taskStatusError}</p>}
                   </div>
                 )}
 

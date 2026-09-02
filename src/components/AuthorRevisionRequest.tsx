@@ -121,6 +121,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   const [showDecisionLetter, setShowDecisionLetter] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
   const [manualChecklist, setManualChecklist] = useState({ addressedComments: false, confirmedDetails: false });
+  const [confirmingSubmit, setConfirmingSubmit] = useState(false);
   const [reviewerComments, setReviewerComments] = useState<ReviewerAssignmentRow[]>([]);
   const [editorNotes, setEditorNotes] = useState<{ screening_comments: string | null; action_reason: string | null } | null>(null);
 
@@ -231,7 +232,12 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   const handleSubmitRevision = async () => {
     if (!selectedRevision || !canSubmit || submitting) return;
     if (selectedRevision.status !== 'AWAITING_AUTHOR_UPLOAD') return;
-    if (!window.confirm(`Send Revision ${selectedRevision.revision_number} to the coordinator? You won't be able to make further changes once it's sent.`)) return;
+    // Uses an inline confirmation panel instead of window.confirm() -- the
+    // native dialog is silently blocked in sandboxed/embedded preview
+    // contexts (e.g. an iframe without allow-modals), which made this
+    // button look like it did nothing when clicked.
+    if (!confirmingSubmit) { setConfirmingSubmit(true); return; }
+    setConfirmingSubmit(false);
 
     setSubmitting(true);
     setError('');
@@ -532,6 +538,34 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
           <p className="text-sm text-emerald-700 mt-2">
             Your revised manuscript has been submitted for coordinator review. Once the coordinator forwards it, the editor will review it and provide feedback.
           </p>
+        </div>
+      )}
+
+      {confirmingSubmit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50">
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 space-y-4">
+            <h3 className="text-base font-black text-slate-900">Send to Editor?</h3>
+            <p className="text-sm text-slate-600">
+              Send Revision {selectedRevision.revision_number} to the coordinator? You won't be able to make further changes once it's sent.
+            </p>
+            <div className="flex gap-3">
+              <button
+                disabled={submitting}
+                onClick={() => setConfirmingSubmit(false)}
+                className="flex-1 border border-slate-300 text-slate-700 text-sm font-bold py-2.5 rounded-lg hover:bg-slate-50 transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={submitting}
+                onClick={handleSubmitRevision}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2.5 rounded-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                Confirm & Send
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

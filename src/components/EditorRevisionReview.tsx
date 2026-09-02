@@ -47,6 +47,16 @@ const DEFAULT_CHECKLIST: string[] = [
 // (coordinator_send_revision_to_reviewers) -- see
 // 0043_editor_initiated_reviewer_recheck.sql.
 type RevisionAction = 'REJECT' | 'RETURN_TO_AUTHOR' | 'NEXT_STAGE' | 'SEND_TO_REVIEWER';
+// NEXT_STAGE's label depends on where this revision came from: a
+// screening-origin revision has no reviewers yet, so accepting it here only
+// moves it into reviewer *selection* -- "Accept Submission" is reserved for
+// the true final decision, which only happens once reviewers have actually
+// reviewed and the revision comes back to the Editor as peer-review-origin.
+function nextStageMeta(isPeerReviewOrigin: boolean) {
+  return isPeerReviewOrigin
+    ? { title: 'Accept Submission', confirmLabel: 'Confirm & Accept Submission' }
+    : { title: 'Move to Next Stage', confirmLabel: 'Confirm & Move to Next Stage' };
+}
 const ACTION_META: Record<RevisionAction, { title: string; confirmLabel: string; recommendation: ReviewerRecommendation; style: string }> = {
   REJECT: { title: 'Reject', confirmLabel: 'Confirm Rejection', recommendation: 'REJECT', style: 'bg-red-700 hover:bg-red-800' },
   RETURN_TO_AUTHOR: { title: 'Return to Author', confirmLabel: 'Confirm Return to Author', recommendation: 'MAJOR_REVISION', style: 'bg-amber-700 hover:bg-amber-800' },
@@ -105,9 +115,17 @@ export default function EditorRevisionReview({
 
   if (!latestRevision) return null;
 
-  const ACTIONS: RevisionAction[] = latestRevision.origin === 'PEER_REVIEW'
-    ? ['REJECT', 'NEXT_STAGE', 'SEND_TO_REVIEWER']
+  const isPeerReviewOrigin = latestRevision.origin === 'PEER_REVIEW';
+  // Cap the peer-review loop at one round-trip through the reviewers --
+  // once a manuscript has already gone through a full "send back to
+  // reviewers" cycle (2+ PEER_REVIEW-origin revisions), the Editor no
+  // longer gets to send it back to reviewers again, only Accept/Reject.
+  const peerReviewOriginRounds = revisions.filter(r => r.origin === 'PEER_REVIEW').length;
+  const ACTIONS: RevisionAction[] = isPeerReviewOrigin
+    ? (peerReviewOriginRounds >= 2 ? ['REJECT', 'NEXT_STAGE'] : ['REJECT', 'NEXT_STAGE', 'SEND_TO_REVIEWER'])
     : ['REJECT', 'RETURN_TO_AUTHOR', 'NEXT_STAGE'];
+  const metaFor = (act: RevisionAction) =>
+    act === 'NEXT_STAGE' ? { ...ACTION_META.NEXT_STAGE, ...nextStageMeta(isPeerReviewOrigin) } : ACTION_META[act];
 
   // The screening-stage revision loop always returns a manuscript with
   // MAJOR_REVISION as its decision_type (Return to Author has no
@@ -262,7 +280,7 @@ export default function EditorRevisionReview({
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {ACTIONS.map((act) => {
-              const meta = ACTION_META[act];
+              const meta = metaFor(act);
               const isSelected = selectedAction === act;
               return (
                 <button
@@ -282,8 +300,8 @@ export default function EditorRevisionReview({
           {selectedAction && (
             <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
               <p className="text-xs text-slate-600">
-                Confirm <span className="font-bold">{ACTION_META[selectedAction].title}</span>
-                {selectedAction === 'NEXT_STAGE' && latestRevision.origin !== 'PEER_REVIEW'
+                Confirm <span className="font-bold">{metaFor(selectedAction).title}</span>
+                {selectedAction === 'NEXT_STAGE' && !isPeerReviewOrigin
                   ? ' and move to reviewer selection?'
                   : ' and submit this decision to the Coordinator?'}
               </p>
@@ -303,7 +321,7 @@ export default function EditorRevisionReview({
                   className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition flex items-center gap-2"
                 >
                   {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                  {ACTION_META[selectedAction].confirmLabel}
+                  {metaFor(selectedAction).confirmLabel}
                 </button>
               </div>
             </div>

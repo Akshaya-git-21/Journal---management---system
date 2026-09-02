@@ -1,6 +1,6 @@
 /**
  * Vercel serverless function -- production entrypoint for the Coordinator
- * "create an Editor/Reviewer/Publisher account" admin operation. Mirrors
+ * "create an Editor/Reviewer/Publisher/GD Member account" admin operation. Mirrors
  * api/reset-user-password.ts: resolvable at POST /api/create-user in
  * production because Vercel resolves files under /api as Functions before
  * applying the SPA catch-all rewrite in vercel.json.
@@ -12,7 +12,7 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const ALLOWED_ROLES = ['EDITOR', 'REVIEWER', 'PUBLISHER'];
+const ALLOWED_ROLES = ['EDITOR', 'REVIEWER', 'PUBLISHER', 'GD_MEMBER'];
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
@@ -72,7 +72,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
     if (callerProfile.role !== 'COORDINATOR' || callerProfile.status !== 'ACTIVE') {
-      res.status(403).json({ error: 'Forbidden: Only an active Coordinator can create Editor/Reviewer/Publisher accounts.' });
+      res.status(403).json({ error: 'Forbidden: Only an active Coordinator can create Editor/Reviewer/Publisher/GD Member accounts.' });
       return;
     }
 

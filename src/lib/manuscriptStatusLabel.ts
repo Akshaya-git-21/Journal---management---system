@@ -17,7 +17,7 @@ export type StandardStatus = typeof STANDARD_STATUSES[number];
 
 /** Shared badge coloring so every workspace renders the same status the
  * same way -- no more per-workspace STATUS_STYLES duplicates. */
-export const STANDARD_STATUS_COLORS: Record<StandardStatus | 'DRAFT', string> = {
+export const STANDARD_STATUS_COLORS: Record<StandardStatus | 'DRAFT' | 'PRODUCTION PREPARATION', string> = {
   DRAFT: 'bg-slate-100 text-slate-600 border-slate-200',
   SUBMITTED: 'bg-amber-50 text-amber-700 border-amber-200',
   'EDITORIAL REVIEW': 'bg-blue-50 text-blue-700 border-blue-200',
@@ -27,6 +27,7 @@ export const STANDARD_STATUS_COLORS: Record<StandardStatus | 'DRAFT', string> = 
   REJECTED: 'bg-red-50 text-red-700 border-red-200',
   PROOFREADING: 'bg-sky-50 text-sky-700 border-sky-200',
   PUBLISHED: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+  'PRODUCTION PREPARATION': 'bg-teal-50 text-teal-700 border-teal-200',
 };
 
 interface ManuscriptStatusLike {
@@ -34,6 +35,16 @@ interface ManuscriptStatusLike {
   display_status?: string | null;
   production_stage?: string | null;
 }
+
+/** Once a proof is with the author (Task 11), the standard "PROOFREADING"
+ * status (already one of the 8 canonical STANDARD_STATUSES) applies instead
+ * of the coarser internal "PRODUCTION PREPARATION" label -- everything
+ * before this is Coordinator/GD Member work the author never sees. */
+const PROOFREADING_PRODUCTION_STATUSES = new Set([
+  'PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW', 'CORRECTIONS_SUBMITTED',
+  'PRODUCTION_REVIEW', 'PROOF_UPDATED', 'CLARIFICATION_REQUESTED',
+  'AUTHOR_APPROVED', 'READY_FOR_PUBLICATION', 'CORRECTIONS_IN_PROGRESS',
+]);
 
 /**
  * The manuscript's PRIMARY user-facing status -- always one of
@@ -45,11 +56,29 @@ interface ManuscriptStatusLike {
  * query forgot to select it -- kept coarse but self-consistent rather than
  * throwing, since a stale/missing field shouldn't crash a badge.
  */
-export function getManuscriptStatusLabel(manuscript: ManuscriptStatusLike, latestRevision?: RevisionRow | null): string {
-  if (manuscript.display_status) return manuscript.display_status;
+export function getManuscriptStatusLabel(manuscript: ManuscriptStatusLike, latestRevision?: RevisionRow | null, productionStatus?: string | null): string {
+  if (manuscript.display_status) {
+    // The `display_status` computed column doesn't know about the Production
+    // module's manuscript_production row (a separate, additive table -- see
+    // supabase/migrations/0047_production_module.sql), so it always reports
+    // an accepted-but-not-yet-in-production manuscript as ACCEPTED. Once the
+    // Coordinator has clicked "Move to Production" (start_production RPC),
+    // overlay that here rather than touching the DB function -- callers that
+    // don't pass productionStatus (Editor/Reviewer/Author views) are
+    // unaffected, so this is purely additive to the Coordinator's own view.
+    if (manuscript.display_status === 'ACCEPTED' && productionStatus && productionStatus !== 'NOT_STARTED') {
+      return PROOFREADING_PRODUCTION_STATUSES.has(productionStatus) ? 'PROOFREADING' : 'PRODUCTION PREPARATION';
+    }
+    return manuscript.display_status;
+  }
 
   const status = manuscript.status;
-  if (status === 'ACCEPTED') return manuscript.production_stage === 'SENT_TO_PUBLISHER' ? 'PROOFREADING' : 'ACCEPTED';
+  if (status === 'ACCEPTED') {
+    if (productionStatus && productionStatus !== 'NOT_STARTED') {
+      return PROOFREADING_PRODUCTION_STATUSES.has(productionStatus) ? 'PROOFREADING' : 'PRODUCTION PREPARATION';
+    }
+    return manuscript.production_stage === 'SENT_TO_PUBLISHER' ? 'PROOFREADING' : 'ACCEPTED';
+  }
   if (status === 'EDITOR_REVIEW' || status === 'AWAITING_DECISION') return 'EDITORIAL REVIEW';
   if (status === 'UNDER_REVIEW') return 'PEER REVIEW';
   if (status === 'REVISION_REQUESTED') {
@@ -58,9 +87,10 @@ export function getManuscriptStatusLabel(manuscript: ManuscriptStatusLike, lates
   return status.replace(/_/g, ' ');
 }
 
-export function getManuscriptStatusMeta(manuscript: ManuscriptStatusLike, latestRevision?: RevisionRow | null): { label: string; nextStep: string } {
-  const label = getManuscriptStatusLabel(manuscript, latestRevision);
-  if (label === 'ACCEPTED') return { label, nextStep: 'Move to Publish' };
+export function getManuscriptStatusMeta(manuscript: ManuscriptStatusLike, latestRevision?: RevisionRow | null, productionStatus?: string | null): { label: string; nextStep: string } {
+  const label = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
+  if (label === 'PRODUCTION PREPARATION') return { label, nextStep: 'Coordinator preparing manuscript for production' };
+  if (label === 'ACCEPTED') return { label, nextStep: 'Production' };
   if (label === 'IN REVISION') {
     const nextStep = latestRevision?.status === 'AWAITING_AUTHOR_UPLOAD' ? 'Author to submit revision' : 'Coordinator to forward';
     return { label, nextStep };

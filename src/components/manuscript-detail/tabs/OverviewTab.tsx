@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, listActiveProfilesByRole, assignEditor, coordinatorSendRevisionToEditor, coordinatorSendReviewsToEditor } from '../../../lib/workflow';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, assignEditor, coordinatorSendRevisionToEditor, coordinatorSendReviewsToEditor, getEditorReviewerActions, getPendingEditorSuggestions } from '../../../lib/workflow';
 import { getManuscriptStatusLabel, getRevisionMeta, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
+import { getProduction, subscribeToProduction } from '../../../lib/production';
 import { CheckCircle2, Circle, AlertCircle, FileText, Loader2 } from 'lucide-react';
 import { AssignmentConfirmationDialog } from '../../AssignmentConfirmationDialog';
 
@@ -25,6 +26,16 @@ export function OverviewTab({
   onWorkflowChange,
   onGoToTab
 }: Props) {
+  const [productionStatus, setProductionStatus] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (manuscript.status !== 'ACCEPTED') { setProductionStatus(null); return; }
+    const refetch = () => getProduction(manuscript.id).then((p) => { if (!cancelled) setProductionStatus(p?.production_status ?? null); }).catch(() => {});
+    refetch();
+    const unsubscribe = subscribeToProduction(refetch);
+    return () => { cancelled = true; unsubscribe(); };
+  }, [manuscript.id, manuscript.status]);
+
   const activeEditor = editorAssignments.find(a => a.status === 'ACCEPTED') || editorAssignments[0];
   const evaluationSubmitted = activeEditor?.assessment_status === 'SUBMITTED';
   const reviewsSubmitted = reviewerAssignments.filter(r => r.status === 'SUBMITTED').length;
@@ -67,6 +78,26 @@ export function OverviewTab({
 
   const latestRevision = getLatestRevision(revisions);
   const revisionN = latestRevision?.revision_number;
+
+  // Editor has selected its 2 reviewers for the current round but the
+  // Coordinator hasn't sent invitations yet (manuscript.status stays
+  // EDITOR_REVIEW until they do -- see editor_select_reviewers() in
+  // 0026_editor_reviewer_selection.sql). Surface that as its own "ready to
+  // invite" state instead of the generic "Editor is reviewing" copy.
+  const [editorReviewerActions, setEditorReviewerActions] = useState<EditorReviewerActionRow[]>([]);
+  useEffect(() => {
+    getEditorReviewerActions(manuscript.id).then(setEditorReviewerActions).catch(() => setEditorReviewerActions([]));
+  }, [manuscript.id]);
+  // No revision-number filter here -- editor_select_reviewers() (0026)
+  // never stamps revision_number on the suggestions it creates (unlike its
+  // replacement-selection sibling in 0034), so they always default to 0
+  // regardless of which round is active. Matching EditorWorkspace.tsx's own
+  // no-round-filter usage (details.suggestedReviewers/editorReviewerActions
+  // call) avoids that mismatch entirely instead of trying to replicate it.
+  const pendingReviewerInvites = manuscript.status === 'EDITOR_REVIEW'
+    ? getPendingEditorSuggestions(suggestedReviewers, editorReviewerActions)
+    : [];
+  const readyToInviteReviewers = pendingReviewerInvites.length > 0;
 
   const [sendingToEditor, setSendingToEditor] = useState(false);
   const [sendToEditorError, setSendToEditorError] = useState('');
@@ -119,6 +150,14 @@ export function OverviewTab({
   // UNDER_REVIEW statuses as the original round, so the description needs
   // to say which one this is).
   const getStatusDescription = (): string => {
+    if (manuscript.status === 'ACCEPTED' && productionStatus && productionStatus !== 'NOT_STARTED') {
+      return 'Manuscript is being prepared for production';
+    }
+    if (readyToInviteReviewers) {
+      return revisionN
+        ? `Editor selected reviewers for Revision ${revisionN} -- invite them to start peer review`
+        : 'Editor selected reviewers -- invite them to start peer review';
+    }
     if (manuscript.status === 'EDITOR_REVIEW' && evaluationSubmitted) {
       return revisionN
         ? `Revision ${revisionN} editor evaluation complete. Ready for peer review assignment.`
@@ -201,7 +240,7 @@ export function OverviewTab({
         <div className="space-y-4">
           <div>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Status</p>
-            <p className="text-lg font-bold text-slate-900">{getManuscriptStatusLabel(manuscript, latestRevision)}</p>
+            <p className="text-lg font-bold text-slate-900">{getManuscriptStatusLabel(manuscript, latestRevision, productionStatus)}</p>
             {(() => {
               const revisionMeta = getRevisionMeta(latestRevision);
               return revisionMeta ? (
@@ -212,6 +251,19 @@ export function OverviewTab({
             })()}
             <p className="text-sm text-slate-600 mt-1">{getStatusDescription()}</p>
           </div>
+
+          {readyToInviteReviewers && (
+            <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+              <p className="text-sm font-bold text-teal-900 mb-1">Editor selected {pendingReviewerInvites.length} reviewer{pendingReviewerInvites.length === 1 ? '' : 's'} — ready to invite</p>
+              <p className="text-xs text-teal-800 mb-3">Send invitations so peer review can begin.</p>
+              <button
+                onClick={() => onGoToTab?.('review-board')}
+                className="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2.5 rounded-lg transition"
+              >
+                Invite Reviewers
+              </button>
+            </div>
+          )}
 
           {readyToSendReviewsToEditor && (
             <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">

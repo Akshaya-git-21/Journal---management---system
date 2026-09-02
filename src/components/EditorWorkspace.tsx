@@ -40,6 +40,7 @@ import { ReviewerReplacementAlert } from './ReviewerReplacementAlert';
 import EditorEvaluationSidebar from './EditorEvaluationSidebar';
 import FilePreviewModal from './FilePreviewModal';
 import EditorRevisionReview from './EditorRevisionReview';
+import EditorProductionVerification from './production/EditorProductionVerification';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 
 /** Which Editor tab a given notification type should land on -- e.g.
@@ -613,6 +614,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [decisionError, setDecisionError] = useState('');
   const [editorComments, setEditorComments] = useState('');
+  // Lets the Editor re-open the decision buttons after already submitting a
+  // recommendation for a revision-loop/peer-review round, as long as the
+  // Coordinator hasn't confirmed it yet -- submit_editor_recommendation
+  // simply overwrites editor_decision on re-call, so this is safe.
+  const [redeciding, setRedeciding] = useState(false);
   const [activePublication, setActivePublication] = useState<'title' | 'contributors' | 'metadata' | 'references' | 'galleries' | 'jats' | 'permissions' | 'issue'>('title');
   const [currentPage] = useState(1);
   const [addingReviewer, setAddingReviewer] = useState(false);
@@ -714,6 +720,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
     try {
       await submitRecommendation(manuscript.id, recommendation, editorComments.trim() || undefined);
       setEditorComments('');
+      setRedeciding(false);
       showNotification('success', `Recommendation submitted: ${recommendation.replace(/_/g, ' ')}`);
       onChanged();
     } catch (e: any) {
@@ -1351,7 +1358,34 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                         </div>
                       )}
 
-                      {!evaluationSubmitted ? (
+                      {/* Always visible for a peer-review decision -- not
+                          gated behind the evaluation/reviewer-release checks
+                          below, so the Editor can start writing comments on
+                          this page (below the reviewer suggestions box)
+                          while those are still pending. */}
+                      {isPeerReviewRound && (
+                        <div className="border-2 border-emerald-300 bg-emerald-50/40 rounded-xl p-4">
+                          <label className="block text-xs font-bold text-emerald-800 mb-1.5">Editor Comments (optional)</label>
+                          <textarea
+                            value={editorComments}
+                            onChange={(e) => setEditorComments(e.target.value)}
+                            disabled={decisionBusy}
+                            rows={3}
+                            placeholder="Additional comments or instructions..."
+                            className="w-full px-3 py-2 border border-emerald-300 rounded-lg text-sm bg-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      )}
+
+                      {/* The "submit your evaluation first" requirement only
+                          applies to the original screening round -- neither
+                          a revision-loop decision nor a peer-review-round
+                          decision needs a fresh assessment_status='SUBMITTED'
+                          (see submit_editor_recommendation's own gate in
+                          0038_revision_loop_accept_and_author_response.sql:
+                          `not is_revision_loop_round and not is_peer_review_round`),
+                          so the UI shouldn't block those on it either. */}
+                      {!evaluationSubmitted && !isRevisionDecision && !isPeerReviewRound ? (
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
                           You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
                         </div>
@@ -1363,7 +1397,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                         <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
                           All reviews are in, but the Coordinator hasn't sent them to you yet.
                         </div>
-                      ) : recommendationIsCurrent ? (
+                      ) : recommendationIsCurrent && !redeciding ? (
                         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
                           <p className="text-sm font-bold text-emerald-900">
                             Recommendation submitted: {assignment.recommendation!.replace(/_/g, ' ')}
@@ -1372,62 +1406,93 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                             <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
                           )}
                           <p className="text-xs text-slate-500 mt-3">Your recommendation is with the Coordinator for review.</p>
+                          {(isRevisionDecision || isPeerReviewRound) && (
+                            <button
+                              type="button"
+                              onClick={() => setRedeciding(true)}
+                              className="mt-3 text-xs font-bold text-emerald-700 hover:text-emerald-900 underline"
+                            >
+                              Change Decision
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <>
-                          <p className="text-xs text-slate-600">
-                            {isRevisionDecision
-                              ? `Accept sends Revision ${latestRevision!.revision_number} straight to the Coordinator's decision. Requesting a revision opens Revision ${nextRevisionNumber}.`
-                              : isPeerReviewRound
-                              ? "Review both peer reports (Reviews tab) and select your decision. This is separate from the reviewers' own recommendations -- you have the final say."
-                              : "Select one decision based on your evaluation and (if applicable) the reviewers' recommendations."}
-                          </p>
-                          {isPeerReviewRound && (
-                            <div>
-                              <label className="block text-xs font-bold text-slate-700 mb-1.5">Editor Comments (optional)</label>
-                              <textarea
-                                value={editorComments}
-                                onChange={(e) => setEditorComments(e.target.value)}
-                                disabled={decisionBusy}
-                                rows={3}
-                                placeholder="Additional comments or instructions..."
-                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
-                              />
-                            </div>
-                          )}
-                          {decisionError && (
-                            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
-                          )}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {(
-                              // A re-review round's peer review decision is the
-                              // final call on this manuscript (the reviewers
-                              // already re-checked the revision the Editor
-                              // asked them to) -- only Accept/Reject apply,
-                              // not another revision loop.
-                              isPeerReviewRound && latestRevision && latestRevision.revision_number > 0
-                                ? [
-                                    { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
-                                    { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
-                                  ]
-                                : [
-                                    { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
-                                    { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
-                                    { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
-                                    { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
-                                  ]
-                            ).map((opt) => (
-                              <button
-                                key={opt.value}
-                                type="button"
-                                disabled={decisionBusy}
-                                onClick={() => handleSubmitRecommendation(opt.value)}
-                                className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
-                              >
-                                {opt.label}
-                              </button>
-                            ))}
-                          </div>
+          {(() => {
+                            // Any Peer Review Decision checkpoint (the
+                            // original round, or after reviewers re-check a
+                            // resubmitted revision) collapses to a single
+                            // "Send to Author" action -- not Accept/Reject/
+                            // Minor/Major -- that forwards the Editor's +
+                            // reviewers' comments to the Author for one more
+                            // round. Capped at one round-trip: once 2+
+                            // PEER_REVIEW-origin revisions exist, it's
+                            // Accept/Reject only (final call). This does not
+                            // affect isRevisionDecision (a different
+                            // component, EditorRevisionReview.tsx, handles
+                            // that screen) or the plain first-round
+                            // screening case (no reviewers assigned yet).
+                            const peerReviewOriginRounds = (details.revisions || []).filter(r => r.origin === 'PEER_REVIEW').length;
+                            if (isPeerReviewRound && peerReviewOriginRounds < 2) {
+                              return (
+                                <>
+                                  <p className="text-xs text-slate-600">
+                                    Send your comments and the reviewers' comments to the Author for one more round of corrections. The Coordinator forwards it on.
+                                  </p>
+                                  {decisionError && (
+                                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={decisionBusy}
+                                    onClick={() => handleSubmitRecommendation('MAJOR_REVISION')}
+                                    className="w-full px-4 py-3 rounded-xl border-2 border-emerald-300 hover:bg-emerald-50 text-emerald-800 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    Send to Author
+                                  </button>
+                                </>
+                              );
+                            }
+
+                            const buttons = isPeerReviewRound
+                              ? [
+                                  { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                  { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                ]
+                              : [
+                                  { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                  { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
+                                  { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
+                                  { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                ];
+                            return (
+                              <>
+                                <p className="text-xs text-slate-600">
+                                  {isRevisionDecision
+                                    ? `Accept sends Revision ${latestRevision!.revision_number} straight to the Coordinator's decision. Requesting a revision opens Revision ${nextRevisionNumber}.`
+                                    : isPeerReviewRound
+                                    ? "This manuscript has already been sent back to the Author once -- final call only."
+                                    : "Select one decision based on your evaluation and (if applicable) the reviewers' recommendations."}
+                                </p>
+                                {decisionError && (
+                                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                                )}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {buttons.map((opt) => (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => handleSubmitRecommendation(opt.value)}
+                                      className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
+                            );
+                          })()}
                         </>
                       )}
                     </>
@@ -1909,7 +1974,34 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                         </div>
                       )}
 
-                      {!evaluationSubmitted ? (
+                      {/* Always visible for a peer-review decision -- not
+                          gated behind the evaluation/reviewer-release checks
+                          below, so the Editor can start writing comments on
+                          this page (below the reviewer suggestions box)
+                          while those are still pending. */}
+                      {isPeerReviewRound && (
+                        <div className="border-2 border-emerald-300 bg-emerald-50/40 rounded-xl p-4">
+                          <label className="block text-xs font-bold text-emerald-800 mb-1.5">Editor Comments (optional)</label>
+                          <textarea
+                            value={editorComments}
+                            onChange={(e) => setEditorComments(e.target.value)}
+                            disabled={decisionBusy}
+                            rows={3}
+                            placeholder="Additional comments or instructions..."
+                            className="w-full px-3 py-2 border border-emerald-300 rounded-lg text-sm bg-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      )}
+
+                      {/* The "submit your evaluation first" requirement only
+                          applies to the original screening round -- neither
+                          a revision-loop decision nor a peer-review-round
+                          decision needs a fresh assessment_status='SUBMITTED'
+                          (see submit_editor_recommendation's own gate in
+                          0038_revision_loop_accept_and_author_response.sql:
+                          `not is_revision_loop_round and not is_peer_review_round`),
+                          so the UI shouldn't block those on it either. */}
+                      {!evaluationSubmitted && !isRevisionDecision && !isPeerReviewRound ? (
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
                           You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
                         </div>
@@ -1921,7 +2013,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                         <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
                           All reviews are in, but the Coordinator hasn't sent them to you yet.
                         </div>
-                      ) : recommendationIsCurrent ? (
+                      ) : recommendationIsCurrent && !redeciding ? (
                         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
                           <p className="text-sm font-bold text-emerald-900">
                             Recommendation submitted: {assignment.recommendation!.replace(/_/g, ' ')}
@@ -1930,62 +2022,93 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                             <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
                           )}
                           <p className="text-xs text-slate-500 mt-3">Your recommendation is with the Coordinator for review.</p>
+                          {(isRevisionDecision || isPeerReviewRound) && (
+                            <button
+                              type="button"
+                              onClick={() => setRedeciding(true)}
+                              className="mt-3 text-xs font-bold text-emerald-700 hover:text-emerald-900 underline"
+                            >
+                              Change Decision
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <>
-                          <p className="text-xs text-slate-600">
-                            {isRevisionDecision
-                              ? `Accept sends Revision ${latestRevision!.revision_number} straight to the Coordinator's decision. Requesting a revision opens Revision ${nextRevisionNumber}.`
-                              : isPeerReviewRound
-                              ? "Review both peer reports (Reviews tab) and select your decision. This is separate from the reviewers' own recommendations -- you have the final say."
-                              : "Select one decision based on your evaluation and (if applicable) the reviewers' recommendations."}
-                          </p>
-                          {isPeerReviewRound && (
-                            <div>
-                              <label className="block text-xs font-bold text-slate-700 mb-1.5">Editor Comments (optional)</label>
-                              <textarea
-                                value={editorComments}
-                                onChange={(e) => setEditorComments(e.target.value)}
-                                disabled={decisionBusy}
-                                rows={3}
-                                placeholder="Additional comments or instructions..."
-                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
-                              />
-                            </div>
-                          )}
-                          {decisionError && (
-                            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
-                          )}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {(
-                              // A re-review round's peer review decision is the
-                              // final call on this manuscript (the reviewers
-                              // already re-checked the revision the Editor
-                              // asked them to) -- only Accept/Reject apply,
-                              // not another revision loop.
-                              isPeerReviewRound && latestRevision && latestRevision.revision_number > 0
-                                ? [
-                                    { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
-                                    { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
-                                  ]
-                                : [
-                                    { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
-                                    { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
-                                    { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
-                                    { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
-                                  ]
-                            ).map((opt) => (
-                              <button
-                                key={opt.value}
-                                type="button"
-                                disabled={decisionBusy}
-                                onClick={() => handleSubmitRecommendation(opt.value)}
-                                className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
-                              >
-                                {opt.label}
-                              </button>
-                            ))}
-                          </div>
+          {(() => {
+                            // Any Peer Review Decision checkpoint (the
+                            // original round, or after reviewers re-check a
+                            // resubmitted revision) collapses to a single
+                            // "Send to Author" action -- not Accept/Reject/
+                            // Minor/Major -- that forwards the Editor's +
+                            // reviewers' comments to the Author for one more
+                            // round. Capped at one round-trip: once 2+
+                            // PEER_REVIEW-origin revisions exist, it's
+                            // Accept/Reject only (final call). This does not
+                            // affect isRevisionDecision (a different
+                            // component, EditorRevisionReview.tsx, handles
+                            // that screen) or the plain first-round
+                            // screening case (no reviewers assigned yet).
+                            const peerReviewOriginRounds = (details.revisions || []).filter(r => r.origin === 'PEER_REVIEW').length;
+                            if (isPeerReviewRound && peerReviewOriginRounds < 2) {
+                              return (
+                                <>
+                                  <p className="text-xs text-slate-600">
+                                    Send your comments and the reviewers' comments to the Author for one more round of corrections. The Coordinator forwards it on.
+                                  </p>
+                                  {decisionError && (
+                                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={decisionBusy}
+                                    onClick={() => handleSubmitRecommendation('MAJOR_REVISION')}
+                                    className="w-full px-4 py-3 rounded-xl border-2 border-emerald-300 hover:bg-emerald-50 text-emerald-800 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    Send to Author
+                                  </button>
+                                </>
+                              );
+                            }
+
+                            const buttons = isPeerReviewRound
+                              ? [
+                                  { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                  { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                ]
+                              : [
+                                  { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                  { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
+                                  { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
+                                  { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                ];
+                            return (
+                              <>
+                                <p className="text-xs text-slate-600">
+                                  {isRevisionDecision
+                                    ? `Accept sends Revision ${latestRevision!.revision_number} straight to the Coordinator's decision. Requesting a revision opens Revision ${nextRevisionNumber}.`
+                                    : isPeerReviewRound
+                                    ? "This manuscript has already been sent back to the Author once -- final call only."
+                                    : "Select one decision based on your evaluation and (if applicable) the reviewers' recommendations."}
+                                </p>
+                                {decisionError && (
+                                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                                )}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {buttons.map((opt) => (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => handleSubmitRecommendation(opt.value)}
+                                      className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
+                            );
+                          })()}
                         </>
                       )}
                     </>
@@ -2054,10 +2177,8 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
 
             {sidebarSection === 'production' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                <h3 className="text-sm font-black text-slate-900 mb-4">PRODUCTION</h3>
-                <div className="space-y-3 text-sm">
-                  <p className="text-slate-700">{details.manuscript?.production_stage ? `Stage: ${details.manuscript.production_stage}` : 'Not in production'}</p>
-                </div>
+                <h3 className="text-sm font-black text-slate-900 mb-4">PRODUCTION VERIFICATION</h3>
+                <EditorProductionVerification manuscriptId={manuscript.id} />
               </div>
             )}
 

@@ -157,7 +157,7 @@ export async function createUserAccount(
   email: string,
   password: string,
   fullName: string,
-  role: 'EDITOR' | 'REVIEWER' | 'PUBLISHER',
+  role: 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'GD_MEMBER',
   metadata: Record<string, any> = {}
 ): Promise<void> {
   const token = await getFreshAccessToken();
@@ -230,6 +230,60 @@ export async function createPublisherAccount(email: string, password: string, fu
   });
 
   return { temporaryPassword: password };
+}
+
+export async function createGDMemberAccount(email: string, password: string, fullName: string): Promise<{ temporaryPassword: string }> {
+  if (!password || password.length < 8) {
+    throw new Error('Password must be at least 8 characters');
+  }
+
+  await createUserAccount(email, password, fullName, 'GD_MEMBER', {
+    invited_by: 'coordinator',
+    created_without_email: true,
+    password_set_by_coordinator: true
+  });
+
+  return { temporaryPassword: password };
+}
+
+/**
+ * Creates a GD Member (production/copyediting staff) account and immediately
+ * activates it -- same reasoning as createAndActivatePublisherAccount below:
+ * a Coordinator-initiated account still lands as PENDING_APPROVAL via
+ * handle_new_user() (see 0049_gd_member_role.sql), so there's an explicit
+ * auto-approve step here rather than leaving it in the Pending Approvals
+ * queue for the Coordinator to approve their own creation a second time.
+ * GD_MEMBER is a distinct role from PUBLISHER and gets none of the
+ * Coordinator-only RLS/RPCs (is_active_coordinator() never matches it).
+ */
+export async function createAndActivateGDMemberAccount(
+  email: string,
+  password: string,
+  fullName: string
+): Promise<{ id: string; email: string } | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+  await createGDMemberAccount(normalizedEmail, password, fullName);
+
+  let profile: { id: string; email: string } | null = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const { data, error } = await supabase.from('profiles').select('id, email').eq('email', normalizedEmail).maybeSingle();
+    if (!error && data) {
+      profile = data as { id: string; email: string };
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+
+  if (profile) {
+    const { approveUserRole } = await import('./workflow');
+    try {
+      await approveUserRole(profile.id, true);
+    } catch (approveError: any) {
+      console.warn('Could not auto-approve GD Member account:', approveError.message);
+    }
+  }
+
+  return profile;
 }
 
 /**

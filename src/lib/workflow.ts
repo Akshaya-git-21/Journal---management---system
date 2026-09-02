@@ -568,7 +568,7 @@ export interface DiscussionRow {
   file_name: string | null;
   file_size: string | null;
   created_at: string;
-  channel: 'GENERAL' | 'COORDINATOR_AUTHOR';
+  channel: 'GENERAL' | 'COORDINATOR_AUTHOR' | 'PRODUCTION';
 }
 
 export interface ProfileRow {
@@ -742,7 +742,7 @@ export async function assignRevisedManuscriptToEditor(manuscriptId: string, edit
 }
 
 /** Active accounts for a given role -- used by Coordinator's editor/reviewer pickers. */
-export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER' | 'PUBLISHER'): Promise<ProfileRow[]> {
+export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'GD_MEMBER'): Promise<ProfileRow[]> {
   const { data, error } = await supabase.from('profiles').select('id, name, email, role, status, created_at').eq('role', role).eq('status', 'ACTIVE').order('name', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
@@ -840,9 +840,18 @@ export async function createDraftManuscript(input: DraftManuscriptInput): Promis
   return id;
 }
 
+let manuscriptsChannelSeq = 0;
+
+// Channel names must be unique per open subscription -- supabase-js throws
+// "cannot add postgres_changes callbacks ... after subscribe()" if a second
+// .channel() call reuses a topic that's already subscribed. A single fixed
+// name broke the moment a nested component (ProductionSection) started
+// calling this alongside its parent workspace (CoordinatorWorkspace), which
+// already holds one open for the session -- every top-level workspace before
+// that had been the only caller in the app at any given time.
 export function subscribeToManuscripts(onChange: () => void): () => void {
   const channel = supabase
-    .channel('manuscripts-workflow-changes')
+    .channel(`manuscripts-workflow-changes-${++manuscriptsChannelSeq}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscripts' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'editor_assignments' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'reviewer_assignments' }, onChange)

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, StatusHistoryRow, ProfileRow, ScreeningResponse } from '../../../lib/workflow';
-import { publishDecision, sendToPublisher, listActiveProfilesByRole, coordinatorSendRevisionToReviewers } from '../../../lib/workflow';
-import { createAndActivatePublisherAccount } from '../../../lib/auth';
-import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, Send, X, Copy, Loader2, Building2, UserPlus, ChevronLeft, CheckCircle2, CheckCircle, XCircle, ClipboardList } from 'lucide-react';
+import { publishDecision, coordinatorSendRevisionToReviewers, listActiveProfilesByRole } from '../../../lib/workflow';
+import { getProduction, startProduction, assignGDMember, subscribeToProduction } from '../../../lib/production';
+import { createAndActivateGDMemberAccount } from '../../../lib/auth';
+import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, PackageCheck, Loader2, CheckCircle2, CheckCircle, XCircle, ClipboardList, UserPlus, X } from 'lucide-react';
 import { getRevisionDecisionLabel } from '../../../lib/decisionUtils';
 import { getManuscriptStatusMeta, getManuscriptStatusLabel, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 
@@ -65,6 +66,15 @@ function DecisionPill({ decision, size = 'sm', screeningStage = false }: { decis
   );
 }
 
+function buildAuthorNote(editorComments: string | null | undefined, reviewerComments: string[]): string {
+  const parts: string[] = [];
+  if (editorComments?.trim()) parts.push(`Editor Comments:\n${editorComments.trim()}`);
+  if (reviewerComments.length > 0) {
+    parts.push(`Reviewer Comments:\n${reviewerComments.map((c, i) => `Reviewer ${i + 1}: ${c.trim()}`).join('\n\n')}`);
+  }
+  return parts.join('\n\n');
+}
+
 export function DecisionTab({
   manuscript,
   editorAssignments,
@@ -82,8 +92,128 @@ export function DecisionTab({
   const [firstSubmissionExpanded, setFirstSubmissionExpanded] = useState(false);
   const [reviewerDecisionsExpanded, setReviewerDecisionsExpanded] = useState(true);
   const [finalDecisionExpanded, setFinalDecisionExpanded] = useState(true);
-  const [showSendToPublisherModal, setShowSendToPublisherModal] = useState(false);
+  const [productionStatus, setProductionStatus] = useState<string | null>(null);
+  const [movingToProduction, setMovingToProduction] = useState(false);
+  const [moveToProductionError, setMoveToProductionError] = useState('');
+  // GD Member assignment gate -- clicking "Move to Production" must not
+  // actually start production until a GD Member is assigned (see the
+  // Coordinator's requirement: "if no GD Member is assigned, a popup should
+  // appear" offering Assign Existing / Create New). Since a manuscript_production
+  // row (and therefore any assignment) can't exist before production starts,
+  // this check is always true pre-move -- the gate always opens on first
+  // click, which is the correct/expected behavior, not a bug.
+  const [showGDGateModal, setShowGDGateModal] = useState(false);
+  const [gdGateMode, setGdGateMode] = useState<'PICK' | 'CREATE'>('PICK');
+  const [gdGateMembers, setGdGateMembers] = useState<ProfileRow[]>([]);
+  const [gdGateLoadingMembers, setGdGateLoadingMembers] = useState(false);
+  const [selectedGdMemberForGate, setSelectedGdMemberForGate] = useState('');
+  const [gdGateName, setGdGateName] = useState('');
+  const [gdGateEmail, setGdGateEmail] = useState('');
+  const [gdGatePassword, setGdGatePassword] = useState('');
+  const [gdGateBusy, setGdGateBusy] = useState(false);
+  const [gdGateError, setGdGateError] = useState('');
+  const [createdGdCredentials, setCreatedGdCredentials] = useState<{ email: string; password: string } | null>(null);
   const toggleRevisionExpanded = (id: string) => setExpandedRevisions(prev => ({ ...prev, [id]: !prev[id] }));
+
+  useEffect(() => {
+    let cancelled = false;
+    if (manuscript.status !== 'ACCEPTED') { setProductionStatus(null); return; }
+    const refetch = () => getProduction(manuscript.id).then((p) => { if (!cancelled) setProductionStatus(p?.production_status ?? null); }).catch(() => {});
+    refetch();
+    const unsubscribe = subscribeToProduction(refetch);
+    return () => { cancelled = true; unsubscribe(); };
+  }, [manuscript.id, manuscript.status]);
+
+  const generateGdGatePassword = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
+    return Array.from({ length: 12 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
+  };
+
+  const openGDGateModal = async () => {
+    setGdGateMode('PICK');
+    setSelectedGdMemberForGate('');
+    setGdGateName('');
+    setGdGateEmail('');
+    setGdGatePassword(generateGdGatePassword());
+    setGdGateError('');
+    setCreatedGdCredentials(null);
+    setShowGDGateModal(true);
+    setGdGateLoadingMembers(true);
+    try {
+      const members = await listActiveProfilesByRole('GD_MEMBER');
+      setGdGateMembers(members);
+      if (members.length === 0) setGdGateMode('CREATE');
+    } catch {
+      setGdGateMembers([]);
+    } finally {
+      setGdGateLoadingMembers(false);
+    }
+  };
+
+  const finalizeMoveToProduction = async (gdMemberId: string) => {
+    setMovingToProduction(true);
+    setMoveToProductionError('');
+    try {
+      const p = await startProduction(manuscript.id);
+      await assignGDMember(manuscript.id, gdMemberId);
+      setProductionStatus(p.production_status);
+      onWorkflowChange();
+      return true;
+    } catch (e: any) {
+      setGdGateError(e.message || 'Failed to move manuscript to production.');
+      return false;
+    } finally {
+      setMovingToProduction(false);
+    }
+  };
+
+  const handleMoveToProduction = async () => {
+    if (movingToProduction || !canMoveToProduction) return;
+    setMoveToProductionError('');
+    try {
+      const existing = await getProduction(manuscript.id);
+      if (existing?.assigned_to) {
+        // Already assigned (e.g. re-opened after a failed publish attempt) --
+        // no need to gate again, just proceed.
+        await finalizeMoveToProduction(existing.assigned_to);
+      } else {
+        await openGDGateModal();
+      }
+    } catch (e: any) {
+      setMoveToProductionError(e.message || 'Failed to move manuscript to production.');
+    }
+  };
+
+  const handleAssignExistingInGate = async () => {
+    if (!selectedGdMemberForGate) return;
+    const ok = await finalizeMoveToProduction(selectedGdMemberForGate);
+    if (ok) setShowGDGateModal(false);
+  };
+
+  const handleCreateAndAssignInGate = async () => {
+    const normalizedName = gdGateName.trim();
+    const normalizedEmail = gdGateEmail.trim().toLowerCase();
+    if (!normalizedName) { setGdGateError('Please enter the GD Member name.'); return; }
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) { setGdGateError('Please enter a valid email address.'); return; }
+    const password = gdGatePassword.trim() || generateGdGatePassword();
+    if (password.length < 6) { setGdGateError('Password must be at least 6 characters.'); return; }
+
+    setGdGateBusy(true);
+    setGdGateError('');
+    try {
+      const profile = await createAndActivateGDMemberAccount(normalizedEmail, password, normalizedName);
+      if (!profile) throw new Error('GD Member account was created but could not be looked up.');
+      const ok = await finalizeMoveToProduction(profile.id);
+      // Keep the modal open to show the generated credentials once, instead
+      // of closing immediately -- otherwise the Coordinator has no way to
+      // retrieve this password again (no email delivery is connected).
+      if (ok) setCreatedGdCredentials({ email: normalizedEmail, password });
+    } catch (e: any) {
+      setGdGateError(e.message || 'Failed to create the GD Member account.');
+    } finally {
+      setGdGateBusy(false);
+    }
+  };
 
   const hasEditorEvaluation = editorAssignments.some(a => a.assessment_status === 'SUBMITTED');
   // Declined rows don't block completion -- only the non-declined ones need
@@ -167,8 +297,37 @@ export function DecisionTab({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingScreeningConfirm, activeEditor?.action_reason]);
+
+  // Pre-fill the note-to-author with the Editor's comments AND each
+  // reviewer's Comments to Author for this round -- so what the Coordinator
+  // sends the Author already contains both, not just whatever the
+  // Coordinator happens to retype. Only comments_to_author is ever pulled
+  // in here (never comments_to_editor, which is explicitly confidential to
+  // the Editor) -- the Coordinator can still edit/trim this before sending.
+  useEffect(() => {
+    if (pendingRevisionConfirm && !letter && decidedRevision) {
+      const roundReviewerComments = reviewerAssignments
+        .filter(r => (r.revision_number ?? 0) === decidedRevision.revision_number && r.status === 'SUBMITTED' && r.comments_to_author)
+        .map(r => r.comments_to_author as string);
+      const combined = buildAuthorNote(decidedRevision.editor_comments, roundReviewerComments);
+      if (combined) setLetter(combined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRevisionConfirm, decidedRevision?.id]);
+
+  useEffect(() => {
+    if (pendingPeerReviewConfirm && !letter && activeEditor) {
+      const roundReviewerComments = reviewerAssignments
+        .filter(r => r.status === 'SUBMITTED' && r.comments_to_author)
+        .map(r => r.comments_to_author as string);
+      const combined = buildAuthorNote(activeEditor.peer_review_comments, roundReviewerComments);
+      if (combined) setLetter(combined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPeerReviewConfirm, activeEditor?.peer_review_comments]);
   const decided = ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
-  const statusMeta = getManuscriptStatusMeta(manuscript, latestRevision);
+  const statusMeta = getManuscriptStatusMeta(manuscript, latestRevision, productionStatus);
+  const canMoveToProduction = manuscript.status === 'ACCEPTED' && (!productionStatus || productionStatus === 'NOT_STARTED');
   const finalDecisionLabel =
     manuscript.status === 'ACCEPTED' ? 'ACCEPT' :
     manuscript.status === 'REJECTED' ? 'REJECT' :
@@ -249,12 +408,26 @@ export function DecisionTab({
           <div className="px-6 pb-6">
             <div className="space-y-2">
               {reviewerAssignments.map(r => (
-                <div key={r.id} className="flex items-center justify-between bg-white border border-blue-200 rounded-lg p-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{profiles[r.reviewer_id]?.name || 'Reviewer'}</p>
-                    <p className="text-xs text-slate-500">{r.status === 'SUBMITTED' ? 'Review submitted' : r.status.replace(/_/g, ' ')}</p>
+                <div key={r.id} className="bg-white border border-blue-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{profiles[r.reviewer_id]?.name || 'Reviewer'}</p>
+                      <p className="text-xs text-slate-500">{r.status === 'SUBMITTED' ? 'Review submitted' : r.status.replace(/_/g, ' ')}</p>
+                    </div>
+                    <DecisionPill decision={r.status === 'SUBMITTED' ? (r.recommendation || null) : null} />
                   </div>
-                  <DecisionPill decision={r.status === 'SUBMITTED' ? (r.recommendation || null) : null} />
+                  {r.status === 'SUBMITTED' && r.comments_to_author && (
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Comments to Author</p>
+                      <p className="text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 border border-slate-200 rounded-lg p-2.5">{r.comments_to_author}</p>
+                    </div>
+                  )}
+                  {r.status === 'SUBMITTED' && r.comments_to_editor && (
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-blue-700 mb-1">Confidential Comments to Editor</p>
+                      <p className="text-sm text-slate-700 whitespace-pre-wrap bg-blue-50 border border-blue-200 rounded-lg p-2.5">{r.comments_to_editor}</p>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -663,323 +836,231 @@ export function DecisionTab({
         </div>
       )}
 
-      {/* 8. Send to Publisher -- Coordinator-only, once the manuscript has
-          actually been accepted. Opens a self-contained "create a Publisher
-          account" flow instead of requiring the Coordinator to separately
-          visit the Publishers roster first. Once already sent, the button
-          stays available (relabeled) so the Coordinator can reopen the same
-          modal to see which Publisher accounts currently have access --
-          the actual send_to_publisher RPC only fires once, but the roster
-          view stays reachable indefinitely for reference. */}
-      {!isEditor && manuscript.status === 'ACCEPTED' && (
+      {/* 8. Move to Production -- Coordinator-only, once the manuscript has
+          actually been accepted. Hands the manuscript into the Production
+          module (start_production RPC -- see
+          supabase/migrations/0047_production_module.sql). manuscripts.status
+          stays ACCEPTED; only the display label changes to PRODUCTION
+          PREPARATION, and the transition is recorded via the existing
+          manuscript_status_history/audit_log trail. */}
+      {!isEditor && canMoveToProduction && (
         <button
           type="button"
-          onClick={() => setShowSendToPublisherModal(true)}
-          className={`w-full flex items-center justify-center gap-2 px-4 py-3 font-bold rounded-2xl transition ${
-            manuscript.production_stage ? 'bg-white border-2 border-slate-200 text-slate-700 hover:bg-slate-50' : 'bg-slate-900 hover:bg-slate-800 text-white'
-          }`}
+          onClick={handleMoveToProduction}
+          disabled={movingToProduction}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 font-bold rounded-2xl transition bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <Send className="w-4 h-4" /> {manuscript.production_stage ? 'View Publisher Accounts' : 'Send to Publisher'}
+          {movingToProduction ? <Loader2 className="w-4 h-4 animate-spin" /> : <PackageCheck className="w-4 h-4" />}
+          {movingToProduction ? 'Moving to Production...' : 'Move to Production'}
         </button>
       )}
+      {moveToProductionError && (
+        <p className="text-xs font-semibold text-red-600">{moveToProductionError}</p>
+      )}
 
-      {showSendToPublisherModal && (
-        <SendToPublisherModal
-          manuscriptId={manuscript.id}
-          alreadySent={!!manuscript.production_stage}
-          assignedPublisherId={manuscript.assigned_publisher_id}
-          onClose={() => setShowSendToPublisherModal(false)}
-          onSent={onWorkflowChange}
+      {showGDGateModal && (
+        <GDMemberGateModal
+          mode={gdGateMode}
+          onModeChange={setGdGateMode}
+          members={gdGateMembers}
+          loadingMembers={gdGateLoadingMembers}
+          selectedId={selectedGdMemberForGate}
+          onSelectedIdChange={setSelectedGdMemberForGate}
+          name={gdGateName}
+          onNameChange={setGdGateName}
+          email={gdGateEmail}
+          onEmailChange={setGdGateEmail}
+          password={gdGatePassword}
+          onPasswordChange={setGdGatePassword}
+          onGeneratePassword={() => setGdGatePassword(generateGdGatePassword())}
+          busy={gdGateBusy || movingToProduction}
+          error={gdGateError}
+          createdCredentials={createdGdCredentials}
+          onClose={() => { if (!gdGateBusy && !movingToProduction) setShowGDGateModal(false); }}
+          onAssignExisting={handleAssignExistingInGate}
+          onCreateAndAssign={handleCreateAndAssignInGate}
         />
       )}
     </div>
   );
 }
 
-function generateTempPassword() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
-  return Array.from({ length: 12 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
-}
-
-function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
 /**
- * Coordinator-only: hand this manuscript off to Publishers (send_to_publisher
- * notifies every ACTIVE publisher account -- it isn't targeted at one
- * specific account). If active publisher accounts already exist, offer to
- * send directly to that roster; otherwise (or if the Coordinator explicitly
- * wants to onboard someone new) fall back to creating a new Publisher
- * account first, same as the original "Invite Publisher" flow.
+ * "Graphic Designer is not assigned yet" gate -- shown when the Coordinator
+ * clicks Move to Production before any GD Member is assigned. Offers Assign
+ * Existing GD Member or Create New GD Member; production only actually
+ * starts once one of those completes (see finalizeMoveToProduction above).
  */
-function SendToPublisherModal({ manuscriptId, alreadySent, assignedPublisherId, onClose, onSent }: { manuscriptId: string; alreadySent: boolean; assignedPublisherId?: string | null; onClose: () => void; onSent: () => void }) {
-  const [loadingPublishers, setLoadingPublishers] = useState(true);
-  const [existingPublishers, setExistingPublishers] = useState<ProfileRow[]>([]);
-  const [mode, setMode] = useState<'PICK' | 'CREATE'>('PICK');
-  const [selectedPublisherId, setSelectedPublisherId] = useState<string | null>(null);
-
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [organization, setOrganization] = useState('');
-  const [password, setPassword] = useState(generateTempPassword());
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
-  const [sent, setSent] = useState(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
-
-  useEffect(() => {
-    listActiveProfilesByRole('PUBLISHER')
-      .then((rows) => {
-        setExistingPublishers(rows);
-        if (rows.length === 0 && !alreadySent) setMode('CREATE');
-      })
-      .catch(() => { if (!alreadySent) setMode('CREATE'); })
-      .finally(() => setLoadingPublishers(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const copyToClipboard = (text: string, field: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedField(field);
-    setTimeout(() => setCopiedField(null), 2000);
-  };
-
-  const handleSendToExisting = async () => {
-    if (!selectedPublisherId) { setError('Choose which Publisher account to send this manuscript to.'); return; }
-    setLoading(true);
-    setError('');
-    try {
-      await sendToPublisher(manuscriptId, selectedPublisherId);
-      setSent(true);
-      onSent();
-    } catch (e: any) {
-      setError(e.message || 'Failed to send to publisher.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSubmit = async () => {
-    const normalizedName = name.trim();
-    const normalizedEmail = email.trim().toLowerCase();
-    const normalizedOrg = organization.trim();
-    setError('');
-
-    if (!normalizedName) { setError('Please enter the publisher name.'); return; }
-    if (!normalizedEmail || !isValidEmail(normalizedEmail)) { setError('Please enter a valid email address.'); return; }
-    if (!normalizedOrg) { setError('Please enter the publisher organization.'); return; }
-    if (!password || password.length < 8) { setError('Password must be at least 8 characters.'); return; }
-
-    setLoading(true);
-    try {
-      const profile = await createAndActivatePublisherAccount(normalizedEmail, password, normalizedName, normalizedOrg);
-      if (!profile) throw new Error('Publisher account was created but could not be looked up.');
-      await sendToPublisher(manuscriptId, profile.id);
-      setCredentials({ email: normalizedEmail, password });
-      setSent(true);
-      onSent();
-    } catch (e: any) {
-      setError(e.message || 'Failed to create the publisher account.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-gradient-to-r from-[#004d2b] to-[#008751] text-white px-6 py-4 flex items-center justify-between border-b">
-          <h2 className="text-lg font-bold">{sent ? 'Sent to Publisher' : alreadySent ? 'Publisher Accounts' : mode === 'CREATE' ? 'Create Publisher Account' : 'Send to Publisher'}</h2>
-          <button onClick={onClose} className="text-white hover:bg-white/20 p-1 rounded transition">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {sent ? (
-          <div className="p-6 space-y-4">
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-              <p className="text-sm font-bold text-emerald-900 mb-1">✓ Manuscript sent to production</p>
-              <p className="text-xs text-emerald-800">
-                {credentials
-                  ? 'The publisher account below can now access this manuscript. This password is only shown once -- copy it now.'
-                  : 'This manuscript is now visible to every active Publisher account.'}
-              </p>
+function GDMemberGateModal({
+  mode, onModeChange, members, loadingMembers, selectedId, onSelectedIdChange,
+  name, onNameChange, email, onEmailChange, password, onPasswordChange, onGeneratePassword,
+  busy, error, createdCredentials, onClose, onAssignExisting, onCreateAndAssign
+}: {
+  mode: 'PICK' | 'CREATE'; onModeChange: (m: 'PICK' | 'CREATE') => void;
+  members: ProfileRow[]; loadingMembers: boolean;
+  selectedId: string; onSelectedIdChange: (v: string) => void;
+  name: string; onNameChange: (v: string) => void;
+  email: string; onEmailChange: (v: string) => void;
+  password: string; onPasswordChange: (v: string) => void;
+  onGeneratePassword: () => void;
+  busy: boolean; error: string;
+  createdCredentials: { email: string; password: string } | null;
+  onClose: () => void;
+  onAssignExisting: () => void;
+  onCreateAndAssign: () => void;
+}) {
+  if (createdCredentials) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+        <div className="w-full max-w-lg rounded-[30px] overflow-hidden bg-white shadow-2xl border border-slate-200">
+          <div className="relative bg-slate-950 px-8 py-6">
+            <div className="uppercase tracking-[0.35em] text-xs text-emerald-300 font-semibold">Production Team</div>
+            <h2 className="mt-3 text-xl font-black text-white">GD Member created &amp; assigned</h2>
+            <button onClick={onClose} className="absolute right-5 top-5 rounded-full p-2 text-slate-400 hover:bg-white/10">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="space-y-4 px-8 py-8 bg-slate-50">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">
+              The manuscript has moved into the production workflow. No email delivery is connected yet -- copy this
+              password now, it won't be shown again.
             </div>
-            {credentials && (
-              <>
-                <div className="bg-slate-50 rounded-xl p-3 space-y-2">
-                  <p className="text-[11px] uppercase tracking-wider text-slate-500 font-bold">Email</p>
-                  <div className="bg-white rounded-lg p-2 flex items-center justify-between">
-                    <p className="text-sm font-mono text-slate-800 break-all">{credentials.email}</p>
-                    <button onClick={() => copyToClipboard(credentials.email, 'email')} className="ml-2 p-2 hover:bg-slate-100 rounded-lg transition shrink-0" title="Copy email">
-                      <Copy className="w-4 h-4 text-slate-600" />
-                    </button>
-                  </div>
-                  {copiedField === 'email' && <p className="text-[10px] text-emerald-600 font-semibold">✓ Copied</p>}
-                </div>
-                <div className="bg-slate-50 rounded-xl p-3 space-y-2">
-                  <p className="text-[11px] uppercase tracking-wider text-slate-500 font-bold">Password</p>
-                  <div className="bg-white rounded-lg p-2 flex items-center justify-between">
-                    <p className="text-sm font-mono text-slate-800 break-all">{credentials.password}</p>
-                    <button onClick={() => copyToClipboard(credentials.password, 'password')} className="ml-2 p-2 hover:bg-slate-100 rounded-lg transition shrink-0" title="Copy password">
-                      <Copy className="w-4 h-4 text-emerald-600" />
-                    </button>
-                  </div>
-                  {copiedField === 'password' && <p className="text-[10px] text-emerald-600 font-semibold">✓ Copied</p>}
-                </div>
-                <p className="text-[10px] text-slate-500">This account also now appears on the Coordinator's Publishers roster (sidebar), where the password can be reset again later if needed.</p>
-              </>
-            )}
-            <button onClick={onClose} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg font-bold text-sm transition">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Email</p>
+              <p className="mt-2 font-semibold text-slate-900 break-words">{createdCredentials.email}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Password</p>
+              <p className="mt-2 font-semibold text-slate-900 break-words">{createdCredentials.password}</p>
+            </div>
+            <button onClick={onClose} className="w-full rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043]">
               Done
             </button>
           </div>
-        ) : loadingPublishers ? (
-          <div className="p-10 flex items-center justify-center text-slate-400">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading publisher accounts...
-          </div>
-        ) : mode === 'PICK' ? (
-          <div className="p-6 space-y-4">
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex gap-2">
-                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                <p className="text-xs text-red-700">{error}</p>
-              </div>
-            )}
-            <p className="text-xs text-slate-500">
-              {alreadySent
-                ? 'This manuscript is already in production. The account it was sent to is highlighted below.'
-                : 'Choose which Publisher account this manuscript should be sent to.'}
-            </p>
-            {existingPublishers.length === 0 ? (
-              <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl">No active publisher accounts found.</div>
-            ) : (
-              <div className="space-y-2">
-                {existingPublishers.map((p) => {
-                  const isAssigned = alreadySent && p.id === assignedPublisherId;
-                  const isSelected = !alreadySent && p.id === selectedPublisherId;
-                  return (
-                    <button
-                      type="button"
-                      key={p.id}
-                      disabled={alreadySent}
-                      onClick={() => setSelectedPublisherId(p.id)}
-                      className={`w-full flex items-center gap-3 border rounded-xl p-3 text-left transition ${
-                        isAssigned ? 'border-emerald-400 bg-emerald-50' : isSelected ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : 'border-slate-200 hover:border-slate-300'
-                      } ${alreadySent ? 'cursor-default' : 'cursor-pointer'}`}
-                    >
-                      <span className={`p-2 rounded-lg shrink-0 border ${isAssigned || isSelected ? 'bg-emerald-100 border-emerald-200 text-emerald-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>
-                        <Building2 className="w-4 h-4" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-bold text-slate-900 truncate">{p.name || 'Unnamed publisher'}</p>
-                        <p className="text-xs text-slate-500 truncate">{p.email}</p>
-                      </div>
-                      {isAssigned && <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-100 px-2 py-1 rounded-full shrink-0">Sent here</span>}
-                      {isSelected && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {alreadySent ? (
-              <button onClick={onClose} className="w-full bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-lg font-bold text-sm transition">
-                Close
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={handleSendToExisting}
-                  disabled={loading || !selectedPublisherId}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-lg font-bold text-sm transition flex items-center justify-center gap-2"
-                >
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  {loading ? 'Sending...' : selectedPublisherId ? 'Send to Publisher' : 'Select a publisher to send'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode('CREATE')}
-                  disabled={loading}
-                  className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 disabled:opacity-50"
-                >
-                  <UserPlus className="w-3.5 h-3.5" /> Invite a new Publisher instead
-                </button>
-              </>
-            )}
-          </div>
-        ) : (
-          <div className="p-6 space-y-4">
-            {existingPublishers.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setMode('PICK')}
-                disabled={loading}
-                className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 disabled:opacity-50"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" /> Back to existing publishers
-              </button>
-            )}
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex gap-2">
-                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                <p className="text-xs text-red-700">{error}</p>
-              </div>
-            )}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">Publisher name</label>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Jordan Lee"
-                disabled={loading}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">Email address</label>
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="publisher@example.com"
-                disabled={loading}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">Organization</label>
-              <input
-                value={organization}
-                onChange={(e) => setOrganization(e.target.value)}
-                placeholder="Springer Nature"
-                disabled={loading}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">Temporary password</label>
-              <div className="flex gap-2">
-                <input
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={loading}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:outline-none focus:border-emerald-500"
-                />
-                <button type="button" onClick={() => setPassword(generateTempPassword())} disabled={loading} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 shrink-0">
-                  Generate
-                </button>
-              </div>
-            </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-[30px] overflow-hidden bg-white shadow-2xl border border-slate-200">
+        <div className="relative bg-slate-950 px-8 py-6">
+          <div className="uppercase tracking-[0.35em] text-xs text-emerald-300 font-semibold">Production Team</div>
+          <h2 className="mt-3 text-xl font-black text-white">Graphic Designer is not assigned yet</h2>
+          <button onClick={onClose} disabled={busy} className="absolute right-5 top-5 rounded-full p-2 text-slate-400 hover:bg-white/10 disabled:opacity-40">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="space-y-5 px-8 py-8 bg-slate-50">
+          <p className="text-sm text-slate-600">
+            Please assign an existing GD Member or create a new GD Member. The manuscript will move into the
+            production workflow once a GD Member is assigned.
+          </p>
+
+          <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={handleSubmit}
-              disabled={loading}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg font-bold text-sm transition"
+              type="button"
+              onClick={() => onModeChange('PICK')}
+              disabled={busy}
+              className={`rounded-full px-4 py-2.5 text-xs font-bold transition ${mode === 'PICK' ? 'bg-[#008751] text-white' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'}`}
             >
-              {loading ? 'Sending...' : 'Create Account & Send to Publisher'}
+              Assign Existing GD Member
+            </button>
+            <button
+              type="button"
+              onClick={() => onModeChange('CREATE')}
+              disabled={busy}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-xs font-bold transition ${mode === 'CREATE' ? 'bg-[#008751] text-white' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'}`}
+            >
+              <UserPlus className="w-3.5 h-3.5" /> Create New GD Member
             </button>
           </div>
-        )}
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-red-700">{error}</p>
+            </div>
+          )}
+
+          {mode === 'PICK' ? (
+            loadingMembers ? (
+              <div className="flex items-center justify-center py-8 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading GD Members...</div>
+            ) : members.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-400 bg-white border border-dashed border-slate-200 rounded-xl">
+                No active GD Member accounts yet -- create one instead.
+              </div>
+            ) : (
+              <>
+                <select
+                  value={selectedId}
+                  onChange={(e) => onSelectedIdChange(e.target.value)}
+                  disabled={busy}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+                >
+                  <option value="">Select GD Member</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={onAssignExisting}
+                  disabled={busy || !selectedId}
+                  className="w-full rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {busy ? 'Assigning...' : 'Assign & Move to Production'}
+                </button>
+              </>
+            )
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold mb-1.5">Name</label>
+                <input
+                  value={name}
+                  onChange={(e) => onNameChange(e.target.value)}
+                  placeholder="Jordan Lee"
+                  disabled={busy}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold mb-1.5">Username / Email</label>
+                <input
+                  value={email}
+                  onChange={(e) => onEmailChange(e.target.value)}
+                  placeholder="gdmember@example.com"
+                  disabled={busy}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold mb-1.5">Generate Password</label>
+                <div className="flex gap-2">
+                  <input
+                    value={password}
+                    onChange={(e) => onPasswordChange(e.target.value)}
+                    disabled={busy}
+                    className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+                  />
+                  <button type="button" onClick={onGeneratePassword} disabled={busy} className="rounded-2xl border border-slate-300 bg-white px-3 py-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                    Generate
+                  </button>
+                </div>
+              </div>
+              <button
+                onClick={onCreateAndAssign}
+                disabled={busy}
+                className="w-full rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043] disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {busy ? 'Creating & Assigning...' : 'Create Account & Move to Production'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
