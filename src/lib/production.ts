@@ -13,7 +13,7 @@ export type ProductionStatus =
   | 'PROOF_GENERATED' | 'PROOF_SUBMITTED_TO_COORDINATOR' | 'PROOF_SENT_TO_AUTHOR' | 'AUTHOR_PROOF_REVIEW'
   | 'CORRECTIONS_SUBMITTED' | 'PRODUCTION_REVIEW' | 'PROOF_UPDATED'
   | 'CLARIFICATION_REQUESTED' | 'AUTHOR_APPROVED' | 'READY_FOR_PUBLICATION' | 'PUBLISHED'
-  | 'CORRECTIONS_IN_PROGRESS';
+  | 'CORRECTIONS_IN_PROGRESS' | 'FINAL_PROOF_READY';
 
 export interface ProductionRow {
   manuscript_id: string;
@@ -52,9 +52,10 @@ export interface ProductionChecklistItemRow {
   item_label: string;
   status: ChecklistItemStatus;
   /** Which checklist this item belongs to -- COPYEDITING (0055, 11 fixed
-   * items) or PROOF (0059, seeded on first proof upload). Same table, same
+   * items), PROOF (0059, seeded on first proof upload), or CORRECTION
+   * (0064, seeded on first corrected-proof upload). Same table, same
    * RLS/RPCs, UI sections just filter on this. */
-  stage: 'COPYEDITING' | 'PROOF';
+  stage: 'COPYEDITING' | 'PROOF' | 'CORRECTION';
   updated_by: string | null;
   updated_at: string;
 }
@@ -186,6 +187,24 @@ export const gdMemberSetProofNotes = (manuscriptId: string, notes: string) =>
 export const gdMemberSubmitProof = (manuscriptId: string) =>
   rpcOrThrow<ProductionRow>(supabase.rpc('gd_member_submit_proof', { p_manuscript_id: manuscriptId }));
 
+/** GD Member-only (Task 15): uploads or replaces the corrected proof PDF
+ * while working through the Coordinator's corrections package (status
+ * CORRECTIONS_IN_PROGRESS only). Seeds the Correction Checklist the first
+ * time. Notes are shared with gdMemberSetProofNotes() above -- both just
+ * edit the current proof version's gd_notes regardless of stage. See
+ * gd_member_upload_corrected_proof() in 0064_gd_member_performs_corrections.sql. */
+export const gdMemberUploadCorrectedProof = (manuscriptId: string, storagePath: string, publicUrl: string, fileName: string) =>
+  rpcOrThrow<ProofRow>(supabase.rpc('gd_member_upload_corrected_proof', {
+    p_manuscript_id: manuscriptId, p_storage_path: storagePath, p_public_url: publicUrl, p_file_name: fileName
+  }));
+
+/** GD Member-only: "Submit Corrected Proof" -- refuses server-side unless a
+ * corrected proof has been uploaded and every Correction Checklist item is
+ * checked. CORRECTIONS_IN_PROGRESS -> FINAL_PROOF_READY. See
+ * gd_member_submit_corrected_proof() in 0064_gd_member_performs_corrections.sql. */
+export const gdMemberSubmitCorrectedProof = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('gd_member_submit_corrected_proof', { p_manuscript_id: manuscriptId }));
+
 export const advanceProductionStage = (manuscriptId: string, toStage: 'FORMATTING' | 'TYPESETTING') =>
   rpcOrThrow<ProductionRow>(supabase.rpc('advance_production_stage', { p_manuscript_id: manuscriptId, p_to_stage: toStage }));
 
@@ -204,6 +223,44 @@ export const sendProofToAuthor = (manuscriptId: string) =>
  * 0060_coordinator_proof_review.sql. */
 export const coordinatorReturnProofToGDMember = (manuscriptId: string, note: string = '') =>
   rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_return_proof_to_gd_member', { p_manuscript_id: manuscriptId, p_note: note }));
+
+/** Coordinator-only (Task 16): the corrected proof isn't good enough --
+ * straight back to the GD Member, skipping the author. FINAL_PROOF_READY ->
+ * CORRECTIONS_IN_PROGRESS (same status/UI as the very first corrections
+ * round). See coordinator_return_for_further_corrections() in
+ * 0065_final_proof_review_and_publishing.sql. */
+export const coordinatorReturnForFurtherCorrections = (manuscriptId: string, note: string = '') =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_return_for_further_corrections', { p_manuscript_id: manuscriptId, p_note: note }));
+
+/** Coordinator-only (Task 18): the important handoff from proofreading to
+ * publishing, once the Author has approved a final proof (any round).
+ * AUTHOR_APPROVED -> READY_FOR_PUBLICATION. See
+ * coordinator_confirm_proofreading_completed() in
+ * 0065_final_proof_review_and_publishing.sql. */
+export const coordinatorConfirmProofreadingCompleted = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_confirm_proofreading_completed', { p_manuscript_id: manuscriptId }));
+
+/** GD Member-only (Task 20): saves/edits publication metadata while
+ * READY_FOR_PUBLICATION -- "Save Draft" and "Edit" are the same call.
+ * Required-field validation happens server-side at publish time, not here,
+ * so partial progress can be saved. See gd_member_save_publication_metadata()
+ * in 0065_final_proof_review_and_publishing.sql. */
+export const gdMemberSavePublicationMetadata = (manuscriptId: string, metadata: {
+  volume: string; issue: string; publicationDate: string | null; pageNumbers: string; doi: string; articleUrl: string;
+}) =>
+  rpcOrThrow<any>(supabase.rpc('gd_member_save_publication_metadata', {
+    p_manuscript_id: manuscriptId, p_volume: metadata.volume, p_issue: metadata.issue,
+    p_publication_date: metadata.publicationDate, p_page_numbers: metadata.pageNumbers,
+    p_doi: metadata.doi, p_article_url: metadata.articleUrl
+  }));
+
+/** GD Member-only (Task 21): "Publish Article" -- refuses server-side
+ * unless a final proof exists and volume/issue/DOI/publication date are all
+ * filled in, then reuses the existing mark_published() RPC.
+ * READY_FOR_PUBLICATION -> PUBLISHED. See gd_member_publish_article() in
+ * 0065_final_proof_review_and_publishing.sql. */
+export const gdMemberPublishArticle = (manuscriptId: string) =>
+  rpcOrThrow<any>(supabase.rpc('gd_member_publish_article', { p_manuscript_id: manuscriptId }));
 
 export const authorOpenProof = (manuscriptId: string) =>
   rpcOrThrow<ProductionRow>(supabase.rpc('author_open_proof', { p_manuscript_id: manuscriptId }));

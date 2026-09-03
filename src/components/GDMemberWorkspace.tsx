@@ -1,9 +1,10 @@
 import { useState, ReactNode } from 'react';
-import { Settings, Printer, Inbox, PackageCheck, FileCheck2, MessageSquareWarning, Send, CheckCircle2, FileText } from 'lucide-react';
+import { Settings, Printer, Inbox, PackageCheck, FileCheck2, MessageSquareWarning, Send, CheckCircle2, FileText, Globe } from 'lucide-react';
 import { Role } from '../types';
 import { NavGroup, NavItem } from './SidebarNavGroup';
 import GDMemberProductionSection, { GDMemberProductionView } from './production/GDMemberProductionSection';
 import GDMemberProductionDetail from './production/GDMemberProductionDetail';
+import GDMemberPublicationDetail from './production/GDMemberPublicationDetail';
 import JournalTemplateSection from './production/JournalTemplateSection';
 
 interface GDMemberWorkspaceProps {
@@ -25,15 +26,23 @@ interface GDMemberWorkspaceProps {
 export default function GDMemberWorkspace({ currentUser }: GDMemberWorkspaceProps) {
   const [activeView, setActiveView] = useState<GDMemberProductionView>('QUEUE');
   const [expanded, setExpanded] = useState(true);
+  const [publicationExpanded, setPublicationExpanded] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showTemplate, setShowTemplate] = useState(false);
 
-  const NAV_ITEMS: { key: GDMemberProductionView; label: string; icon: ReactNode }[] = [
+  const PRODUCTION_NAV_ITEMS: { key: GDMemberProductionView; label: string; icon: ReactNode }[] = [
     { key: 'QUEUE', label: 'Production Queue', icon: <Inbox className="w-4 h-4" /> },
     { key: 'FORMATTING', label: 'Formatting', icon: <PackageCheck className="w-4 h-4" /> },
     { key: 'PROOF_PREPARATION', label: 'Proof Preparation', icon: <Send className="w-4 h-4" /> },
     { key: 'CORRECTIONS', label: 'Corrections', icon: <MessageSquareWarning className="w-4 h-4" /> },
     { key: 'FINAL_PROOF', label: 'Final Proof', icon: <FileCheck2 className="w-4 h-4" /> },
+  ];
+
+  /** Tasks 19-22: publication is its own workflow stage, not another
+   * production checklist item -- kept as a separate sidebar group so the
+   * GD Member sees "I'm done with production work" vs "I'm publishing"
+   * as distinct modes, not folded into the same list as Formatting/Corrections. */
+  const PUBLICATION_NAV_ITEMS: { key: GDMemberProductionView; label: string; icon: ReactNode }[] = [
     { key: 'READY', label: 'Ready for Publication', icon: <CheckCircle2 className="w-4 h-4" /> },
     { key: 'PUBLISHED', label: 'Published', icon: <CheckCircle2 className="w-4 h-4" /> },
   ];
@@ -54,7 +63,7 @@ export default function GDMemberWorkspace({ currentUser }: GDMemberWorkspaceProp
             </div>
 
             <NavGroup title="Production" icon={<Printer className="w-4 h-4" />} expanded={expanded} onToggle={() => setExpanded((v) => !v)}>
-              {NAV_ITEMS.map((item) => (
+              {PRODUCTION_NAV_ITEMS.map((item) => (
                 <NavItem
                   key={item.key}
                   icon={item.icon}
@@ -70,6 +79,18 @@ export default function GDMemberWorkspace({ currentUser }: GDMemberWorkspaceProp
                 onClick={() => { setShowTemplate(true); setSelectedId(null); }}
               />
             </NavGroup>
+
+            <NavGroup title="Publication" icon={<Globe className="w-4 h-4" />} expanded={publicationExpanded} onToggle={() => setPublicationExpanded((v) => !v)}>
+              {PUBLICATION_NAV_ITEMS.map((item) => (
+                <NavItem
+                  key={item.key}
+                  icon={item.icon}
+                  label={item.label}
+                  active={activeView === item.key && !selectedId && !showTemplate}
+                  onClick={() => { setActiveView(item.key); setSelectedId(null); setShowTemplate(false); }}
+                />
+              ))}
+            </NavGroup>
           </div>
         </aside>
 
@@ -77,6 +98,8 @@ export default function GDMemberWorkspace({ currentUser }: GDMemberWorkspaceProp
           <main className="flex-1 bg-slate-50 md:rounded-3xl border border-[#002b1d]/20 p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
             {showTemplate ? (
               <JournalTemplateSection canUpload={false} />
+            ) : selectedId && (activeView === 'READY' || activeView === 'PUBLISHED') ? (
+              <GDMemberPublicationDetail manuscriptId={selectedId} onBack={() => setSelectedId(null)} />
             ) : selectedId ? (
               <GDMemberProductionDetail manuscriptId={selectedId} onBack={() => setSelectedId(null)} />
             ) : (

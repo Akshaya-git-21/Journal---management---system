@@ -525,6 +525,13 @@ export interface ManuscriptRow {
   issue: string | null;
   production_stage: 'SENT_TO_PUBLISHER' | 'PUBLISHED' | null;
   published_pdf_url: string | null;
+  /** Publication metadata (Task 20) -- entered by the assigned GD Member
+   * while READY_FOR_PUBLICATION, validated at publish time. See
+   * gd_member_save_publication_metadata() in
+   * 0065_final_proof_review_and_publishing.sql. */
+  page_numbers: string | null;
+  article_url: string | null;
+  publication_date: string | null;
   submitted_at: string | null;
   published_at: string | null;
   created_at: string;

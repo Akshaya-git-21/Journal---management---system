@@ -18,7 +18,7 @@ function daysSince(iso: string | null | undefined) {
 
 const IN_PRODUCTION_STATUSES = ['IN_PRODUCTION', 'COPYEDITING', 'FORMATTING', 'TYPESETTING', 'PROOF_GENERATED', 'PROOF_SUBMITTED_TO_COORDINATOR', 'PROOF_UPDATED'];
 const PROOFS_STATUSES = ['PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW'];
-const CORRECTIONS_STATUSES = ['CORRECTIONS_SUBMITTED', 'CLARIFICATION_REQUESTED', 'PRODUCTION_REVIEW', 'CORRECTIONS_IN_PROGRESS'];
+const CORRECTIONS_STATUSES = ['CORRECTIONS_SUBMITTED', 'CLARIFICATION_REQUESTED', 'PRODUCTION_REVIEW', 'CORRECTIONS_IN_PROGRESS', 'FINAL_PROOF_READY'];
 
 const STAGE_LABELS: Record<string, string> = {
   NOT_STARTED: 'Not Started', IN_PRODUCTION: 'Accepted', COPYEDITING: 'Copyediting',
@@ -28,7 +28,7 @@ const STAGE_LABELS: Record<string, string> = {
   AUTHOR_PROOF_REVIEW: 'Author Proofreading', CORRECTIONS_SUBMITTED: 'Corrections Submitted',
   CLARIFICATION_REQUESTED: 'Clarification Requested', PRODUCTION_REVIEW: 'Production Review',
   AUTHOR_APPROVED: 'Author Approved', READY_FOR_PUBLICATION: 'Ready for Publication', PUBLISHED: 'Published',
-  CORRECTIONS_IN_PROGRESS: 'Corrections In Progress',
+  CORRECTIONS_IN_PROGRESS: 'Corrections In Progress', FINAL_PROOF_READY: 'Final Proof Ready',
 };
 
 function StageBadge({ status }: { status: string }) {

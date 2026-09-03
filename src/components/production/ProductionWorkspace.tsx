@@ -10,8 +10,9 @@ import {
   getProduction, getChecklist, getProofs, getCorrections,
   startProduction, updateChecklistItem, advanceProductionStage,
   uploadProof, generateProof, sendProofToAuthor,
-  acceptCorrections, requestClarification, productionPublish, assignGDMember,
-  coordinatorReturnProofToGDMember, sendCorrectionsToEditor, sendForCorrections
+  acceptCorrections, requestClarification, assignGDMember,
+  coordinatorReturnProofToGDMember, sendCorrectionsToEditor, sendForCorrections,
+  coordinatorReturnForFurtherCorrections, coordinatorConfirmProofreadingCompleted
 } from '../../lib/production';
 import { getManuscriptStatusLabel } from '../../lib/manuscriptStatusLabel';
 
@@ -26,7 +27,7 @@ function stepIndex(status: string | undefined) {
     case 'PROOF_GENERATED': case 'PROOF_SUBMITTED_TO_COORDINATOR': return 4;
     case 'PROOF_SENT_TO_AUTHOR': case 'AUTHOR_PROOF_REVIEW': case 'CORRECTIONS_SUBMITTED':
     case 'CLARIFICATION_REQUESTED': case 'PRODUCTION_REVIEW': case 'PROOF_UPDATED':
-    case 'CORRECTIONS_IN_PROGRESS': return 5;
+    case 'CORRECTIONS_IN_PROGRESS': case 'FINAL_PROOF_READY': return 5;
     case 'AUTHOR_APPROVED': return 6;
     case 'READY_FOR_PUBLICATION': case 'PUBLISHED': return 7;
     default: return 0;
@@ -81,8 +82,6 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [clarificationDraft, setClarificationDraft] = useState<Record<string, string>>({});
-  const [publishForm, setPublishForm] = useState({ doi: '', volume: '', issue: '' });
-  const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [returnNote, setReturnNote] = useState('');
   const [showReturnForm, setShowReturnForm] = useState(false);
 
@@ -436,6 +435,59 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
             </div>
           )}
 
+          {/* Correction Checklist -- read-only here, same as the Proof
+              Checklist above but for Task 15's corrections stage. */}
+          {checklist.some((item) => item.stage === 'CORRECTION') && (
+            <div className="bg-white border border-slate-200 rounded-3xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">Correction Checklist (GD Member)</h2>
+                <span className="text-xs font-bold text-slate-400">
+                  {checklist.filter((c) => c.stage === 'CORRECTION' && c.status === 'COMPLETED').length} / {checklist.filter((c) => c.stage === 'CORRECTION').length} checked
+                </span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {checklist.filter((item) => item.stage === 'CORRECTION').map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+                    <span className="text-slate-700">{item.item_label}</span>
+                    <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase text-slate-400"><ChecklistIcon status={item.status} /> {item.status.replace('_', ' ')}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Task 16: Coordinator reviews the GD Member's corrected proof --
+             either send it on to reach the same round of proof review, or
+             kick it straight back to the GD Member without troubling the
+             author. */}
+          {status === 'FINAL_PROOF_READY' && (
+            <div className="rounded-3xl border-2 border-emerald-300 bg-emerald-50 p-6 space-y-3">
+              <p className="text-sm text-emerald-800 font-semibold">The GD Member has submitted the corrected proof. Final proof is ready for review.</p>
+              {latestProof?.public_url && (
+                <div className="flex items-center gap-2">
+                  <a href={latestProof.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"><Eye className="w-3.5 h-3.5" /> View Proof v{latestProof.version}</a>
+                  <a href={latestProof.public_url} download className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"><Download className="w-3.5 h-3.5" /> Download</a>
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  disabled={busy}
+                  onClick={() => run(() => sendProofToAuthor(manuscriptId))}
+                  className="inline-flex items-center gap-1 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40"
+                >
+                  <Send className="w-3.5 h-3.5" /> Send Final Proof to Author
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => run(() => coordinatorReturnForFurtherCorrections(manuscriptId))}
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-700 px-4 py-2 text-xs font-bold text-white hover:bg-amber-800 disabled:opacity-40"
+                >
+                  Return for Further Corrections
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Proofs */}
           <div className="bg-white border border-slate-200 rounded-3xl p-6">
             <div className="flex items-center justify-between mb-4">
@@ -606,32 +658,27 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
             </div>
           )}
 
-          {/* Publish */}
+          {/* Task 18: the handoff from proofreading to publishing -- the
+             Coordinator no longer publishes directly (that's now the
+             assigned GD Member's job, Tasks 19-21); this just confirms
+             proofreading is done and hands the manuscript to them. */}
           {status === 'AUTHOR_APPROVED' && (
             <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4">
-              <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">Ready for Publication</h2>
-              <p className="text-sm text-slate-500">The author has approved Proof v{production.current_proof_version}. Review and publish when ready.</p>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <input value={publishForm.doi} onChange={(e) => setPublishForm({ ...publishForm, doi: e.target.value })} placeholder="DOI" className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#008751]" />
-                <input value={publishForm.volume} onChange={(e) => setPublishForm({ ...publishForm, volume: e.target.value })} placeholder="Volume" className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#008751]" />
-                <input value={publishForm.issue} onChange={(e) => setPublishForm({ ...publishForm, issue: e.target.value })} placeholder="Issue" className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#008751]" />
-              </div>
-              <button onClick={() => setShowPublishConfirm(true)} className="rounded-full bg-[#008751] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#007043]">
-                Publish
+              <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">Proofreading Complete</h2>
+              <p className="text-sm text-slate-500">The author has accepted the final proof (Proof v{production.current_proof_version}).</p>
+              <button
+                disabled={busy}
+                onClick={() => run(() => coordinatorConfirmProofreadingCompleted(manuscriptId))}
+                className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40"
+              >
+                <Check className="w-4 h-4" /> Confirm Proofreading Completed
               </button>
-              {showPublishConfirm && (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-3">
-                  <p className="text-sm text-amber-800">The author has approved the final proof. Are you sure you want to publish this manuscript?</p>
-                  <div className="flex items-center gap-2">
-                    <button disabled={busy} onClick={() => run(() => productionPublish(manuscriptId, publishForm.doi, publishForm.volume, publishForm.issue))} className="rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40">
-                      Confirm Publication
-                    </button>
-                    <button onClick={() => setShowPublishConfirm(false)} className="rounded-full border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
+            </div>
+          )}
+
+          {status === 'READY_FOR_PUBLICATION' && (
+            <div className="rounded-3xl border-2 border-emerald-300 bg-emerald-50 p-6 text-sm text-emerald-800 font-semibold">
+              Ready for Publication. The assigned GD Member will enter publication metadata and publish this manuscript.
             </div>
           )}
 

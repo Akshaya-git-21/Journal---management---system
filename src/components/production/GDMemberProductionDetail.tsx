@@ -5,9 +5,12 @@ import {
   ProductionRow, ProductionChecklistItemRow, ChecklistItemStatus, ProofRow, CorrectionRow,
   getProduction, getChecklist, getProofs, getCorrections,
   setChecklistItemStatus, gdMemberCompleteChecklist,
-  uploadProof, gdMemberUploadProof, gdMemberSetProofNotes, gdMemberSubmitProof
+  uploadProof, gdMemberUploadProof, gdMemberSetProofNotes, gdMemberSubmitProof,
+  gdMemberUploadCorrectedProof, gdMemberSubmitCorrectedProof
 } from '../../lib/production';
 import { getManuscriptStatusLabel, STANDARD_STATUS_COLORS } from '../../lib/manuscriptStatusLabel';
+
+const JOURNAL_NAME = 'Journal of Molecular Sciences';
 
 const CHECKLIST_STATUS_CYCLE: Record<ChecklistItemStatus, ChecklistItemStatus> = {
   PENDING: 'IN_PROGRESS', IN_PROGRESS: 'COMPLETED', COMPLETED: 'PENDING',
@@ -24,7 +27,7 @@ function stepIndex(status: string | undefined) {
     case 'PROOF_GENERATED': case 'PROOF_SUBMITTED_TO_COORDINATOR': return 4;
     case 'PROOF_SENT_TO_AUTHOR': case 'AUTHOR_PROOF_REVIEW': case 'CORRECTIONS_SUBMITTED':
     case 'CLARIFICATION_REQUESTED': case 'PRODUCTION_REVIEW': case 'PROOF_UPDATED':
-    case 'CORRECTIONS_IN_PROGRESS': return 5;
+    case 'CORRECTIONS_IN_PROGRESS': case 'FINAL_PROOF_READY': return 5;
     case 'AUTHOR_APPROVED': return 6;
     case 'READY_FOR_PUBLICATION': case 'PUBLISHED': return 7;
     default: return 0;
@@ -84,6 +87,10 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
   const [notesDirty, setNotesDirty] = useState(false);
   const [savingNotes, setSavingNotes] = useState(false);
   const [submittingProof, setSubmittingProof] = useState(false);
+  const [uploadingCorrectedProof, setUploadingCorrectedProof] = useState(false);
+  const [correctionError, setCorrectionError] = useState('');
+  const [submittingCorrectedProof, setSubmittingCorrectedProof] = useState(false);
+  const [togglingCorrectionKey, setTogglingCorrectionKey] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -155,6 +162,47 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
     }
   };
 
+  const handleUploadCorrectedProof = async (file: File) => {
+    setUploadingCorrectedProof(true);
+    setCorrectionError('');
+    try {
+      const { storagePath, publicUrl } = await uploadProof(manuscriptId, file);
+      await gdMemberUploadCorrectedProof(manuscriptId, storagePath, publicUrl, file.name);
+      setNotesDirty(false);
+      await load();
+    } catch (e: any) {
+      setCorrectionError(e.message || 'Failed to upload the corrected proof PDF.');
+    } finally {
+      setUploadingCorrectedProof(false);
+    }
+  };
+
+  const handleSubmitCorrectedProof = async () => {
+    setSubmittingCorrectedProof(true);
+    setCorrectionError('');
+    try {
+      await gdMemberSubmitCorrectedProof(manuscriptId);
+      await load();
+    } catch (e: any) {
+      setCorrectionError(e.message || 'Failed to submit the corrected proof.');
+    } finally {
+      setSubmittingCorrectedProof(false);
+    }
+  };
+
+  const handleToggleCorrectionItem = async (item: ProductionChecklistItemRow) => {
+    setTogglingCorrectionKey(item.item_key);
+    setCorrectionError('');
+    try {
+      await setChecklistItemStatus(manuscriptId, item.item_key, CHECKLIST_STATUS_CYCLE[item.status]);
+      await load();
+    } catch (e: any) {
+      setCorrectionError(e.message || 'Failed to update checklist item.');
+    } finally {
+      setTogglingCorrectionKey(null);
+    }
+  };
+
   const handleToggleItem = async (item: ProductionChecklistItemRow) => {
     setTogglingItemKey(item.item_key);
     setCompleteError('');
@@ -212,8 +260,9 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 text-sm">
           <div><p className="text-[11px] uppercase tracking-wide text-slate-400">Manuscript ID</p><p className="font-mono text-slate-700">{manuscript.id}</p></div>
-          <div><p className="text-[11px] uppercase tracking-wide text-slate-400">Author</p><p className="text-slate-700">{manuscript.author_name}</p></div>
+          <div><p className="text-[11px] uppercase tracking-wide text-slate-400">Author</p><p className="text-slate-700">{manuscript.author_name} &lt;{manuscript.author_email}&gt;</p></div>
           <div><p className="text-[11px] uppercase tracking-wide text-slate-400">Editor</p><p className="text-slate-700">{editorProfile?.name || '--'}</p></div>
+          <div><p className="text-[11px] uppercase tracking-wide text-slate-400">Journal</p><p className="text-slate-700">{JOURNAL_NAME}</p></div>
           <div><p className="text-[11px] uppercase tracking-wide text-slate-400">Accepted Date</p><p className="text-slate-700">{formatDate(production?.accepted_at || manuscript.updated_at)}</p></div>
         </div>
       </div>
@@ -513,6 +562,128 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
             </div>
           )}
 
+          {/* Task 15: the actual corrections work -- upload/replace the
+             corrected PDF, add notes, work through the Correction Checklist,
+             then submit. Only shown while CORRECTIONS_IN_PROGRESS; locked
+             once submitted (status moves on to FINAL_PROOF_READY). */}
+          {status === 'CORRECTIONS_IN_PROGRESS' && (
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-5">
+              <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">Corrected Proof</h2>
+
+              {(() => {
+                const currentProof = proofs[0] || null;
+                const hasCorrectedProof = !!currentProof && currentProof.version > (corrections[0]?.proof_version || 0);
+                const correctionChecklist = checklist.filter((c) => c.stage === 'CORRECTION');
+                const allCorrectionChecked = correctionChecklist.length > 0 && correctionChecklist.every((c) => c.status === 'COMPLETED');
+                const canSubmit = hasCorrectedProof && allCorrectionChecked;
+
+                return (
+                  <>
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Corrected Proof PDF</p>
+                      {currentProof ? (
+                        <div className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+                          <div>
+                            <p className="font-bold text-slate-800">Proof v{currentProof.version}</p>
+                            <p className="text-xs text-slate-400">{currentProof.file_name} • Uploaded {formatDate(currentProof.uploaded_at)}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {currentProof.public_url && (
+                              <a href={currentProof.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-3.5 h-3.5" /> View</a>
+                            )}
+                            <label className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold text-white cursor-pointer ${uploadingCorrectedProof ? 'bg-slate-400 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800'}`}>
+                              {uploadingCorrectedProof ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                              {uploadingCorrectedProof ? 'Uploading...' : 'Replace'}
+                              <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={uploadingCorrectedProof} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadCorrectedProof(f); e.target.value = ''; }} />
+                            </label>
+                          </div>
+                        </div>
+                      ) : null}
+                      {!hasCorrectedProof && (
+                        <label className={`mt-2 inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-xs font-bold text-white cursor-pointer ${uploadingCorrectedProof ? 'bg-slate-400 cursor-not-allowed' : 'bg-[#008751] hover:bg-[#007043]'}`}>
+                          {uploadingCorrectedProof ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                          {uploadingCorrectedProof ? 'Uploading...' : 'Upload Corrected PDF'}
+                          <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={uploadingCorrectedProof} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadCorrectedProof(f); e.target.value = ''; }} />
+                        </label>
+                      )}
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Correction Notes</p>
+                      <textarea
+                        value={notesDraft}
+                        onChange={(e) => { setNotesDraft(e.target.value); setNotesDirty(true); }}
+                        disabled={!currentProof}
+                        placeholder="Notes on the corrections applied..."
+                        rows={3}
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-[#008751] disabled:bg-slate-50 disabled:text-slate-500"
+                      />
+                      {currentProof && (
+                        <button
+                          type="button"
+                          disabled={savingNotes || !notesDirty}
+                          onClick={handleSaveNotes}
+                          className="mt-2 inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {savingNotes ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                          {savingNotes ? 'Saving...' : 'Save Draft'}
+                        </button>
+                      )}
+                    </div>
+
+                    {correctionChecklist.length > 0 && (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Correction Checklist</p>
+                          <span className="text-xs font-bold text-slate-400">
+                            {correctionChecklist.filter((c) => c.status === 'COMPLETED').length} / {correctionChecklist.length} checked
+                          </span>
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {correctionChecklist.map((item) => {
+                            const busy = togglingCorrectionKey === item.item_key;
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                disabled={busy}
+                                onClick={() => handleToggleCorrectionItem(item)}
+                                title="Click to cycle: Pending -> In Progress -> Completed"
+                                className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-left hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                              >
+                                <span className="text-slate-700">{item.item_label}</span>
+                                <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase text-slate-400">
+                                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChecklistIcon status={item.status} />}
+                                  {item.status.replace('_', ' ')}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-4 border-t border-slate-100">
+                      <button
+                        type="button"
+                        disabled={!canSubmit || submittingCorrectedProof}
+                        onClick={handleSubmitCorrectedProof}
+                        className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {submittingCorrectedProof ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        {submittingCorrectedProof ? 'Submitting...' : 'Submit Corrected Proof'}
+                      </button>
+                      {!canSubmit && (
+                        <p className="mt-2 text-xs text-slate-400">Upload a corrected proof and check off every correction checklist item before submitting.</p>
+                      )}
+                      {correctionError && <p className="mt-2 text-xs font-semibold text-red-600">{correctionError}</p>}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
           {corrections.length > 0 && (
             <div className="bg-white border border-slate-200 rounded-3xl p-6">
               <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-4">Author Proof Corrections</h2>
@@ -541,9 +712,16 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
             </div>
           )}
 
-          {status === 'PUBLISHED' && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-3xl p-6 text-center text-emerald-700 font-bold">
-              This manuscript has been published.
+          {/* Tasks 19-22 (Ready for Publication / Published) now live in
+             their own page -- GDMemberPublicationDetail.tsx, reached via
+             the sidebar's separate "Publication" section -- rather than
+             here alongside the earlier production/corrections work. This
+             manuscript can still be opened here from the unfiltered
+             Production Queue once it's reached that stage, so point the
+             GD Member at the right page instead of showing nothing. */}
+          {(status === 'READY_FOR_PUBLICATION' || status === 'PUBLISHED') && (
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 text-center text-sm text-slate-500">
+              {status === 'PUBLISHED' ? 'This manuscript has been published.' : 'Ready for publication.'} See the Publication section in the sidebar for details.
             </div>
           )}
         </>
