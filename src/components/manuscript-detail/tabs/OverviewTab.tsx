@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, assignEditor, coordinatorSendRevisionToEditor, coordinatorSendReviewsToEditor, getEditorReviewerActions, getPendingEditorSuggestions } from '../../../lib/workflow';
-import { getManuscriptStatusLabel, getRevisionMeta, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
+import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 import { getProduction, subscribeToProduction } from '../../../lib/production';
 import { CheckCircle2, Circle, AlertCircle, FileText, Loader2 } from 'lucide-react';
 import { AssignmentConfirmationDialog } from '../../AssignmentConfirmationDialog';
@@ -38,6 +38,10 @@ export function OverviewTab({
 
   const activeEditor = editorAssignments.find(a => a.status === 'ACCEPTED') || editorAssignments[0];
   const evaluationSubmitted = activeEditor?.assessment_status === 'SUBMITTED';
+  // Coordinator-only distinction: the editor has just been assigned but
+  // hasn't accepted yet -- see getCoordinatorStatusLabel() for why this
+  // stays separate from the shared EDITORIAL REVIEW status everyone else sees.
+  const pendingEditorAcceptance = manuscript.status === 'EDITOR_REVIEW' && !!activeEditor && activeEditor.status !== 'ACCEPTED';
   const reviewsSubmitted = reviewerAssignments.filter(r => r.status === 'SUBMITTED').length;
   const reviewsInvited = reviewerAssignments.filter(r => r.status === 'INVITED').length;
   const reviewsAccepted = reviewerAssignments.filter(r => r.status === 'ACCEPTED').length;
@@ -153,6 +157,9 @@ export function OverviewTab({
     if (manuscript.status === 'ACCEPTED' && productionStatus && productionStatus !== 'NOT_STARTED') {
       return 'Manuscript is being prepared for production';
     }
+    if (pendingEditorAcceptance) {
+      return 'Waiting for the editor to accept the assignment';
+    }
     if (readyToInviteReviewers) {
       return revisionN
         ? `Editor selected reviewers for Revision ${revisionN} -- invite them to start peer review`
@@ -240,7 +247,7 @@ export function OverviewTab({
         <div className="space-y-4">
           <div>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Status</p>
-            <p className="text-lg font-bold text-slate-900">{getManuscriptStatusLabel(manuscript, latestRevision, productionStatus)}</p>
+            <p className="text-lg font-bold text-slate-900">{getCoordinatorStatusLabel(manuscript, editorAssignments, latestRevision, productionStatus)}</p>
             {(() => {
               const revisionMeta = getRevisionMeta(latestRevision);
               return revisionMeta ? (

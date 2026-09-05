@@ -6,10 +6,9 @@ import { ProfileRow } from '../lib/workflow';
 interface EditorDetailsModalProps {
   editor: ProfileRow | null;
   onClose: () => void;
-  currentUserToken?: string;
 }
 
-export default function EditorDetailsModal({ editor, onClose, currentUserToken }: EditorDetailsModalProps) {
+export default function EditorDetailsModal({ editor, onClose }: EditorDetailsModalProps) {
   const [showPasswordReset, setShowPasswordReset] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -51,7 +50,14 @@ export default function EditorDetailsModal({ editor, onClose, currentUserToken }
 
     setLoading(true);
     try {
-      await resetUserPassword(editor.id, newPassword, currentUserToken);
+      // No token passed here -- resetUserPassword() always reads (and
+      // refreshes if needed) a fresh session token itself. Passing one down
+      // from a value captured once when the parent workspace mounted was
+      // the actual bug: a Coordinator session open longer than the access
+      // token's ~1hr lifetime would keep sending that same now-expired
+      // token forever, failing with "Unauthorized: session is invalid or
+      // has expired" on every attempt no matter how recently they'd logged in.
+      await resetUserPassword(editor.id, newPassword);
       setTempPassword(newPassword);
       setNewPassword('');
       setConfirmPassword('');

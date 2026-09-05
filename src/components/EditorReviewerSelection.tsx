@@ -59,23 +59,7 @@ export function EditorReviewerSelection({ manuscriptId, suggestedReviewers, onSu
   };
 
   if (alreadySelected) {
-    return (
-      <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6">
-        <div className="flex items-center gap-2 mb-3">
-          <CheckCircle className="w-5 h-5 text-emerald-700" />
-          <h3 className="text-sm font-black text-emerald-900">Reviewers Selected</h3>
-        </div>
-        <div className="space-y-2">
-          {editorSelections.map(s => (
-            <div key={s.id} className="bg-white border border-emerald-200 rounded-lg p-3">
-              <p className="text-sm font-semibold text-slate-900">{s.name}</p>
-              <p className="text-xs text-slate-600">{s.email}</p>
-            </div>
-          ))}
-        </div>
-        <p className="text-xs text-emerald-800 mt-3">Awaiting the Coordinator to send invitations.</p>
-      </div>
-    );
+    return null;
   }
 
   return (

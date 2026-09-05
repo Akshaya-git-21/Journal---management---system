@@ -1,16 +1,23 @@
 import { useState, useEffect } from 'react';
 import {
   getRevisionFiles, submitEditorRecommendation, ManuscriptFileRow, RevisionRow, ChecklistItem,
-  ReviewerRecommendation
+  ReviewerRecommendation, ReviewerAssignmentRow
 } from '../lib/workflow';
+import { ProfileData } from '../lib/editorWorkspace';
 import { getLatestRevision } from '../lib/manuscriptStatusLabel';
-import { Loader2, FileText, Eye, Download, CheckCircle, Send } from 'lucide-react';
+import { Loader2, FileText, Eye, Download, CheckCircle, Send, Users } from 'lucide-react';
 import FilePreviewModal from './FilePreviewModal';
 
 interface Props {
   manuscriptTitle: string;
   manuscriptId: string;
   revisions: RevisionRow[];
+  /** The manuscript's reviewer assignments, so the Editor can see what each
+   * reviewer said (recommendation + comments) while deciding on this
+   * resubmission -- previously this screen only showed the Author's own
+   * response, with no way to see the reviewers' feedback that prompted it. */
+  reviewerAssignments?: ReviewerAssignmentRow[];
+  profiles?: Map<string, ProfileData>;
   onSubmitSuccess: () => void;
   /** Called instead of onSubmitSuccess specifically when the Editor confirms
    * "Move to Next Stage" -- lets the parent jump straight to the existing
@@ -81,6 +88,8 @@ export default function EditorRevisionReview({
   manuscriptTitle,
   manuscriptId,
   revisions,
+  reviewerAssignments = [],
+  profiles,
   onSubmitSuccess,
   onMoveToNextStage,
 }: Props) {
@@ -184,7 +193,94 @@ export default function EditorRevisionReview({
           </p>
         </div>
 
-        {/* 2. Files for review */}
+        {/* 2. Reviewer Comments -- what prompted the Author's corrections in
+            the first place, so the Editor sees the reviewers' feedback
+            before anything else. Only submitted reports are shown (an
+            invited/accepted-but-not-yet-reported reviewer has nothing to
+            display); the whole card is skipped when there are no reviewers
+            at all (a screening-origin revision that never went to peer
+            review). */}
+        {reviewerAssignments.filter(r => r.status === 'SUBMITTED').length > 0 && (
+          <div className="bg-white border border-slate-200 rounded-lg p-6">
+            <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5" /> Reviewer Comments
+            </h3>
+            <div className="space-y-3">
+              {reviewerAssignments.filter(r => r.status === 'SUBMITTED').map((r, idx) => (
+                <div key={r.id} className="border border-slate-200 rounded-lg p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-900">{profiles?.get(r.reviewer_id)?.name || `Reviewer ${idx + 1}`}</p>
+                    {r.recommendation && (
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">{r.recommendation.replace(/_/g, ' ')}</span>
+                    )}
+                  </div>
+                  {r.comments_to_author && (
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Comments to Author</p>
+                      <p className="text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 border border-slate-200 rounded-lg p-2.5">{r.comments_to_author}</p>
+                    </div>
+                  )}
+                  {r.comments_to_editor && (
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-blue-700 mb-1">Confidential Comments to Editor</p>
+                      <p className="text-sm text-slate-700 whitespace-pre-wrap bg-blue-50 border border-blue-200 rounded-lg p-2.5">{r.comments_to_editor}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 3. Editor's previous comments -- decision_letter is what was
+            actually sent to the Author when this revision was requested,
+            built by buildAuthorNote() in DecisionTab.tsx as "Editor
+            Comments:\n<note>" optionally followed by "\n\nReviewer
+            Comments:\n...". The reviewer half is already shown above from
+            the reviewer_assignments data directly, so only the Editor's own
+            note is pulled out here to avoid repeating it. Read-only --
+            context for the Editor while writing their new comment below,
+            not resubmitted verbatim. */}
+        {(() => {
+          const match = latestRevision.decision_letter?.match(/^Editor Comments:\n([\s\S]*?)(?:\n\nReviewer Comments:|$)/);
+          const priorEditorNote = match?.[1]?.trim();
+          if (!priorEditorNote) return null;
+          return (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-6">
+              <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor's Previous Comments</h3>
+              <p className="text-sm text-slate-600 whitespace-pre-wrap">{priorEditorNote}</p>
+            </div>
+          );
+        })()}
+
+        {/* 4. Author's Response -- the note the author typed when submitting
+            this revision (manuscript_revisions.author_response, see
+            0038_revision_loop_accept_and_author_response.sql). Always shown
+            (not hidden when empty) so it's clear this field exists even
+            when this particular author left it blank -- their "Response to
+            Editor" note is optional on the submission side. */}
+        <div className="bg-white border border-slate-200 rounded-lg p-6">
+          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Author's Response</h3>
+          {latestRevision.author_response ? (
+            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{latestRevision.author_response}</p>
+          ) : (
+            <p className="text-sm text-slate-400 italic">The author did not provide a response note with this revision.</p>
+          )}
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-lg p-6">
+          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor Comments</h3>
+          <textarea
+            value={comments}
+            onChange={(e) => setComments(e.target.value)}
+            placeholder="Enter your general comments about this revision..."
+            rows={6}
+            disabled={submitting}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
+          />
+        </div>
+
+        {/* 5. Files for review */}
         <div className="bg-white border border-slate-200 rounded-lg p-6">
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">
             Revision {latestRevision.revision_number} — Files for Review
@@ -222,36 +318,7 @@ export default function EditorRevisionReview({
           )}
         </div>
 
-        {/* 2b. Author's Response -- the note the author typed when
-            submitting this revision (manuscript_revisions.author_response,
-            see 0038_revision_loop_accept_and_author_response.sql). Kept
-            separate from the Editor's own comments below. Always shown
-            (not hidden when empty) so it's clear this field exists even
-            when this particular author left it blank -- their "Response to
-            Editor" note is optional on the submission side. */}
-        <div className="bg-white border border-slate-200 rounded-lg p-6">
-          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Author's Response</h3>
-          {latestRevision.author_response ? (
-            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{latestRevision.author_response}</p>
-          ) : (
-            <p className="text-sm text-slate-400 italic">The author did not provide a response note with this revision.</p>
-          )}
-        </div>
-
-        {/* 3. Editor Comments */}
-        <div className="bg-white border border-slate-200 rounded-lg p-6">
-          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor Comments</h3>
-          <textarea
-            value={comments}
-            onChange={(e) => setComments(e.target.value)}
-            placeholder="Enter your general comments about this revision..."
-            rows={6}
-            disabled={submitting}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
-          />
-        </div>
-
-        {/* 4. Editor Checklist */}
+        {/* 6. Editor Checklist */}
         <div className="bg-white border border-slate-200 rounded-lg p-6">
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor Checklist</h3>
           <div className="space-y-2.5">
@@ -270,7 +337,7 @@ export default function EditorRevisionReview({
           </div>
         </div>
 
-        {/* 5-6. Decision buttons + Submit Decision */}
+        {/* 7-8. Decision buttons + Submit Decision */}
         <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide">Decision</h3>
 

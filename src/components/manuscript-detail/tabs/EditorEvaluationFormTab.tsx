@@ -114,7 +114,15 @@ export function EditorEvaluationFormTab({
     setPendingAction(action);
   };
 
-  const hasSubmittedEvaluation = assignment.assessment_status === 'SUBMITTED';
+  // A revision cycle resets assessment_status back to NOT_STARTED on this
+  // same assignment row without clearing the actual submitted screening
+  // responses (see coordinator_send_revision_to_editor() in
+  // 0018_coordinator_revision_gate.sql, and the same fallback in
+  // EditorEvaluationTab.tsx / EditorWorkspace.tsx's evaluationDone). The
+  // screening questionnaire only ever runs once, in the original
+  // screening phase -- it shouldn't reappear as a blank editable form on
+  // every later revision round just because the status flag got reset.
+  const hasSubmittedEvaluation = assignment.assessment_status === 'SUBMITTED' || (assignment.screening_responses?.length ?? 0) > 0;
 
   if (hasSubmittedEvaluation) {
     return (
@@ -122,10 +130,21 @@ export function EditorEvaluationFormTab({
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-8 text-center">
           <CheckCircle className="w-12 h-12 mx-auto mb-4 text-emerald-700" />
           <p className="text-emerald-900 font-semibold mb-2">Screening Submitted</p>
-          <p className="text-sm text-emerald-800">
-            Your Initial Editorial Screening has been recorded.
-            {assignment.recommendation ? ` Action: ${assignment.recommendation.replace(/_/g, ' ')}.` : ''}
-          </p>
+          <p className="text-sm text-emerald-800">Your Initial Editorial Screening has been recorded.</p>
+          {/* This tab only ever shows the screening-stage evaluation, so
+              the recommendation is always one of the 3 screening actions
+              above (ACTION_META) -- show that action name, not the raw
+              MAJOR_REVISION/ACCEPT recommendation value, same mapping as
+              EditorEvaluationTab.tsx's read-only view. Pulled into its own
+              bold, higher-contrast badge (rather than folded into the
+              sentence above) so the actual outcome is what stands out here. */}
+          {assignment.recommendation && (
+            <p className="mt-4 inline-flex items-center gap-2 rounded-full border-2 border-emerald-300 bg-emerald-100 px-4 py-2 text-base font-black text-emerald-950">
+              {assignment.recommendation === 'REJECT' ? 'Reject Submission'
+                : assignment.recommendation === 'ACCEPT' ? 'Move to Next Stage: Peer Review'
+                : 'Return to Author'}
+            </p>
+          )}
         </div>
       </div>
     );

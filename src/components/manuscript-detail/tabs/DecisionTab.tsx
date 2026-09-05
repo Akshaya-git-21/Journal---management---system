@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, StatusHistoryRow, ProfileRow, ScreeningResponse } from '../../../lib/workflow';
 import { publishDecision, coordinatorSendRevisionToReviewers, listActiveProfilesByRole } from '../../../lib/workflow';
 import { getProduction, startProduction, assignGDMember, subscribeToProduction } from '../../../lib/production';
 import { createAndActivateGDMemberAccount } from '../../../lib/auth';
-import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, PackageCheck, Loader2, CheckCircle2, CheckCircle, XCircle, ClipboardList, UserPlus, X } from 'lucide-react';
+import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, PackageCheck, Loader2, CheckCircle2, CheckCircle, XCircle, ClipboardList, UserPlus, X, Clock } from 'lucide-react';
 import { getRevisionDecisionLabel } from '../../../lib/decisionUtils';
-import { getManuscriptStatusMeta, getManuscriptStatusLabel, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
+import { getCoordinatorStatusMeta, getManuscriptStatusLabel, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 
 interface Props {
   manuscript: ManuscriptRow;
@@ -224,9 +224,21 @@ export function DecisionTab({
   const hasRequiredReviews = activeReviewerAssignments.length > 0 && activeReviewerAssignments.every(r => r.status === 'SUBMITTED');
 
   const activeEditor = editorAssignments.find(a => a.status === 'ACCEPTED') || editorAssignments[0];
+  // Coordinator-only distinction (mirrors getCoordinatorStatusLabel): the
+  // editor has been assigned but hasn't accepted yet, so "Editor evaluation"
+  // would be misleading -- the editor can't evaluate before accepting.
+  const pendingEditorAcceptance = manuscript.status === 'EDITOR_REVIEW' && !!activeEditor && activeEditor.status !== 'ACCEPTED';
   const latestRevision = getLatestRevision(revisions);
   const sortedRevisions = [...revisions].sort((a, b) => a.revision_number - b.revision_number);
   const firstSubmissionRevision = sortedRevisions[0] || null;
+  // Display-only signal for the "Decision Unavailable" checklist below --
+  // hasEditorEvaluation resets to false on every revision cycle (assessment_
+  // status goes back to NOT_STARTED, see the comment above pendingRevisionConfirm),
+  // so it wrongly says "Editor evaluation pending" once a manuscript is deep
+  // into a revision loop even though the original screening was long since
+  // done. Any revision existing, or the editor having ever recorded a
+  // recommendation, is proof the original evaluation happened.
+  const hasEditorEvaluationForDisplay = hasEditorEvaluation || sortedRevisions.length > 0 || !!activeEditor?.recommendation;
   // The most recent revision cycle that an editor has actually decided on.
   // Once the coordinator finalizes a MINOR/MAJOR decision, a fresh blank
   // revision row is created for the next cycle -- latestRevision then points
@@ -245,15 +257,27 @@ export function DecisionTab({
     manuscript.status === 'AWAITING_DECISION' &&
     decidedRevision && latestRevision &&
     decidedRevision.id === latestRevision.id &&
-    !decidedRevision.coordinator_decision
+    !decidedRevision.coordinator_decision &&
+    // An EDITOR_SCREENING-origin ACCEPT never gets a coordinator_decision
+    // stamped -- per 0038_revision_loop_accept_and_author_response.sql it
+    // deliberately behaves like the original round's "Move to Next Stage"
+    // (manuscript stays EDITOR_REVIEW, reviewer selection picks it up), not
+    // a revision cycle the Coordinator confirms. Without this exclusion,
+    // that permanently-unconfirmed row keeps masquerading as "the current
+    // revision cycle" forever, even after real peer reviewers have since
+    // been assigned and submitted -- hiding the actual peer-review decision
+    // UI below behind a stale "Accept Submission N -- Send to Production"
+    // button that was never the right action for this cycle.
+    !(decidedRevision.origin === 'EDITOR_SCREENING' && decidedRevision.editor_decision === 'ACCEPT')
   );
   // Peer-review round: reviews already pushed the manuscript to
-  // AWAITING_DECISION and at least one reviewer was ever assigned -- the
-  // screening round's own AWAITING_DECISION (reject/revision) always has
-  // zero reviewerAssignments, since reviewers aren't selected until
-  // screening ACCEPTs. Distinct from the revision-loop round, which always
-  // has sortedRevisions.length > 0.
-  const isPeerReviewRound = sortedRevisions.length === 0 && reviewerAssignments.length > 0;
+  // AWAITING_DECISION and at least one reviewer was ever assigned. Counts
+  // only PEER_REVIEW-origin revisions, not revisions in general -- an
+  // EDITOR_SCREENING-origin revision (editor sent it back before peer review
+  // ever started) doesn't make this any less the manuscript's first peer
+  // review round once reviewers are actually assigned and reporting.
+  const peerReviewOriginRounds = sortedRevisions.filter(r => r.origin === 'PEER_REVIEW').length;
+  const isPeerReviewRound = peerReviewOriginRounds === 0 && reviewerAssignments.length > 0;
   const latestReviewSubmittedAt = activeReviewerAssignments.reduce<string | null>((latest, r) => (
     r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
   ), null);
@@ -284,8 +308,15 @@ export function DecisionTab({
   // before reviewers were even assigned (reviewerAssignments.length === 0
   // trivially satisfies hasRequiredReviews), so Submit always failed with
   // "Manuscript is not awaiting a decision".
+  // A genuine peer-review round is ready on its own reviewer reports --
+  // hasEditorEvaluation tracks the ORIGINAL screening assessment
+  // (submit_editor_assessment), which any revision cycle resets to
+  // NOT_STARTED and never resubmits (see pendingRevisionConfirm above).
+  // Requiring it here meant a manuscript that had ever been through an
+  // EDITOR_SCREENING-origin revision could never reach a decision even once
+  // its reviewers had actually finished reporting.
   const canDecide = manuscript.status === 'AWAITING_DECISION' &&
-    (pendingRevisionConfirm || (hasEditorEvaluation && (reviewerAssignments.length === 0 || hasRequiredReviews)));
+    (pendingRevisionConfirm || (isPeerReviewRound && hasRequiredReviews) || (hasEditorEvaluation && (reviewerAssignments.length === 0 || hasRequiredReviews)));
 
   // Pre-fill the note-to-author with the Editor's own Return to
   // Author / Rejection reason so it reaches the Author by default -- the
@@ -326,7 +357,7 @@ export function DecisionTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingPeerReviewConfirm, activeEditor?.peer_review_comments]);
   const decided = ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
-  const statusMeta = getManuscriptStatusMeta(manuscript, latestRevision, productionStatus);
+  const statusMeta = getCoordinatorStatusMeta(manuscript, editorAssignments, latestRevision, productionStatus);
   const canMoveToProduction = manuscript.status === 'ACCEPTED' && (!productionStatus || productionStatus === 'NOT_STARTED');
   const finalDecisionLabel =
     manuscript.status === 'ACCEPTED' ? 'ACCEPT' :
@@ -386,56 +417,92 @@ export function DecisionTab({
     }
   };
 
-  return (
-    <div className="space-y-6">
-      {/* 1. Reviewer Decisions -- original round peer review only. Nothing
-          to show at the screening stage (before any reviewer is ever
-          assigned), so this card doesn't render at all rather than showing
-          an empty "No reviewers assigned yet" placeholder. */}
-      {reviewerAssignments.length > 0 && (
-      <div className="bg-blue-50/60 border-2 border-blue-100 rounded-2xl overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setReviewerDecisionsExpanded((v) => !v)}
-          className="w-full flex items-center gap-2 px-6 py-4 hover:bg-blue-50 transition"
-        >
-          {reviewerDecisionsExpanded ? <ChevronDown className="w-4 h-4 text-blue-700" /> : <ChevronRight className="w-4 h-4 text-blue-700" />}
-          <h3 className="text-sm font-black text-blue-900 flex items-center gap-2">
-            <Users className="w-4 h-4" /> Reviewer Decisions
-          </h3>
-        </button>
-        {reviewerDecisionsExpanded && (
-          <div className="px-6 pb-6">
-            <div className="space-y-2">
-              {reviewerAssignments.map(r => (
-                <div key={r.id} className="bg-white border border-blue-200 rounded-lg p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{profiles[r.reviewer_id]?.name || 'Reviewer'}</p>
-                      <p className="text-xs text-slate-500">{r.status === 'SUBMITTED' ? 'Review submitted' : r.status.replace(/_/g, ' ')}</p>
-                    </div>
-                    <DecisionPill decision={r.status === 'SUBMITTED' ? (r.recommendation || null) : null} />
+  // Reviewer Decisions card -- original round peer review only. Positioned
+  // after Revision 1's card (see sortedRevisions.map below) rather than at
+  // the top, since chronologically the reviewers' re-check happens after
+  // the author responds to Revision 1, ahead of the Editor's Revision 2
+  // decision. Nothing to show at the screening stage (before any reviewer
+  // is ever assigned), so this card doesn't render at all rather than
+  // showing an empty "No reviewers assigned yet" placeholder.
+  const reviewerDecisionsCard = reviewerAssignments.length > 0 && (
+    <div className="bg-blue-50/60 border-2 border-blue-100 rounded-2xl overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setReviewerDecisionsExpanded((v) => !v)}
+        className="w-full flex items-center gap-2 px-6 py-4 hover:bg-blue-50 transition"
+      >
+        {reviewerDecisionsExpanded ? <ChevronDown className="w-4 h-4 text-blue-700" /> : <ChevronRight className="w-4 h-4 text-blue-700" />}
+        <h3 className="text-sm font-black text-blue-900 flex items-center gap-2">
+          <Users className="w-4 h-4" /> Reviewer Decisions
+        </h3>
+      </button>
+      {reviewerDecisionsExpanded && (
+        <div className="px-6 pb-6">
+          <div className="space-y-2">
+            {reviewerAssignments.map(r => (
+              <div key={r.id} className="bg-white border border-blue-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{profiles[r.reviewer_id]?.name || 'Reviewer'}</p>
+                    <p className="text-xs text-slate-500">{r.status === 'SUBMITTED' ? 'Review submitted' : r.status.replace(/_/g, ' ')}</p>
                   </div>
-                  {r.status === 'SUBMITTED' && r.comments_to_author && (
-                    <div>
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Comments to Author</p>
-                      <p className="text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 border border-slate-200 rounded-lg p-2.5">{r.comments_to_author}</p>
-                    </div>
-                  )}
-                  {r.status === 'SUBMITTED' && r.comments_to_editor && (
-                    <div>
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-blue-700 mb-1">Confidential Comments to Editor</p>
-                      <p className="text-sm text-slate-700 whitespace-pre-wrap bg-blue-50 border border-blue-200 rounded-lg p-2.5">{r.comments_to_editor}</p>
-                    </div>
+                  <DecisionPill decision={r.status === 'SUBMITTED' ? (r.recommendation || null) : null} />
+                </div>
+                {r.status === 'SUBMITTED' && r.comments_to_author && (
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Comments to Author</p>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 border border-slate-200 rounded-lg p-2.5">{r.comments_to_author}</p>
+                  </div>
+                )}
+                {r.status === 'SUBMITTED' && r.comments_to_editor && (
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-blue-700 mb-1">Confidential Comments to Editor</p>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap bg-blue-50 border border-blue-200 rounded-lg p-2.5">{r.comments_to_editor}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* The Editor's decision made off this re-check. Normally captured
+              as the NEXT revision's own opening decision_type -- but for an
+              EDITOR_SCREENING-origin revision loop, publish_decision() never
+              stamps decision_type (that only happens on the PEER_REVIEW
+              path), so decision_type comes back null even once the revision
+              exists. Fall back to editor_assignments.recommendation (the
+              same field EditorWorkspace's peer-review-round decision
+              writes), which does carry it. Not yet made if that next
+              revision doesn't exist yet. */}
+          {(() => {
+            const nextRevision = sortedRevisions[1];
+            const editorRecommendation = nextRevision?.decision_type || (nextRevision ? activeEditor?.recommendation : null);
+            return (
+              <div className="mt-3 bg-teal-50/60 border border-teal-100 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold uppercase tracking-wide text-teal-700/70 flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5" /> Editor Decision
+                  </p>
+                  {editorRecommendation ? (
+                    <span className="font-bold rounded-full border bg-teal-100 text-teal-800 border-teal-300 text-xs px-2.5 py-1">
+                      {getRevisionDecisionLabel(editorRecommendation as any, 1)}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400 italic">Awaiting editor decision</span>
                   )}
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+                {nextRevision && activeEditor?.peer_review_comments && (
+                  <p className="text-sm text-slate-800 whitespace-pre-wrap bg-white border border-teal-200 rounded-lg p-2.5">{activeEditor.peer_review_comments}</p>
+                )}
+              </div>
+            );
+          })()}
+        </div>
       )}
+    </div>
+  );
 
+  return (
+    <div className="space-y-6">
       {/* 1b. Initial Editorial Screening summary -- shown once, for the
           round-1 gate only (no revisions yet), so the Coordinator can see
           the Editor's 10-question questionnaire, reasons, comments, and
@@ -545,52 +612,67 @@ export function DecisionTab({
           : { label: 'AWAITING EDITOR', className: 'bg-slate-100 text-slate-600' };
 
         return (
-          <div key={rev.id} className="bg-white border-2 border-slate-200 rounded-2xl overflow-hidden">
-            <button
-              type="button"
-              onClick={() => toggleRevisionExpanded(rev.id)}
-              className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition"
-            >
-              <div className="flex items-center gap-2">
-                {isExpanded ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
-                <h3 className="text-sm font-black text-slate-900">Revision {rev.revision_number} Decision</h3>
-              </div>
-              <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${fullyDecided ? '' : 'uppercase'} ${statusPill.className}`}>
-                {statusPill.label}
-              </span>
-            </button>
+          <Fragment key={rev.id}>
+            <div className="bg-white border-2 border-slate-200 rounded-2xl overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggleRevisionExpanded(rev.id)}
+                className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition"
+              >
+                <div className="flex items-center gap-2">
+                  {isExpanded ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
+                  <h3 className="text-sm font-black text-slate-900">Revision {rev.revision_number} Decision</h3>
+                </div>
+                <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${fullyDecided ? '' : 'uppercase'} ${statusPill.className}`}>
+                  {statusPill.label}
+                </span>
+              </button>
 
-            {isExpanded && (
-              <div className="px-6 pb-6 pt-1 space-y-5">
-                <div className="bg-teal-50/60 border border-teal-100 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold uppercase tracking-wide text-teal-700/70 flex items-center gap-1.5">
-                      <UserCheck className="w-3.5 h-3.5" /> Editor Decision
-                    </p>
-                    {rev.editor_decision ? (
-                      <span className="font-bold rounded-full border bg-teal-100 text-teal-800 border-teal-300 text-xs px-2.5 py-1">
-                        {getRevisionDecisionLabel(rev.editor_decision as any, rev.revision_number)}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-slate-400 italic">Awaiting editor decision</span>
-                    )}
-                  </div>
-                  {rev.editor_comments && (
-                    <p className="text-sm text-slate-800 whitespace-pre-wrap bg-white border border-teal-200 rounded-lg p-3">{rev.editor_comments}</p>
-                  )}
-                  {rev.editor_checklist?.length > 0 && (
-                    <div className="bg-white border border-teal-200 rounded-lg p-3 space-y-1.5">
-                      {rev.editor_checklist.map(item => (
-                        <p key={item.id} className={`text-sm flex items-center gap-2 ${item.checked ? 'text-slate-700' : 'text-slate-400'}`}>
-                          <span>{item.checked ? '☑' : '☐'}</span> {item.label}
-                        </p>
-                      ))}
+              {isExpanded && (
+                <div className="px-6 pb-6 pt-1 space-y-5">
+                  {rev.author_response && (
+                    <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-4 space-y-2">
+                      <p className="text-xs font-bold uppercase tracking-wide text-blue-700/70 flex items-center gap-1.5">
+                        <FileCheck className="w-3.5 h-3.5" /> Author's Comments
+                      </p>
+                      <p className="text-sm text-slate-800 whitespace-pre-wrap bg-white border border-blue-200 rounded-lg p-3">{rev.author_response}</p>
                     </div>
                   )}
+                  <div className="bg-teal-50/60 border border-teal-100 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-bold uppercase tracking-wide text-teal-700/70 flex items-center gap-1.5">
+                        <UserCheck className="w-3.5 h-3.5" /> Editor Decision
+                      </p>
+                      {rev.editor_decision ? (
+                        <span className="font-bold rounded-full border bg-teal-100 text-teal-800 border-teal-300 text-xs px-2.5 py-1">
+                          {getRevisionDecisionLabel(rev.editor_decision as any, rev.revision_number)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic">Awaiting editor decision</span>
+                      )}
+                    </div>
+                    {rev.editor_comments && (
+                      <p className="text-sm text-slate-800 whitespace-pre-wrap bg-white border border-teal-200 rounded-lg p-3">{rev.editor_comments}</p>
+                    )}
+                    {rev.editor_checklist?.length > 0 && (
+                      <div className="bg-white border border-teal-200 rounded-lg p-3 space-y-1.5">
+                        {rev.editor_checklist.map(item => (
+                          <p key={item.id} className={`text-sm flex items-center gap-2 ${item.checked ? 'text-slate-700' : 'text-slate-400'}`}>
+                            <span>{item.checked ? '☑' : '☐'}</span> {item.label}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+
+            {/* Reviewer Decisions sits between Revision 1 and Revision 2:
+                the reviewers' re-check happens after the author responds to
+                Revision 1, ahead of the Editor's Revision 2 decision. */}
+            {idx === 0 && reviewerDecisionsCard}
+          </Fragment>
         );
       })}
 
@@ -613,15 +695,61 @@ export function DecisionTab({
         {!canDecide ? (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 flex gap-3">
             <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold text-amber-900 mb-1">Decision Unavailable</p>
-              <p className="text-sm text-amber-800">
-                Waiting for: {[
-                  !hasEditorEvaluation && 'Editor evaluation',
-                  reviewerAssignments.length > 0 && !hasRequiredReviews && `${reviewerAssignments.filter(r => r.status !== 'SUBMITTED').length} reviewer report(s)`,
-                  hasEditorEvaluation && (reviewerAssignments.length === 0 || hasRequiredReviews) && manuscript.status !== 'AWAITING_DECISION' && `manuscript to be ready for a decision (currently ${getManuscriptStatusLabel(manuscript)})`,
-                ].filter(Boolean).join(', ') || 'the manuscript to be ready for a decision'}
-              </p>
+            <div className="flex-1 space-y-2">
+              <p className="font-bold text-amber-900">Decision Unavailable</p>
+              {/* One line per actual step, not a flattened summary -- each
+                  recomputes straight off editorAssignments/reviewerAssignments
+                  props, so it reflects the latest state on every realtime
+                  refetch (see CoordinatorManuscriptDetail's postgres_changes
+                  subscriptions on both tables) without any extra wiring here. */}
+              <div className="space-y-1.5">
+                <p className={`text-sm flex items-center gap-1.5 ${hasEditorEvaluationForDisplay ? 'text-emerald-700' : 'text-amber-800'}`}>
+                  {hasEditorEvaluationForDisplay ? <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" /> : <Clock className="w-3.5 h-3.5 flex-shrink-0" />}
+                  {pendingEditorAcceptance ? 'Editor to accept the assignment'
+                    : hasEditorEvaluationForDisplay ? 'Editor evaluation submitted'
+                    : 'Editor evaluation pending'}
+                </p>
+                {reviewerAssignments.length > 0 && (() => {
+                  const invited = reviewerAssignments.filter(r => r.status === 'INVITED').length;
+                  const accepted = reviewerAssignments.filter(r => r.status === 'ACCEPTED').length;
+                  const submitted = reviewerAssignments.filter(r => r.status === 'SUBMITTED').length;
+                  const declined = reviewerAssignments.filter(r => r.status === 'DECLINED').length;
+                  return (
+                    <>
+                      {invited > 0 && (
+                        <p className="text-sm text-amber-800 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 flex-shrink-0" />
+                          {invited} reviewer{invited > 1 ? 's' : ''} invited, awaiting response
+                        </p>
+                      )}
+                      {accepted > 0 && (
+                        <p className="text-sm text-amber-800 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 flex-shrink-0" />
+                          {accepted} reviewer{accepted > 1 ? 's' : ''} accepted, report pending
+                        </p>
+                      )}
+                      {submitted > 0 && (
+                        <p className="text-sm text-emerald-700 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                          {submitted} reviewer report{submitted > 1 ? 's' : ''} submitted
+                        </p>
+                      )}
+                      {declined > 0 && (
+                        <p className="text-sm text-red-700 flex items-center gap-1.5">
+                          <XCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                          {declined} reviewer{declined > 1 ? 's' : ''} declined
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
+                {hasEditorEvaluation && (reviewerAssignments.length === 0 || hasRequiredReviews) && manuscript.status !== 'AWAITING_DECISION' && (
+                  <p className="text-sm text-amber-800 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 flex-shrink-0" />
+                    Manuscript not yet ready for a decision (currently {getManuscriptStatusLabel(manuscript)})
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         ) : pendingRevisionConfirm && decidedRevision && decidedRevision.editor_decision === 'ADDITIONAL_REVIEW' ? (

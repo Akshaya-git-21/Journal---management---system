@@ -2,11 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Role, ManuscriptStatus, Manuscript } from '../types';
 import {
   ManuscriptRow,
+  RevisionRow,
   listManuscripts,
   getManuscript,
   subscribeToManuscripts,
   getManuscriptFiles,
-  submitManuscript
+  submitManuscript,
+  getLatestRevisionsByManuscriptIds
 } from '../lib/workflow';
 import { supabase, upsertManuscriptToDb, ensureAuthorProfile } from '../lib/supabase';
 import { getManuscriptStatusLabel, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
@@ -58,6 +60,14 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   // in lib/manuscriptStatusLabel.ts). RLS already scopes listProduction() to
   // rows the author owns, same as their manuscripts themselves.
   const [productionByManuscript, setProductionByManuscript] = useState<Record<string, string>>({});
+  // manuscript_id -> latest manuscript_revisions row. Needed to tell "revision
+  // requested, not yet submitted" (AWAITING_AUTHOR_UPLOAD -- show "Submit
+  // Revision") apart from "already submitted, waiting on the Coordinator to
+  // forward it" (REVISION_SUBMITTED -- manuscripts.status stays
+  // REVISION_REQUESTED until then, see submit_revision() in
+  // 0038_revision_loop_accept_and_author_response.sql, so the raw status
+  // alone can't distinguish these two).
+  const [latestRevisionByManuscript, setLatestRevisionByManuscript] = useState<Record<string, RevisionRow>>({});
 
   useEffect(() => {
     const refetch = () => listProduction().then((rows) => {
@@ -105,6 +115,10 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       console.log('[LOAD] Setting items with', manuscriptsWithFiles.length, 'manuscripts');
       setItems((manuscriptsWithFiles || []) as ManuscriptRow[]);
       setError('');
+
+      getLatestRevisionsByManuscriptIds((data || []).map((m: any) => m.id))
+        .then(setLatestRevisionByManuscript)
+        .catch((e) => console.error('[LOAD] Error loading latest revisions:', e));
     } catch (e: any) {
       setError(e.message || 'Failed to load manuscripts');
       console.error('[LOAD] Error loading manuscripts:', e);
@@ -543,6 +557,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               paper={selected}
               onBack={() => { setView('list'); setSelectedId(null); }}
               currentUser={currentUser}
+              onSubmitRevision={() => setView('revision')}
             />
           )}
 
@@ -669,12 +684,18 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                                 View
                               </button>
                               {m.status === 'REVISION_REQUESTED' && (
-                                <button
-                                  onClick={() => { setSelectedId(m.id); setView('revision'); }}
-                                  className="rounded border border-orange-300 bg-orange-50 px-3 py-1.5 text-xs font-bold text-orange-700 hover:bg-orange-100 transition"
-                                >
-                                  Submit Revision
-                                </button>
+                                latestRevisionByManuscript[m.id]?.status === 'AWAITING_AUTHOR_UPLOAD' ? (
+                                  <button
+                                    onClick={() => { setSelectedId(m.id); setView('revision'); }}
+                                    className="rounded border border-orange-300 bg-orange-50 px-3 py-1.5 text-xs font-bold text-orange-700 hover:bg-orange-100 transition"
+                                  >
+                                    Submit Revision
+                                  </button>
+                                ) : (
+                                  <span className="inline-flex items-center rounded border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
+                                    Revision {latestRevisionByManuscript[m.id]?.revision_number ?? 1} — Submitted
+                                  </span>
+                                )
                               )}
                               <button
                                 onClick={() => { setSelectedId(m.id); setView('discussion'); }}

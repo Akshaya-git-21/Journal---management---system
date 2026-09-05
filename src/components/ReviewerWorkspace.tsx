@@ -388,7 +388,7 @@ function ManuscriptList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
                   onClick={() => onOpen(manuscript.id)}
                   className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white font-bold text-xs rounded-lg transition-all whitespace-nowrap"
                 >
-                  {assignment.status === 'INVITED' ? 'Accept/Decline' : 'Open Evaluation'}
+                  {assignment.status === 'INVITED' ? 'View Invitation' : 'View Assignment'}
                 </button>
               )}
               {assignment.status === 'SUBMITTED' && (
@@ -472,14 +472,37 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
   const [showDeclineModal, setShowDeclineModal] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
   const [files, setFiles] = useState<ManuscriptFileRow[]>([]);
+  const [filesRevisionNumber, setFilesRevisionNumber] = useState<number | null>(null);
   const [previewFile, setPreviewFile] = useState<ManuscriptFileRow | null>(null);
+  const [showEvaluation, setShowEvaluation] = useState(false);
 
   useEffect(() => {
     // The manuscript PDF is only unlocked once the invitation is accepted
     // (see spec: "Do not show the manuscript PDF ... before the reviewer
     // accepts the invitation").
     if (assignment.status === 'INVITED') return;
-    getManuscriptFiles(manuscript.id).then(setFiles).catch(() => {});
+
+    // getManuscriptFiles() only ever returns the ORIGINAL submission's files
+    // (revision_id is null). Once the author has submitted ANY revision --
+    // even an EDITOR_SCREENING-origin one that never touched this reviewer's
+    // own assignment (assignment.revision_number can still be 0 in that
+    // case, e.g. peer reviewers assigned after an earlier screening-only
+    // revision loop) -- those original files are stale. Always prefer the
+    // most recent revision's actual files when one exists; fall back to the
+    // original submission only if no revision has ever happened.
+    getRevisions(manuscript.id)
+      .then(async (revs) => {
+        const latest = revs.reduce<typeof revs[number] | null>((best, r) => (!best || r.revision_number > best.revision_number ? r : best), null);
+        const revFiles = latest ? await getRevisionFiles(latest.id) : [];
+        if (revFiles.length > 0) {
+          setFilesRevisionNumber(latest!.revision_number);
+          return revFiles;
+        }
+        setFilesRevisionNumber(null);
+        return getManuscriptFiles(manuscript.id);
+      })
+      .then(setFiles)
+      .catch(() => {});
   }, [manuscript.id, assignment.status]);
 
   const accept = async () => {
@@ -499,8 +522,6 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
     } catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
   };
-
-  const manuscriptPdf = files.find(f => f.file_type?.toLowerCase().includes('manuscript')) || files[0] || null;
 
   return (
     <div className="space-y-5">
@@ -546,18 +567,56 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
               </div>
             </div>
           </div>
-          {assignment.status !== 'INVITED' && (
+          {assignment.status === 'ACCEPTED' && (
             <button
-              onClick={() => manuscriptPdf && setPreviewFile(manuscriptPdf)}
-              disabled={!manuscriptPdf}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-all disabled:opacity-50 whitespace-nowrap flex items-center gap-1.5"
+              onClick={() => setShowEvaluation(true)}
+              className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white font-bold text-xs rounded-lg transition-all whitespace-nowrap flex items-center gap-1.5"
             >
-              <Eye className="w-3.5 h-3.5" />
-              {manuscriptPdf ? 'View Manuscript PDF' : 'No file available'}
+              <ClipboardCheck className="w-3.5 h-3.5" />
+              Open Evaluation
             </button>
           )}
         </div>
         <p className="text-sm text-slate-600 leading-relaxed">{manuscript.abstract}</p>
+
+        {assignment.status !== 'INVITED' && (
+          <div className="mt-5 pt-5 border-t border-slate-100">
+            <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">
+              {filesRevisionNumber !== null
+                ? `Revision ${filesRevisionNumber} File${files.length !== 1 ? 's' : ''} (${files.length})`
+                : `Manuscript File${files.length !== 1 ? 's' : ''} (${files.length})`}
+            </h3>
+            {files.length === 0 ? (
+              <p className="text-xs text-slate-500 py-1">
+                {filesRevisionNumber !== null ? 'No files were uploaded for this revision.' : 'No files were uploaded by the author.'}
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {files.map((f) => (
+                  <div key={f.id} className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-slate-900 truncate">{f.file_name}</p>
+                        <p className="text-[11px] text-slate-500">{f.file_type}{f.file_size ? ` · ${f.file_size}` : ''}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => setPreviewFile(f)} className="p-1.5 hover:bg-slate-200 rounded transition" title="View">
+                        <Eye className="w-4 h-4 text-slate-600" />
+                      </button>
+                      {f.public_url && (
+                        <a href={f.public_url} download={f.file_name} className="p-1.5 hover:bg-slate-200 rounded transition" title="Download">
+                          <Download className="w-4 h-4 text-slate-600" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {priorRounds.length > 0 && (
@@ -622,7 +681,15 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
       )}
 
       {assignment.status === 'ACCEPTED' && (
-        <ReviewForm manuscript={manuscript} assignmentId={assignment.id} onSubmitted={onChanged} isReReview={assignment.revision_number > 0} revisionNumber={assignment.revision_number} />
+        <ReviewForm
+          manuscript={manuscript}
+          assignmentId={assignment.id}
+          onSubmitted={onChanged}
+          isReReview={assignment.revision_number > 0}
+          revisionNumber={assignment.revision_number}
+          open={showEvaluation}
+          onOpenChange={setShowEvaluation}
+        />
       )}
 
       {assignment.status === 'SUBMITTED' && (
@@ -703,7 +770,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
   );
 }
 
-function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisionNumber }: { manuscript: ManuscriptRow; assignmentId: string; onSubmitted: () => void; isReReview: boolean; revisionNumber: number }) {
+function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisionNumber, open, onOpenChange }: { manuscript: ManuscriptRow; assignmentId: string; onSubmitted: () => void; isReReview: boolean; revisionNumber: number; open: boolean; onOpenChange: (open: boolean) => void }) {
   const [responses, setResponses] = useState<Record<string, { answer: boolean | null; reason: string }>>(
     () => Object.fromEntries(PEER_REVIEW_QUESTIONS.map(q => [q.id, { answer: null, reason: '' }]))
   );
@@ -712,7 +779,6 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [showModal, setShowModal] = useState(true);
   const [lastSaveTime, setLastSaveTime] = useState<string | null>(null);
 
   // Re-review context: which revision this round is re-checking, its
@@ -832,7 +898,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
     }
   };
 
-  if (!showModal) return null;
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
@@ -848,7 +914,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
               <span className="font-bold">Status:</span> ACCEPTED FOR REVIEW | <span className="font-bold">Referee:</span> You
             </p>
           </div>
-          <button onClick={() => setShowModal(false)} className="text-white font-black text-sm hover:opacity-75 flex items-center gap-1.5"><XIcon className="w-4 h-4" /> Close</button>
+          <button onClick={() => onOpenChange(false)} className="text-white font-black text-sm hover:opacity-75 flex items-center gap-1.5"><XIcon className="w-4 h-4" /> Close</button>
         </div>
 
         {/* Modal Body */}
@@ -1032,7 +1098,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setShowModal(false)}
+              onClick={() => onOpenChange(false)}
               className="px-4 py-2.5 border border-slate-300 text-slate-700 font-bold text-xs rounded-lg hover:bg-slate-100 transition-all"
             >
               Cancel

@@ -96,6 +96,17 @@ export function ReviewBoardTab({
     return action?.action || 'PENDING';
   };
 
+  // "ACCEPTED" from getSuggestionStatus only means the Coordinator accepted
+  // the editor's *suggestion* and sent an invitation (coordinatorAcceptSuggestion)
+  // -- it says nothing about whether that reviewer has actually responded.
+  // reviewer_assignments doesn't carry a suggestion_id back-reference, so the
+  // only way to find the resulting invitation is by matching the suggestion's
+  // email to a profile, then that profile's id to a reviewer_assignments row.
+  const getReviewerAssignmentForSuggestion = (suggestion: SuggestedReviewerRow) => {
+    const profileId = Object.values(profiles).find(p => p.email.toLowerCase() === suggestion.email.toLowerCase())?.id;
+    return profileId ? reviewerAssignments.find(r => r.reviewer_id === profileId) : undefined;
+  };
+
   // Get suggested reviewers that were actually persisted by editor
   const editorSuggestions = suggestedReviewers.filter(s => s.suggested_by === 'EDITOR');
 
@@ -414,11 +425,17 @@ export function ReviewBoardTab({
           <div className="space-y-3">
             {visibleEditorSuggestions.map(suggestion => {
               const status = getSuggestionStatus(suggestion.id);
-              const isAssigned = reviewerAssignments.some(r => r.reviewer_id === suggestion.id);
+              const reviewerAssignment = status === 'ACCEPTED' ? getReviewerAssignmentForSuggestion(suggestion) : undefined;
+              // Once the Coordinator has accepted the suggestion, the badge
+              // should track the actual reviewer's response, not just "the
+              // Coordinator sent an invite" -- INVITED until the reviewer
+              // themself accepts (or SUBMITTED/further, which implies accepted).
+              const reviewerHasAccepted = reviewerAssignment ? reviewerAssignment.status !== 'INVITED' && reviewerAssignment.status !== 'DECLINED' : false;
+              const reviewerDeclined = reviewerAssignment?.status === 'DECLINED';
 
               return (
                 <div key={suggestion.id} className={`border rounded-lg p-4 ${
-                  status === 'ACCEPTED' ? 'bg-emerald-50 border-emerald-200' :
+                  status === 'ACCEPTED' ? (reviewerHasAccepted ? 'bg-emerald-50 border-emerald-200' : reviewerDeclined ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200') :
                   status === 'DECLINED' ? 'bg-red-50 border-red-200' :
                   status === 'REPLACED' ? 'bg-blue-50 border-blue-200' :
                   'border-slate-200'
@@ -428,7 +445,13 @@ export function ReviewBoardTab({
                       <div className="flex items-center gap-2 mb-1">
                         <p className="font-semibold text-slate-900">{suggestion.name}</p>
                         {status === 'ACCEPTED' && (
-                          <span className="text-xs px-2 py-0.5 bg-emerald-200 text-emerald-700 rounded-full font-bold">✓ Accepted</span>
+                          reviewerHasAccepted ? (
+                            <span className="text-xs px-2 py-0.5 bg-emerald-200 text-emerald-700 rounded-full font-bold">✓ Accepted</span>
+                          ) : reviewerDeclined ? (
+                            <span className="text-xs px-2 py-0.5 bg-red-200 text-red-700 rounded-full font-bold">✕ Declined</span>
+                          ) : (
+                            <span className="text-xs px-2 py-0.5 bg-amber-200 text-amber-800 rounded-full font-bold">⏳ Invited</span>
+                          )
                         )}
                         {status === 'DECLINED' && (
                           <span className="text-xs px-2 py-0.5 bg-red-200 text-red-700 rounded-full font-bold">✕ Declined</span>

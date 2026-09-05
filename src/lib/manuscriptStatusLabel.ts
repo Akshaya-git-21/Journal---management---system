@@ -1,6 +1,10 @@
 import { ManuscriptStatus } from '../types';
 import { RevisionRow } from './workflow';
 
+interface EditorAssignmentStatusLike {
+  status: 'INVITED' | 'ACCEPTED' | 'DECLINED';
+}
+
 /**
  * Phase 3 -- standardized user-facing manuscript status. Exactly 8 values,
  * identical across Author/Coordinator/Editor/Reviewer. Internal workflow
@@ -17,7 +21,7 @@ export type StandardStatus = typeof STANDARD_STATUSES[number];
 
 /** Shared badge coloring so every workspace renders the same status the
  * same way -- no more per-workspace STATUS_STYLES duplicates. */
-export const STANDARD_STATUS_COLORS: Record<StandardStatus | 'DRAFT' | 'PRODUCTION PREPARATION', string> = {
+export const STANDARD_STATUS_COLORS: Record<StandardStatus | 'DRAFT' | 'PRODUCTION PREPARATION' | 'EDITOR ASSIGNED', string> = {
   DRAFT: 'bg-slate-100 text-slate-600 border-slate-200',
   SUBMITTED: 'bg-amber-50 text-amber-700 border-amber-200',
   'EDITORIAL REVIEW': 'bg-blue-50 text-blue-700 border-blue-200',
@@ -28,6 +32,7 @@ export const STANDARD_STATUS_COLORS: Record<StandardStatus | 'DRAFT' | 'PRODUCTI
   PROOFREADING: 'bg-sky-50 text-sky-700 border-sky-200',
   PUBLISHED: 'bg-emerald-100 text-emerald-800 border-emerald-300',
   'PRODUCTION PREPARATION': 'bg-teal-50 text-teal-700 border-teal-200',
+  'EDITOR ASSIGNED': 'bg-indigo-50 text-indigo-700 border-indigo-200',
 };
 
 interface ManuscriptStatusLike {
@@ -98,6 +103,42 @@ export function getManuscriptStatusMeta(manuscript: ManuscriptStatusLike, latest
   if (label === 'REJECTED') return { label, nextStep: 'Manuscript rejected' };
   if (label === 'PUBLISHED') return { label, nextStep: 'Published' };
   return { label, nextStep: '' };
+}
+
+/**
+ * Coordinator-only variant of getManuscriptStatusLabel(): the shared
+ * "EDITORIAL REVIEW" label is what every role (Author included) sees the
+ * moment assign_editor() fires -- correct for the Author, who only cares
+ * that their manuscript reached an editor. The Coordinator, though, is the
+ * one who has to notice a still-pending assignment and chase it up, so
+ * their view distinguishes "assigned, not yet accepted" (EDITOR ASSIGNED)
+ * from "the editor is actually working on it" (EDITORIAL REVIEW) using the
+ * same editorAssignments the Overview/Decision tabs already fetch. Never
+ * touches manuscripts.status or display_status -- purely a Coordinator-side
+ * relabeling of the same EDITORIAL REVIEW state, so Author/Editor/Reviewer
+ * views are unaffected.
+ */
+export function getCoordinatorStatusLabel(
+  manuscript: ManuscriptStatusLike,
+  editorAssignments: EditorAssignmentStatusLike[] | undefined | null,
+  latestRevision?: RevisionRow | null,
+  productionStatus?: string | null
+): string {
+  const label = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
+  if (label !== 'EDITORIAL REVIEW' || !editorAssignments || editorAssignments.length === 0) return label;
+  const activeEditor = editorAssignments.find((a) => a.status === 'ACCEPTED') || editorAssignments[0];
+  return activeEditor.status === 'ACCEPTED' ? label : 'EDITOR ASSIGNED';
+}
+
+export function getCoordinatorStatusMeta(
+  manuscript: ManuscriptStatusLike,
+  editorAssignments: EditorAssignmentStatusLike[] | undefined | null,
+  latestRevision?: RevisionRow | null,
+  productionStatus?: string | null
+): { label: string; nextStep: string } {
+  const label = getCoordinatorStatusLabel(manuscript, editorAssignments, latestRevision, productionStatus);
+  if (label === 'EDITOR ASSIGNED') return { label, nextStep: 'Waiting for the editor to accept the assignment' };
+  return getManuscriptStatusMeta(manuscript, latestRevision, productionStatus);
 }
 
 /** Picks the most recent manuscript_revisions row (by revision_number). */

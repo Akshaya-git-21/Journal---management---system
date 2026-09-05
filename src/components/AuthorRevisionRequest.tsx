@@ -118,7 +118,6 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   const [submitting, setSubmitting] = useState(false);
   const [responseNote, setResponseNote] = useState('');
   const [error, setError] = useState('');
-  const [showDecisionLetter, setShowDecisionLetter] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
   const [manualChecklist, setManualChecklist] = useState({ addressedComments: false, confirmedDetails: false });
   const [confirmingSubmit, setConfirmingSubmit] = useState(false);
@@ -151,13 +150,28 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   }, [selectedRevision]);
 
   // Reviewer feedback that led to this revision (Phase 2 Checkpoint C) --
-  // the round just before this one. Kept separate from the Editor's
-  // Decision card below so the Author can tell which feedback came from
-  // which role. Reviewer identity isn't resolved/shown (double-blind).
+  // the most recent reviewer round actually completed before this revision
+  // was created. Kept separate from the Editor's Decision card below so the
+  // Author can tell which feedback came from which role. Reviewer identity
+  // isn't resolved/shown (double-blind).
+  //
+  // NOT simply "revision_number - 1": that assumes every revision has its
+  // own numbered reviewer round immediately before it, which breaks the
+  // moment an EDITOR_SCREENING-origin revision (e.g. "Return to Author"
+  // sent right after a peer-review round, with no reviewer round of its
+  // own) sits in between -- the reviewers' actual reviewer_assignments rows
+  // are still numbered for the ORIGINAL peer-review round (often 0), not
+  // this revision's number minus one. Take the latest SUBMITTED round
+  // strictly before this revision instead, whatever its number is.
   useEffect(() => {
     if (!selectedRevision || selectedRevision.revision_number <= 0) { setReviewerComments([]); return; }
     getReviewerAssignments(manuscriptId)
-      .then(rows => setReviewerComments(rows.filter(r => r.revision_number === selectedRevision.revision_number - 1 && r.status === 'SUBMITTED')))
+      .then(rows => {
+        const priorSubmitted = rows.filter(r => r.status === 'SUBMITTED' && (r.revision_number ?? 0) < selectedRevision.revision_number);
+        if (priorSubmitted.length === 0) { setReviewerComments([]); return; }
+        const latestRound = Math.max(...priorSubmitted.map(r => r.revision_number ?? 0));
+        setReviewerComments(priorSubmitted.filter(r => (r.revision_number ?? 0) === latestRound));
+      })
       .catch(() => setReviewerComments([]));
   }, [manuscriptId, selectedRevision?.id, selectedRevision?.revision_number]);
 
@@ -375,28 +389,15 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
           </div>
         )}
 
-        {/* The Coordinator's note to author is pre-filled from the Return
-            to Author Reason (see DecisionTab.tsx) but can be edited before
-            sending -- only show it as its own block when it actually
-            diverges from that reason, so the common case doesn't repeat
-            the same text twice. */}
-        {selectedRevision.decision_letter && selectedRevision.decision_letter.trim() !== (editorNotes?.action_reason || '').trim() && (
-          <div>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Note from Coordinator</p>
-            <p className="text-sm text-slate-700 italic leading-relaxed">
-              "{showDecisionLetter || selectedRevision.decision_letter.length <= 160 ? selectedRevision.decision_letter : selectedRevision.decision_letter.slice(0, 160) + '…'}"
-            </p>
-            {selectedRevision.decision_letter.length > 160 && (
-              <button
-                onClick={() => setShowDecisionLetter(v => !v)}
-                className="text-xs font-bold text-blue-600 hover:text-blue-700 mt-2"
-              >
-                {showDecisionLetter ? 'Show less' : 'View full note'}
-              </button>
-            )}
-          </div>
-        )}
-        {((isScreeningOrigin && selectedRevision.revision_number > 1) || !isScreeningOrigin) && !selectedRevision.decision_letter && !selectedRevision.editor_comments && (
+        {/* The Coordinator's note to author (decision_letter) is just the
+            Editor Comments and each reviewer's Comments to Author
+            concatenated into one string (see buildAuthorNote() in
+            DecisionTab.tsx) -- both already render as their own labeled
+            blocks here (Editor Comments above, Reviewer 1/Reviewer 2 below),
+            so showing decision_letter too was pure duplication of the exact
+            same text under a third, unattributed "Note from Coordinator"
+            heading. Dropped entirely; nothing else reads decision_letter. */}
+        {((isScreeningOrigin && selectedRevision.revision_number > 1) || !isScreeningOrigin) && !selectedRevision.editor_comments && (
           <p className="text-sm text-slate-500 italic">No letter provided.</p>
         )}
       </div>
@@ -412,15 +413,6 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
             <div key={r.id} className="border border-slate-200 rounded-lg p-4">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Reviewer {idx + 1}</p>
               {r.comments_to_author && <p className="text-sm text-slate-700 leading-relaxed">{r.comments_to_author}</p>}
-              {(r.screening_responses?.length ?? 0) > 0 && (
-                <div className="mt-3 space-y-1.5">
-                  {r.screening_responses.filter(resp => !resp.answer).map(resp => (
-                    <p key={resp.question_id} className="text-xs text-slate-600 bg-slate-50 rounded p-2">
-                      <span className="font-bold text-red-700">Flagged:</span> {resp.reason}
-                    </p>
-                  ))}
-                </div>
-              )}
             </div>
           ))}
         </div>

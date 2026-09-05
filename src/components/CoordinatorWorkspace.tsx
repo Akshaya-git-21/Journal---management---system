@@ -108,18 +108,6 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [gdMemberInvitePassword, setGdMemberInvitePassword] = useState('');
   const [generatedGDMemberCredentials, setGeneratedGDMemberCredentials] = useState<{ email: string; password: string } | null>(null);
   const [selectedEditorForDetails, setSelectedEditorForDetails] = useState<ProfileRow | null>(null);
-  const [currentUserToken, setCurrentUserToken] = useState<string>('');
-
-  // Get current user's auth token for password reset
-  useEffect(() => {
-    const getToken = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        setCurrentUserToken(session.access_token);
-      }
-    };
-    getToken();
-  }, []);
 
   // Lazily surface any reviewer-replacement deadline that expired with no
   // Editor action taken -- idempotent (see notify_expired_reviewer_replacements
@@ -763,7 +751,6 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
             <EditorDetailsModal
               editor={selectedEditorForDetails}
               onClose={() => setSelectedEditorForDetails(null)}
-              currentUserToken={currentUserToken}
             />
           )}
         </div>

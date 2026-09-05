@@ -85,6 +85,10 @@ interface OjsSubmissionDetailProps {
   onBack: () => void;
   onUpdatePaperDiscussions?: (paperId: string, updatedDiscussions: any[]) => void;
   currentUser?: { name: string; email: string; role: string } | null;
+  /** Jumps to the same AuthorRevisionRequest screen the Manuscript Queue's
+   * own "Submit Revision" button opens -- only relevant while the
+   * manuscript is REVISION_REQUESTED. */
+  onSubmitRevision?: () => void;
 }
 
 // Predefined OJS templates
@@ -110,7 +114,8 @@ export default function OjsSubmissionDetail({
   paper,
   onBack,
   onUpdatePaperDiscussions,
-  currentUser
+  currentUser,
+  onSubmitRevision
 }: OjsSubmissionDetailProps) {
   // Navigation tabs within submission view
   const [activeTab, setActiveTab] = useState<string>('SUBMISSION');
@@ -1070,18 +1075,47 @@ export default function OjsSubmissionDetail({
                   const decisionLetterEntry = manuscriptDetails.statusHistory?.find(h => h.to_status === status && h.note);
                   const isAccepted = status === 'ACCEPTED';
                   const isRejected = status === 'REJECTED';
+                  // manuscripts.status stays REVISION_REQUESTED even after the
+                  // author submits -- only the revision row itself flips from
+                  // AWAITING_AUTHOR_UPLOAD to REVISION_SUBMITTED, until the
+                  // Coordinator forwards it on (see submit_revision() in
+                  // 0038_revision_loop_accept_and_author_response.sql). So
+                  // "still needs a submission" has to check the revision, not
+                  // just the manuscript status.
+                  const revisionPending = status === 'REVISION_REQUESTED' && latestRevision?.status === 'AWAITING_AUTHOR_UPLOAD';
+                  const revisionAlreadySubmitted = status === 'REVISION_REQUESTED' && latestRevision && latestRevision.status !== 'AWAITING_AUTHOR_UPLOAD';
                   return (
                     <div className={`rounded-2xl p-5 border-2 ${
                       isRejected ? 'bg-red-50 border-red-200' :
                       isAccepted ? 'bg-emerald-50 border-emerald-200' :
                       'bg-amber-50 border-amber-200'
                     }`}>
-                      <p className={`text-base font-black ${isRejected ? 'text-red-800' : isAccepted ? 'text-emerald-800' : 'text-amber-800'}`}>
-                        {isAccepted ? 'Manuscript Accepted' : isRejected ? 'Manuscript Rejected' : `Revision Required — ${meta.label}`}
-                      </p>
-                      <p className="text-sm font-semibold text-slate-700 mt-1">Status: {meta.label}</p>
-                      {isAccepted && <p className="text-sm font-semibold text-slate-700 mt-1">Decision: Accepted</p>}
-                      {meta.nextStep && <p className="text-sm text-slate-600 mt-1">Next step: {meta.nextStep}</p>}
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className={`text-base font-black ${isRejected ? 'text-red-800' : isAccepted ? 'text-emerald-800' : 'text-amber-800'}`}>
+                            {isAccepted ? 'Manuscript Accepted' : isRejected ? 'Manuscript Rejected' :
+                              revisionAlreadySubmitted ? `Revision ${latestRevision!.revision_number} Submitted` :
+                              `Revision Required — ${meta.label}`}
+                          </p>
+                          <p className="text-sm font-semibold text-slate-700 mt-1">Status: {meta.label}</p>
+                          {isAccepted && <p className="text-sm font-semibold text-slate-700 mt-1">Decision: Accepted</p>}
+                          {revisionAlreadySubmitted && <p className="text-sm text-slate-600 mt-1">Waiting for the editorial team to review your submission.</p>}
+                          {meta.nextStep && <p className="text-sm text-slate-600 mt-1">Next step: {meta.nextStep}</p>}
+                        </div>
+                        {revisionPending && onSubmitRevision && (
+                          <button
+                            onClick={onSubmitRevision}
+                            className="shrink-0 rounded-lg border border-orange-300 bg-orange-50 px-4 py-2 text-xs font-bold text-orange-700 hover:bg-orange-100 transition"
+                          >
+                            Submit Revision
+                          </button>
+                        )}
+                        {revisionAlreadySubmitted && (
+                          <span className="shrink-0 inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-700">
+                            Revision {latestRevision!.revision_number} — Submitted
+                          </span>
+                        )}
+                      </div>
                       {decisionLetterEntry?.note && (
                         <p className="text-sm text-slate-700 mt-3 whitespace-pre-wrap border-t border-black/10 pt-3">{decisionLetterEntry.note}</p>
                       )}
@@ -1254,8 +1288,8 @@ export default function OjsSubmissionDetail({
                 {/* Uploaded Files and Pre-Review Discussions Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full">
                   {/* Uploaded Files Panel */}
-                  <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl p-4 shadow-xs text-left flex flex-col justify-between min-h-[500px]">
-                    <div>
+                  <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl p-4 shadow-xs text-left flex flex-col h-[500px] overflow-hidden">
+                    <div className="shrink-0">
                       <input
                         type="file"
                         ref={fileInputRef}
@@ -1283,8 +1317,15 @@ export default function OjsSubmissionDetail({
                           </button>
                         </div>
                       </div>
-                      
-                      <div className="mt-3 overflow-x-auto rounded-lg border border-emerald-100">
+                    </div>
+
+                    {/* Scrollable region: as revisions accumulate (Revision 1,
+                        Revision 2, ...) this list keeps growing -- without a
+                        capped, scrollable container it pushed the card taller
+                        than its fixed-height Discussions sibling every time,
+                        making the two-column grid row uneven. */}
+                    <div className="flex-1 overflow-y-auto mt-3">
+                      <div className="overflow-x-auto rounded-lg border border-emerald-100">
                         <table className="w-full text-left text-xs border-collapse">
                           <thead>
                             <tr className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 border-b border-emerald-100 bg-slate-50">
@@ -1367,9 +1408,8 @@ export default function OjsSubmissionDetail({
                           </tbody>
                         </table>
                       </div>
-                    </div>
 
-                    {[...allRevisions].sort((a, b) => a.revision_number - b.revision_number).map((rev) => {
+                      {[...allRevisions].sort((a, b) => a.revision_number - b.revision_number).map((rev) => {
                       const files = allRevisionFilesById[rev.id] || [];
                       return (
                         <div key={rev.id} className="mt-4 pt-3 border-t border-emerald-100">
@@ -1450,8 +1490,9 @@ export default function OjsSubmissionDetail({
                         </div>
                       );
                     })}
+                    </div>
 
-                    <div className="border-t pt-3 border-emerald-100 mt-3">
+                    <div className="shrink-0 border-t pt-3 border-emerald-100 mt-3">
                       <button
                         onClick={() => alert("Downloading all matching document publication files recursively as a single zip file.")}
                         className="inline-flex items-center gap-2 text-[12px] font-bold text-[#008751] hover:text-[#007043] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg transition cursor-pointer shadow-2xs"
