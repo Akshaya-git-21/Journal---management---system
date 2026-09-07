@@ -40,6 +40,7 @@ import EditorEvaluationSidebar from './EditorEvaluationSidebar';
 import FilePreviewModal from './FilePreviewModal';
 import EditorRevisionReview from './EditorRevisionReview';
 import EditorProductionVerification from './production/EditorProductionVerification';
+import { getProduction, getCorrections, subscribeToProduction, ProductionRow, CorrectionRow } from '../lib/production';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 
 /** Which Editor tab a given notification type should land on -- e.g.
@@ -638,6 +639,28 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
   const [error, setError] = useState('');
   const [sidebarSection, setSidebarSection] = useState<'dashboard' | 'evaluation_timeline' | 'title_abstract' | 'authors' | 'manuscript' | 'references' | 'supplementary' | 'cover_letter' | 'discussions' | 'editor_evaluation' | 'reviews' | 'decision' | 'suggestions' | 'review_history' | 'metadata' | 'revisions' | 'production' | 'galley_files'>('dashboard');
   const [activeTab, setActiveTab] = useState<'status' | 'files' | 'evaluation' | 'decision' | 'reviews' | 'revisions' | 'comments'>(initialTab || 'status');
+  const [production, setProduction] = useState<ProductionRow | null>(null);
+  const [productionCorrections, setProductionCorrections] = useState<CorrectionRow[]>([]);
+
+  // RLS only exposes manuscript_production/manuscript_production_corrections
+  // to this Editor once a correction package is explicitly routed to them
+  // (sent_to_editor_at) -- fetching unconditionally is safe either way,
+  // since a manuscript never sent to them just resolves to no rows.
+  useEffect(() => {
+    let cancelled = false;
+    const refetch = () => {
+      getProduction(manuscript.id).then((p) => { if (!cancelled) setProduction(p); }).catch(() => {});
+      getCorrections(manuscript.id).then((c) => { if (!cancelled) setProductionCorrections(c); }).catch(() => {});
+    };
+    refetch();
+    const unsubscribe = subscribeToProduction(refetch);
+    return () => { cancelled = true; unsubscribe(); };
+  }, [manuscript.id]);
+
+  // True once the Coordinator has routed a correction to this Editor and
+  // they haven't yet submitted their editorial feedback on it.
+  const pendingProductionVerification = !!production?.sent_to_editor_at &&
+    !productionCorrections.find((c) => c.id === production.sent_to_editor_correction_id)?.editor_feedback_at;
 
   // A notification click can request a specific tab (see EditorWorkspace's
   // JMS_OPEN_MANUSCRIPT_EVENT listener) -- apply it once on mount and let
@@ -1086,6 +1109,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                 const reviewsSubmittedCount = activeReviews.filter(r => r.status === 'SUBMITTED').length;
 
                 const getStatusDescription = (): string => {
+                  if (pendingProductionVerification) return 'The Coordinator sent you the Author\'s proof corrections to verify.';
                   if (!evaluationDone) return 'Complete your editorial screening evaluation.';
                   if (readyToSelectReviewers) return 'Select 2 reviewers to begin peer review.';
                   if (isRevisionReviewPage) return `Revision ${revisionN} is ready for your review.`;
@@ -1112,12 +1136,25 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                       <div className="space-y-4">
                         <div>
                           <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Status</p>
-                          <p className="text-lg font-bold text-slate-900">{getManuscriptStatusLabel(manuscript, latestRevisionForReview)}</p>
+                          <p className="text-lg font-bold text-slate-900">{getManuscriptStatusLabel(manuscript, latestRevisionForReview, production?.production_status)}</p>
                           {revisionN != null && (
                             <p className="text-xs font-bold text-slate-500 mt-1">Revision: {revisionN}</p>
                           )}
                           <p className="text-sm text-slate-600 mt-1">{getStatusDescription()}</p>
                         </div>
+
+                        {pendingProductionVerification && (
+                          <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+                            <p className="text-sm font-bold text-teal-900 mb-1">Proofreading corrections ready for your review</p>
+                            <p className="text-xs text-teal-800 mb-3">The Coordinator sent over the Author's proof corrections (and the current proof PDF) for you to verify.</p>
+                            <button
+                              onClick={() => setSidebarSection('production')}
+                              className="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2.5 rounded-lg transition"
+                            >
+                              Review Proofreading Corrections
+                            </button>
+                          </div>
+                        )}
 
                         {!evaluationDone && (
                           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
