@@ -97,7 +97,6 @@ export function DecisionTab({
   const [moveToProductionError, setMoveToProductionError] = useState('');
   const [sendingProofToAuthor, setSendingProofToAuthor] = useState(false);
   const [sendProofToAuthorError, setSendProofToAuthorError] = useState('');
-  const [sendProofToAuthorSuccess, setSendProofToAuthorSuccess] = useState(false);
   // GD Member assignment gate -- clicking "Move to Production" must not
   // actually start production until a GD Member is assigned (see the
   // Coordinator's requirement: "if no GD Member is assigned, a popup should
@@ -188,21 +187,13 @@ export function DecisionTab({
   };
 
   const handleSendProofToAuthor = async () => {
-    if (sendingProofToAuthor || !canSendProofToAuthor) return;
+    if (sendingProofToAuthor || !proofToSend) return;
     setSendingProofToAuthor(true);
     setSendProofToAuthorError('');
-    setSendProofToAuthorSuccess(false);
     try {
       const updated = await sendProofToAuthor(manuscript.id);
       setProductionStatus(updated.production_status);
       onWorkflowChange();
-      // The button's visible state doesn't change when the status was
-      // already PROOF_SENT_TO_AUTHOR (a resend), so without this the click
-      // looked like it did nothing -- show an explicit confirmation instead,
-      // auto-clearing after a few seconds like the draft-saved pattern
-      // elsewhere in this app.
-      setSendProofToAuthorSuccess(true);
-      setTimeout(() => setSendProofToAuthorSuccess(false), 3000);
     } catch (e: any) {
       setSendProofToAuthorError(e.message || 'Failed to send the proof to the author.');
     } finally {
@@ -389,13 +380,14 @@ export function DecisionTab({
   const decided = ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
   const statusMeta = getCoordinatorStatusMeta(manuscript, editorAssignments, latestRevision, productionStatus);
   const canMoveToProduction = manuscript.status === 'ACCEPTED' && (!productionStatus || productionStatus === 'NOT_STARTED');
-  // Shown and clickable for the whole "PROOFREADING" stretch -- including
-  // PROOF_SENT_TO_AUTHOR, where it's a resend/re-notify of the current proof
-  // rather than a new one (see send_proof_to_author() in 0067, which now
-  // treats that case as a no-op status change plus a fresh notification).
-  const showSendProofToAuthor = !isEditor && productionStatus && statusMeta.label === 'PROOFREADING';
-  const canSendProofToAuthor = !isEditor && !!productionStatus &&
-    ['PROOF_GENERATED', 'PROOF_SUBMITTED_TO_COORDINATOR', 'PROOF_UPDATED', 'FINAL_PROOF_READY', 'PROOF_SENT_TO_AUTHOR'].includes(productionStatus);
+  // A one-time action -- once the current proof has actually reached the
+  // Author (PROOF_SENT_TO_AUTHOR), the button disappears entirely rather
+  // than staying around to be clicked again; only a plain "already sent"
+  // line shows instead. It only reappears once there's something new to
+  // send (a corrections-round proof update, etc.).
+  const proofToSend = !isEditor && !!productionStatus &&
+    ['PROOF_GENERATED', 'PROOF_SUBMITTED_TO_COORDINATOR', 'PROOF_UPDATED', 'FINAL_PROOF_READY'].includes(productionStatus);
+  const proofAlreadySent = !isEditor && productionStatus === 'PROOF_SENT_TO_AUTHOR';
   const finalDecisionLabel =
     manuscript.status === 'ACCEPTED' ? 'ACCEPT' :
     manuscript.status === 'REJECTED' ? 'REJECT' :
@@ -1012,26 +1004,26 @@ export function DecisionTab({
                   <p className="text-sm font-bold text-slate-700">{statusMeta.nextStep}</p>
                 </>
               )}
-              {showSendProofToAuthor && (
+              {proofToSend && (
                 <div className="pt-3">
                   <button
                     type="button"
                     onClick={handleSendProofToAuthor}
-                    disabled={sendingProofToAuthor || !canSendProofToAuthor}
+                    disabled={sendingProofToAuthor}
                     className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {sendingProofToAuthor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                     {sendingProofToAuthor ? 'Sending...' : 'Send Proof to Author'}
                   </button>
-                  {sendProofToAuthorSuccess && (
-                    <p className="mt-2 text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Proof sent to the Author.
-                    </p>
-                  )}
                   {sendProofToAuthorError && (
                     <p className="mt-2 text-xs font-semibold text-red-600">{sendProofToAuthorError}</p>
                   )}
                 </div>
+              )}
+              {proofAlreadySent && (
+                <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Proof sent to the Author -- awaiting their response.
+                </p>
               )}
             </div>
           )}
