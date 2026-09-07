@@ -1180,13 +1180,24 @@ export function DecisionTab({
                 {c.editor_feedback_at && (
                   <div className="rounded-xl border-2 border-slate-900 p-4 space-y-2">
                     <p className="text-[11px] uppercase tracking-wide text-slate-500 font-bold">Send to GD Member for Corrections</p>
-                    <button
-                      disabled={correctionsBusy}
-                      onClick={() => runCorrectionsAction(() => sendForCorrections(manuscript.id, c.id), 'Sent to the GD Member for corrections.')}
-                      className="inline-flex items-center gap-1 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
-                    >
-                      <Send className="w-3.5 h-3.5" /> Send for Corrections
-                    </button>
+                    {/* PRODUCTION_REVIEW is the only status this is actionable
+                        from -- once clicked, production_status moves to
+                        CORRECTIONS_IN_PROGRESS (and beyond as the GD Member
+                        works), so anything else means it's already been sent
+                        and shouldn't be clickable again. */}
+                    {productionStatus === 'PRODUCTION_REVIEW' ? (
+                      <button
+                        disabled={correctionsBusy}
+                        onClick={() => runCorrectionsAction(() => sendForCorrections(manuscript.id, c.id), 'Sent to the GD Member for corrections.')}
+                        className="inline-flex items-center gap-1 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
+                      >
+                        <Send className="w-3.5 h-3.5" /> Send for Corrections
+                      </button>
+                    ) : (
+                      <span className="text-[10px] font-bold uppercase text-emerald-700 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Submitted
+                      </span>
+                    )}
                   </div>
                 )}
               </div>

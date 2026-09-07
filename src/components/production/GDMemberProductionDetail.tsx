@@ -552,6 +552,34 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
             </div>
           )}
 
+          {corrections.length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-3xl p-6">
+              <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-4">Author Proof Corrections</h2>
+              <div className="space-y-4">
+                {corrections.map((c) => (
+                  <div key={c.id} className="rounded-2xl border border-slate-200 p-4 text-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="font-bold text-slate-800">Proof v{c.proof_version} — submitted {formatDate(c.submitted_at)}</p>
+                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${c.status === 'REVIEWED' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{c.status}</span>
+                    </div>
+                    <p className="text-slate-600 whitespace-pre-wrap">{c.comments}</p>
+                    {c.attachment_public_url && (
+                      <a href={c.attachment_public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-[#008751] hover:underline">
+                        <Download className="w-3.5 h-3.5" /> {c.attachment_file_name || 'Proof Corrections attachment'}
+                      </a>
+                    )}
+                    {c.editor_feedback_at && (
+                      <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 space-y-1">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">Editor Feedback</p>
+                        <p className="text-slate-600 whitespace-pre-wrap">{c.editor_comments || 'No editorial comments.'}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Task 15: the actual corrections work -- upload/replace the
              corrected PDF, add notes, work through the Correction Checklist,
              then submit. Only shown while CORRECTIONS_IN_PROGRESS; locked
@@ -668,34 +696,6 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
                   </>
                 );
               })()}
-            </div>
-          )}
-
-          {corrections.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-3xl p-6">
-              <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-4">Author Proof Corrections</h2>
-              <div className="space-y-4">
-                {corrections.map((c) => (
-                  <div key={c.id} className="rounded-2xl border border-slate-200 p-4 text-sm space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="font-bold text-slate-800">Proof v{c.proof_version} — submitted {formatDate(c.submitted_at)}</p>
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${c.status === 'REVIEWED' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{c.status}</span>
-                    </div>
-                    <p className="text-slate-600 whitespace-pre-wrap">{c.comments}</p>
-                    {c.attachment_public_url && (
-                      <a href={c.attachment_public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-[#008751] hover:underline">
-                        <Download className="w-3.5 h-3.5" /> {c.attachment_file_name || 'Proof Corrections attachment'}
-                      </a>
-                    )}
-                    {c.editor_feedback_at && (
-                      <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 space-y-1">
-                        <p className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">Editor Feedback</p>
-                        <p className="text-slate-600 whitespace-pre-wrap">{c.editor_comments || 'No editorial comments.'}</p>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
             </div>
           )}
 
