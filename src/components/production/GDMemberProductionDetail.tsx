@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Loader2, CheckCircle2, Circle, Check, Minus, Download, Eye, AlertTriangle, CheckSquare, Upload, Send } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, Circle, Check, Download, Eye, AlertTriangle, CheckSquare, Upload, Send } from 'lucide-react';
 import { ManuscriptRow, ProfileRow, getManuscript, getProfilesByIds } from '../../lib/workflow';
 import {
   ProductionRow, ProductionChecklistItemRow, ChecklistItemStatus, ProofRow, CorrectionRow,
@@ -12,8 +12,10 @@ import { getManuscriptStatusLabel, STANDARD_STATUS_COLORS } from '../../lib/manu
 
 const JOURNAL_NAME = 'Journal of Molecular Sciences';
 
+// Plain checked/unchecked toggle -- no IN_PROGRESS middle state. A stray
+// IN_PROGRESS row from before this change just toggles straight to COMPLETED.
 const CHECKLIST_STATUS_CYCLE: Record<ChecklistItemStatus, ChecklistItemStatus> = {
-  PENDING: 'IN_PROGRESS', IN_PROGRESS: 'COMPLETED', COMPLETED: 'PENDING',
+  PENDING: 'COMPLETED', IN_PROGRESS: 'COMPLETED', COMPLETED: 'PENDING',
 };
 
 const STEPS = ['Accepted', 'Copyediting', 'Formatting', 'Typesetting', 'Proof Generated', 'Author Proofreading', 'Final Approval', 'Publication'];
@@ -39,21 +41,15 @@ function formatDate(iso: string | null | undefined) {
   return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-/** Checkbox-style tick mark (not a circular icon) -- matches the ☐/☑
+/** Plain checkbox-style tick mark (not a circular icon) -- matches the ☐/☑
  * checklist wireframe from Task 6. COMPLETED = filled square with a tick,
- * IN_PROGRESS = amber square with a dash, PENDING = empty square. */
+ * anything else (PENDING, or a stray IN_PROGRESS from before this became a
+ * two-state toggle) = empty square. */
 function ChecklistIcon({ status }: { status: ProductionChecklistItemRow['status'] }) {
   if (status === 'COMPLETED') {
     return (
       <span className="flex items-center justify-center w-4 h-4 rounded-[4px] bg-emerald-600 shrink-0">
         <Check className="w-3 h-3 text-white" strokeWidth={3} />
-      </span>
-    );
-  }
-  if (status === 'IN_PROGRESS') {
-    return (
-      <span className="flex items-center justify-center w-4 h-4 rounded-[4px] border-2 border-amber-500 bg-amber-50 shrink-0">
-        <Minus className="w-3 h-3 text-amber-600" strokeWidth={3} />
       </span>
     );
   }
@@ -326,10 +322,7 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
                               className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-left hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                               <span className="text-slate-700">{item.item_label}</span>
-                              <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase text-slate-400">
-                                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChecklistIcon status={item.status} />}
-                                {item.status.replace('_', ' ')}
-                              </span>
+                              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChecklistIcon status={item.status} />}
                             </button>
                           );
                         })}
@@ -457,14 +450,11 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
                                 type="button"
                                 disabled={!draftEditable || busy}
                                 onClick={() => handleToggleItem(item)}
-                                title="Click to cycle: Pending -> In Progress -> Completed"
+                                title="Click to toggle checked"
                                 className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-left hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
                               >
                                 <span className="text-slate-700">{item.item_label}</span>
-                                <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase text-slate-400">
-                                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChecklistIcon status={item.status} />}
-                                  {item.status.replace('_', ' ')}
-                                </span>
+                                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChecklistIcon status={item.status} />}
                               </button>
                             );
                           })}
@@ -648,14 +638,11 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
                                 type="button"
                                 disabled={busy}
                                 onClick={() => handleToggleCorrectionItem(item)}
-                                title="Click to cycle: Pending -> In Progress -> Completed"
+                                title="Click to toggle checked"
                                 className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-left hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
                               >
                                 <span className="text-slate-700">{item.item_label}</span>
-                                <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase text-slate-400">
-                                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChecklistIcon status={item.status} />}
-                                  {item.status.replace('_', ' ')}
-                                </span>
+                                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChecklistIcon status={item.status} />}
                               </button>
                             );
                           })}
