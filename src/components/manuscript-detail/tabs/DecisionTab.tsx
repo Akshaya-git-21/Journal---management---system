@@ -1240,6 +1240,19 @@ export function DecisionTab({
         </div>
       )}
 
+      {/* Once "Send Final Proof to Author" is clicked, production_status
+          moves past FINAL_PROOF_READY -- the card above disappears, so show
+          the same bordered "Submitted" confirmation pattern as the other
+          one-time actions in this corrections loop, instead of nothing. */}
+      {!isEditor && corrections.length > 0 && productionStatus === 'PROOF_SENT_TO_AUTHOR' && (
+        <div className="rounded-2xl border-2 border-slate-900 p-4">
+          <p className="text-[11px] uppercase tracking-wide text-slate-500 font-bold">Final Proof</p>
+          <span className="text-[10px] font-bold uppercase text-emerald-700 flex items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author
+          </span>
+        </div>
+      )}
+
       {showGDGateModal && (
         <GDMemberGateModal
           mode={gdGateMode}
