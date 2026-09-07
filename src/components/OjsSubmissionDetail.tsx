@@ -1135,6 +1135,20 @@ export default function OjsSubmissionDetail({
                             Revision {latestRevision!.revision_number} — Submitted
                           </span>
                         )}
+                        {/* View Proofreading -- straight to AuthorProductionPanel
+                            (view/download the proof, request corrections with
+                            comments, or approve it) once production has
+                            actually started, so this doesn't only depend on
+                            the auto-redirect firing the first time a proof
+                            arrives. */}
+                        {isAccepted && productionStatus && productionStatus !== 'NOT_STARTED' && (
+                          <button
+                            onClick={() => setActiveTab('production')}
+                            className="shrink-0 rounded-lg border border-emerald-300 bg-emerald-100 px-4 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-200 transition"
+                          >
+                            View Proofreading
+                          </button>
+                        )}
                       </div>
                       {decisionLetterEntry?.note && (
                         <p className="text-sm text-slate-700 mt-3 whitespace-pre-wrap border-t border-black/10 pt-3">{decisionLetterEntry.note}</p>
