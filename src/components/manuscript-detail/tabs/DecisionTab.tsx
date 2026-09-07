@@ -1243,12 +1243,16 @@ export function DecisionTab({
       {/* Once "Send Final Proof to Author" is clicked, production_status
           moves past FINAL_PROOF_READY -- the card above disappears, so show
           the same bordered "Submitted" confirmation pattern as the other
-          one-time actions in this corrections loop, instead of nothing. */}
-      {!isEditor && corrections.length > 0 && productionStatus === 'PROOF_SENT_TO_AUTHOR' && (
+          one-time actions in this corrections loop, instead of nothing.
+          Stays visible for the whole time the Author has this round's proof
+          (PROOF_SENT_TO_AUTHOR, then AUTHOR_PROOF_REVIEW once they open it)
+          -- only disappears once they've actually acted (approved it, or
+          requested another round of corrections). */}
+      {!isEditor && corrections.length > 0 && (productionStatus === 'PROOF_SENT_TO_AUTHOR' || productionStatus === 'AUTHOR_PROOF_REVIEW') && (
         <div className="rounded-2xl border-2 border-slate-900 p-4">
           <p className="text-[11px] uppercase tracking-wide text-slate-500 font-bold">Final Proof</p>
           <span className="text-[10px] font-bold uppercase text-emerald-700 flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author
+            <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author -- awaiting their response
           </span>
         </div>
       )}
