@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Eye, Download, CheckCircle2, AlertTriangle, Upload } from 'lucide-react';
 import {
-  ProductionRow, ProofRow,
-  getProduction, getProofs,
+  ProductionRow, ProofRow, CorrectionRow,
+  getProduction, getProofs, getCorrections,
   authorOpenProof, authorApproveProof, authorSubmitCorrections,
   uploadCorrectionAttachment
 } from '../../lib/production';
@@ -39,6 +39,7 @@ async function downloadFile(url: string, filename: string) {
 export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: string }) {
   const [production, setProduction] = useState<ProductionRow | null>(null);
   const [proofs, setProofs] = useState<ProofRow[]>([]);
+  const [corrections, setCorrections] = useState<CorrectionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -50,9 +51,10 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
 
   const load = async () => {
     try {
-      const [prod, pf] = await Promise.all([getProduction(manuscriptId), getProofs(manuscriptId)]);
+      const [prod, pf, corr] = await Promise.all([getProduction(manuscriptId), getProofs(manuscriptId), getCorrections(manuscriptId)]);
       setProduction(prod);
       setProofs(pf);
+      setCorrections(corr);
       if (prod?.production_status === 'PROOF_SENT_TO_AUTHOR') {
         await authorOpenProof(manuscriptId);
         const refreshed = await getProduction(manuscriptId);
@@ -72,6 +74,15 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
   const status = production?.production_status;
   const latestProof = proofs[0];
   const awaitingReview = status === 'AUTHOR_PROOF_REVIEW' || status === 'PROOF_SENT_TO_AUTHOR';
+  // Between the Author submitting corrections and a fresh proof actually
+  // reaching them again -- shows the "In Correction" marker plus their
+  // submitted comments/attachment instead of the misleading "Final Proof
+  // Available" banner (that proof is the one they already responded to).
+  const inCorrection = !awaitingReview && (
+    status === 'CORRECTIONS_SUBMITTED' || status === 'PRODUCTION_REVIEW' ||
+    status === 'CLARIFICATION_REQUESTED' || status === 'CORRECTIONS_IN_PROGRESS'
+  );
+  const latestCorrection = corrections[0];
 
   const submitCorrections = async () => {
     if (!comments.trim()) { setError('Comments are required to submit Proof Corrections.'); return; }
@@ -138,10 +149,17 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
         </div>
       ) : (
         <div className="space-y-5">
-          <div className="bg-[#eefcf4] border border-emerald-100 p-4 rounded-xl leading-relaxed text-[#004d2e]">
-            <strong className="block text-[#004d2b] font-bold text-sm mb-1">Final Proof Available</strong>
-            <span className="text-sm">Your final proof is ready for review. Please carefully check the article before publication.</span>
-          </div>
+          {inCorrection ? (
+            <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl leading-relaxed text-amber-900">
+              <strong className="block font-bold text-sm mb-1">In Correction</strong>
+              <span className="text-sm">Your requested corrections are with the editorial team. You&rsquo;ll be notified once an updated proof is ready.</span>
+            </div>
+          ) : (
+            <div className="bg-[#eefcf4] border border-emerald-100 p-4 rounded-xl leading-relaxed text-[#004d2e]">
+              <strong className="block text-[#004d2b] font-bold text-sm mb-1">Final Proof Available</strong>
+              <span className="text-sm">Your final proof is ready for review. Please carefully check the article before publication.</span>
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 p-4">
             <div>
@@ -163,6 +181,27 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
               </div>
             )}
           </div>
+
+          {inCorrection && latestCorrection && (
+            <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="font-bold text-slate-900">Your Submitted Correction</p>
+                <span className="text-xs font-medium text-slate-400 uppercase tracking-wide">Submitted {formatDate(latestCorrection.submitted_at)}</span>
+              </div>
+              <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">{latestCorrection.comments}</p>
+              {latestCorrection.attachment_public_url && (
+                <a href={latestCorrection.attachment_public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  <Eye className="w-4 h-4" /> {latestCorrection.attachment_file_name || 'View Attachment'}
+                </a>
+              )}
+              {latestCorrection.editor_comments && (
+                <div className="pt-2 border-t border-slate-100">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-1">Editor&rsquo;s Response</p>
+                  <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">{latestCorrection.editor_comments}</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {awaitingReview && mode === 'view' && (
             <div className="flex flex-wrap items-center gap-3">
