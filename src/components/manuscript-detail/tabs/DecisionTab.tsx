@@ -97,6 +97,7 @@ export function DecisionTab({
   const [moveToProductionError, setMoveToProductionError] = useState('');
   const [sendingProofToAuthor, setSendingProofToAuthor] = useState(false);
   const [sendProofToAuthorError, setSendProofToAuthorError] = useState('');
+  const [sendProofToAuthorSuccess, setSendProofToAuthorSuccess] = useState(false);
   // GD Member assignment gate -- clicking "Move to Production" must not
   // actually start production until a GD Member is assigned (see the
   // Coordinator's requirement: "if no GD Member is assigned, a popup should
@@ -190,10 +191,18 @@ export function DecisionTab({
     if (sendingProofToAuthor || !canSendProofToAuthor) return;
     setSendingProofToAuthor(true);
     setSendProofToAuthorError('');
+    setSendProofToAuthorSuccess(false);
     try {
       const updated = await sendProofToAuthor(manuscript.id);
       setProductionStatus(updated.production_status);
       onWorkflowChange();
+      // The button's visible state doesn't change when the status was
+      // already PROOF_SENT_TO_AUTHOR (a resend), so without this the click
+      // looked like it did nothing -- show an explicit confirmation instead,
+      // auto-clearing after a few seconds like the draft-saved pattern
+      // elsewhere in this app.
+      setSendProofToAuthorSuccess(true);
+      setTimeout(() => setSendProofToAuthorSuccess(false), 3000);
     } catch (e: any) {
       setSendProofToAuthorError(e.message || 'Failed to send the proof to the author.');
     } finally {
@@ -1014,6 +1023,11 @@ export function DecisionTab({
                     {sendingProofToAuthor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                     {sendingProofToAuthor ? 'Sending...' : 'Send Proof to Author'}
                   </button>
+                  {sendProofToAuthorSuccess && (
+                    <p className="mt-2 text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Proof sent to the Author.
+                    </p>
+                  )}
                   {sendProofToAuthorError && (
                     <p className="mt-2 text-xs font-semibold text-red-600">{sendProofToAuthorError}</p>
                   )}
