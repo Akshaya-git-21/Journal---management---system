@@ -1,9 +1,9 @@
 import { Fragment, useState, useEffect } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, StatusHistoryRow, ProfileRow, ScreeningResponse } from '../../../lib/workflow';
 import { publishDecision, coordinatorSendRevisionToReviewers, listActiveProfilesByRole } from '../../../lib/workflow';
-import { getProduction, startProduction, assignGDMember, subscribeToProduction } from '../../../lib/production';
+import { getProduction, startProduction, assignGDMember, subscribeToProduction, sendProofToAuthor } from '../../../lib/production';
 import { createAndActivateGDMemberAccount } from '../../../lib/auth';
-import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, PackageCheck, Loader2, CheckCircle2, CheckCircle, XCircle, ClipboardList, UserPlus, X, Clock } from 'lucide-react';
+import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, PackageCheck, Loader2, CheckCircle2, CheckCircle, XCircle, ClipboardList, UserPlus, X, Clock, Send } from 'lucide-react';
 import { getRevisionDecisionLabel } from '../../../lib/decisionUtils';
 import { getCoordinatorStatusMeta, getManuscriptStatusLabel, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 
@@ -95,6 +95,8 @@ export function DecisionTab({
   const [productionStatus, setProductionStatus] = useState<string | null>(null);
   const [movingToProduction, setMovingToProduction] = useState(false);
   const [moveToProductionError, setMoveToProductionError] = useState('');
+  const [sendingProofToAuthor, setSendingProofToAuthor] = useState(false);
+  const [sendProofToAuthorError, setSendProofToAuthorError] = useState('');
   // GD Member assignment gate -- clicking "Move to Production" must not
   // actually start production until a GD Member is assigned (see the
   // Coordinator's requirement: "if no GD Member is assigned, a popup should
@@ -181,6 +183,21 @@ export function DecisionTab({
       }
     } catch (e: any) {
       setMoveToProductionError(e.message || 'Failed to move manuscript to production.');
+    }
+  };
+
+  const handleSendProofToAuthor = async () => {
+    if (sendingProofToAuthor || !canSendProofToAuthor) return;
+    setSendingProofToAuthor(true);
+    setSendProofToAuthorError('');
+    try {
+      const updated = await sendProofToAuthor(manuscript.id);
+      setProductionStatus(updated.production_status);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendProofToAuthorError(e.message || 'Failed to send the proof to the author.');
+    } finally {
+      setSendingProofToAuthor(false);
     }
   };
 
@@ -363,6 +380,16 @@ export function DecisionTab({
   const decided = ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
   const statusMeta = getCoordinatorStatusMeta(manuscript, editorAssignments, latestRevision, productionStatus);
   const canMoveToProduction = manuscript.status === 'ACCEPTED' && (!productionStatus || productionStatus === 'NOT_STARTED');
+  // Shown for the whole "PROOFREADING" stretch (not just the instant a new
+  // proof lands) so the Coordinator always has this action in view here
+  // instead of having to go find the Production tab -- but only truly
+  // actionable (see send_proof_to_author() in 0047/0059/0065) when there's
+  // actually a new/updated proof to send; otherwise disabled with a note,
+  // since e.g. PROOF_SENT_TO_AUTHOR means the Author already has the current
+  // one and is the one who needs to act next.
+  const showSendProofToAuthor = !isEditor && productionStatus && statusMeta.label === 'PROOFREADING';
+  const canSendProofToAuthor = !isEditor && !!productionStatus &&
+    ['PROOF_GENERATED', 'PROOF_SUBMITTED_TO_COORDINATOR', 'PROOF_UPDATED', 'FINAL_PROOF_READY'].includes(productionStatus);
   const finalDecisionLabel =
     manuscript.status === 'ACCEPTED' ? 'ACCEPT' :
     manuscript.status === 'REJECTED' ? 'REJECT' :
@@ -978,6 +1005,26 @@ export function DecisionTab({
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-500 pt-3">Next Step</p>
                   <p className="text-sm font-bold text-slate-700">{statusMeta.nextStep}</p>
                 </>
+              )}
+              {showSendProofToAuthor && (
+                <div className="pt-3">
+                  <button
+                    type="button"
+                    onClick={handleSendProofToAuthor}
+                    disabled={sendingProofToAuthor || !canSendProofToAuthor}
+                    title={canSendProofToAuthor ? undefined : 'The Author already has the current proof and hasn’t responded yet.'}
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {sendingProofToAuthor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    {sendingProofToAuthor ? 'Sending...' : 'Send Proof to Author'}
+                  </button>
+                  {!canSendProofToAuthor && (
+                    <p className="mt-2 text-xs text-slate-500">The Author already has the current proof and hasn&rsquo;t responded yet.</p>
+                  )}
+                  {sendProofToAuthorError && (
+                    <p className="mt-2 text-xs font-semibold text-red-600">{sendProofToAuthorError}</p>
+                  )}
+                </div>
               )}
             </div>
           )}
