@@ -488,37 +488,6 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
             </div>
           )}
 
-          <div className="bg-white border border-slate-200 rounded-3xl p-6">
-            <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-4">Proof Versions</h2>
-            {proofs.length === 0 ? (
-              <p className="text-sm text-slate-400">No proofs generated yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {proofs.map((p) => (
-                  <div key={p.id} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <p className="font-bold text-slate-800">Proof v{p.version}</p>
-                        <p className="text-xs text-slate-400">{p.file_name} • Uploaded {formatDate(p.uploaded_at)}{p.sent_to_author_at ? ` • Sent ${formatDate(p.sent_to_author_at)}` : ''}{p.approved_at ? ` • Approved ${formatDate(p.approved_at)}` : ''}</p>
-                      </div>
-                      {p.public_url && (
-                        <div className="flex items-center gap-2 shrink-0">
-                          <a href={p.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-3.5 h-3.5" /> View</a>
-                          <a href={p.public_url} download className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Download className="w-3.5 h-3.5" /> Download</a>
-                        </div>
-                      )}
-                    </div>
-                    {p.gd_notes && (
-                      <p className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600 whitespace-pre-wrap">
-                        <span className="font-bold text-slate-400 uppercase tracking-wide">Notes: </span>{p.gd_notes}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
           {/* Task 14: when the Coordinator has sent this manuscript back for
              corrections, lead with the consolidated Author + Editor + current
              proof package -- the GD Member shouldn't have to piece it together
@@ -579,6 +548,37 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack }: { man
               </div>
             </div>
           )}
+
+          <div className="bg-white border border-slate-200 rounded-3xl p-6">
+            <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-4">Proof Versions</h2>
+            {proofs.length === 0 ? (
+              <p className="text-sm text-slate-400">No proofs generated yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {proofs.map((p) => (
+                  <div key={p.id} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="font-bold text-slate-800">Proof v{p.version}</p>
+                        <p className="text-xs text-slate-400">{p.file_name} • Uploaded {formatDate(p.uploaded_at)}{p.sent_to_author_at ? ` • Sent ${formatDate(p.sent_to_author_at)}` : ''}{p.approved_at ? ` • Approved ${formatDate(p.approved_at)}` : ''}</p>
+                      </div>
+                      {p.public_url && (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <a href={p.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-3.5 h-3.5" /> View</a>
+                          <a href={p.public_url} download className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Download className="w-3.5 h-3.5" /> Download</a>
+                        </div>
+                      )}
+                    </div>
+                    {p.gd_notes && (
+                      <p className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600 whitespace-pre-wrap">
+                        <span className="font-bold text-slate-400 uppercase tracking-wide">Notes: </span>{p.gd_notes}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Task 15: the actual corrections work -- upload/replace the
              corrected PDF, add notes, work through the Correction Checklist,
