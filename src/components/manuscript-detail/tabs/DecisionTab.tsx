@@ -1242,17 +1242,32 @@ export function DecisionTab({
 
       {/* Once "Send Final Proof to Author" is clicked, production_status
           moves past FINAL_PROOF_READY -- the card above disappears, so show
-          the same bordered "Submitted" confirmation pattern as the other
-          one-time actions in this corrections loop, instead of nothing.
-          Stays visible for the whole time the Author has this round's proof
-          (PROOF_SENT_TO_AUTHOR, then AUTHOR_PROOF_REVIEW once they open it)
-          -- only disappears once they've actually acted (approved it, or
-          requested another round of corrections). */}
-      {!isEditor && corrections.length > 0 && (productionStatus === 'PROOF_SENT_TO_AUTHOR' || productionStatus === 'AUTHOR_PROOF_REVIEW') && (
+          a proof card here (same layout as the Proof Versions list in
+          ProductionWorkspace.tsx) instead of nothing. Stays up for the whole
+          time the Author has this round's proof (PROOF_SENT_TO_AUTHOR, then
+          AUTHOR_PROOF_REVIEW once they open it) -- only disappears once
+          they've actually acted (approved it, or requested another round of
+          corrections). */}
+      {!isEditor && corrections.length > 0 && (productionStatus === 'PROOF_SENT_TO_AUTHOR' || productionStatus === 'AUTHOR_PROOF_REVIEW') && latestProductionProof && (
         <div className="rounded-2xl border-2 border-slate-900 p-4">
-          <p className="text-[11px] uppercase tracking-wide text-slate-500 font-bold">Final Proof</p>
-          <span className="text-[10px] font-bold uppercase text-emerald-700 flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author -- awaiting their response
+          <p className="text-[11px] uppercase tracking-wide text-slate-500 font-bold mb-2">Final Proof</p>
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="font-bold text-slate-800">Proof v{latestProductionProof.version}</p>
+              <p className="text-xs text-slate-400">
+                {latestProductionProof.file_name}
+                {latestProductionProof.sent_to_author_at ? ` • Sent ${new Date(latestProductionProof.sent_to_author_at).toLocaleDateString()}` : ''}
+              </p>
+            </div>
+            {latestProductionProof.public_url && (
+              <div className="flex items-center gap-2 shrink-0">
+                <a href={latestProductionProof.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-3.5 h-3.5" /> View</a>
+                <a href={latestProductionProof.public_url} download className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Download className="w-3.5 h-3.5" /> Download</a>
+              </div>
+            )}
+          </div>
+          <span className="mt-2 inline-flex text-[10px] font-bold uppercase text-emerald-700 items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5" /> Awaiting Author&rsquo;s acceptance
           </span>
         </div>
       )}
