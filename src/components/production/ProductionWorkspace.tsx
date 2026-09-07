@@ -484,53 +484,6 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
             </div>
           )}
 
-          {/* Proofs */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">Proof Versions</h2>
-              <div className="flex items-center gap-2">
-                {(status === 'TYPESETTING' || status === 'CORRECTIONS_SUBMITTED' || status === 'PRODUCTION_REVIEW') && (
-                  <label className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] cursor-pointer">
-                    <Upload className="w-3.5 h-3.5" /> Generate / Upload Proof
-                    <input type="file" className="hidden" disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleProofFile(f); e.target.value = ''; }} />
-                  </label>
-                )}
-                {(status === 'PROOF_GENERATED' || status === 'PROOF_SUBMITTED_TO_COORDINATOR' || status === 'PROOF_UPDATED') && (
-                  <button disabled={busy} onClick={() => run(() => sendProofToAuthor(manuscriptId))} className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40">
-                    <Send className="w-3.5 h-3.5" /> Send Proof to Author
-                  </button>
-                )}
-              </div>
-            </div>
-            {proofs.length === 0 ? (
-              <p className="text-sm text-slate-400">No proofs generated yet. Accepted Manuscript → Production Version → Proof v1.</p>
-            ) : (
-              <div className="space-y-2">
-                {proofs.map((p) => (
-                  <div key={p.id} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <p className="font-bold text-slate-800">Proof v{p.version}</p>
-                        <p className="text-xs text-slate-400">{p.file_name} • Uploaded {formatDate(p.uploaded_at)}{p.sent_to_author_at ? ` • Sent ${formatDate(p.sent_to_author_at)}` : ''}{p.approved_at ? ` • Approved ${formatDate(p.approved_at)}` : ''}</p>
-                      </div>
-                      {p.public_url && (
-                        <div className="flex items-center gap-2 shrink-0">
-                          <a href={p.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-3.5 h-3.5" /> View</a>
-                          <a href={p.public_url} download className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Download className="w-3.5 h-3.5" /> Download</a>
-                        </div>
-                      )}
-                    </div>
-                    {p.gd_notes && (
-                      <p className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600 whitespace-pre-wrap">
-                        <span className="font-bold text-slate-400 uppercase tracking-wide">GD Member notes: </span>{p.gd_notes}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
           {/* Corrections */}
           {corrections.length > 0 && (
             <div className="bg-white border border-slate-200 rounded-3xl p-6">
@@ -653,6 +606,53 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
               )}
             </div>
           )}
+
+          {/* Proofs */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">Proof Versions</h2>
+              <div className="flex items-center gap-2">
+                {(status === 'TYPESETTING' || status === 'CORRECTIONS_SUBMITTED' || status === 'PRODUCTION_REVIEW') && (
+                  <label className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" /> Generate / Upload Proof
+                    <input type="file" className="hidden" disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleProofFile(f); e.target.value = ''; }} />
+                  </label>
+                )}
+                {(status === 'PROOF_GENERATED' || status === 'PROOF_SUBMITTED_TO_COORDINATOR' || status === 'PROOF_UPDATED') && (
+                  <button disabled={busy} onClick={() => run(() => sendProofToAuthor(manuscriptId))} className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40">
+                    <Send className="w-3.5 h-3.5" /> Send Proof to Author
+                  </button>
+                )}
+              </div>
+            </div>
+            {proofs.length === 0 ? (
+              <p className="text-sm text-slate-400">No proofs generated yet. Accepted Manuscript → Production Version → Proof v1.</p>
+            ) : (
+              <div className="space-y-2">
+                {proofs.map((p) => (
+                  <div key={p.id} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="font-bold text-slate-800">Proof v{p.version}</p>
+                        <p className="text-xs text-slate-400">{p.file_name} • Uploaded {formatDate(p.uploaded_at)}{p.sent_to_author_at ? ` • Sent ${formatDate(p.sent_to_author_at)}` : ''}{p.approved_at ? ` • Approved ${formatDate(p.approved_at)}` : ''}</p>
+                      </div>
+                      {p.public_url && (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <a href={p.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-3.5 h-3.5" /> View</a>
+                          <a href={p.public_url} download className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Download className="w-3.5 h-3.5" /> Download</a>
+                        </div>
+                      )}
+                    </div>
+                    {p.gd_notes && (
+                      <p className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600 whitespace-pre-wrap">
+                        <span className="font-bold text-slate-400 uppercase tracking-wide">GD Member notes: </span>{p.gd_notes}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Task 18: the handoff from proofreading to publishing -- the
              Coordinator no longer publishes directly (that's now the
