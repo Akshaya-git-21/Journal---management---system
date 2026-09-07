@@ -1012,7 +1012,7 @@ export function DecisionTab({
                     className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {sendingProofToAuthor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                    {sendingProofToAuthor ? 'Sending...' : productionStatus === 'PROOF_SENT_TO_AUTHOR' ? 'Resend Proof to Author' : 'Send Proof to Author'}
+                    {sendingProofToAuthor ? 'Sending...' : 'Send Proof to Author'}
                   </button>
                   {sendProofToAuthorError && (
                     <p className="mt-2 text-xs font-semibold text-red-600">{sendProofToAuthorError}</p>
