@@ -19,12 +19,6 @@ interface Props {
   reviewerAssignments?: ReviewerAssignmentRow[];
   profiles?: Map<string, ProfileData>;
   onSubmitSuccess: () => void;
-  /** Called instead of onSubmitSuccess specifically when the Editor confirms
-   * "Move to Next Stage" -- lets the parent jump straight to the existing
-   * reviewer-selection screen instead of dropping the Editor back at a
-   * generic dashboard they'd have to navigate away from manually. Falls
-   * back to onSubmitSuccess if not provided. */
-  onMoveToNextStage?: () => void;
 }
 
 const DEFAULT_CHECKLIST: string[] = [
@@ -41,10 +35,14 @@ const DEFAULT_CHECKLIST: string[] = [
 // revision round) isn't offered here: that determination happens later, at
 // the Peer Review Decision screen (DecisionTab.tsx-embedded, Accept/Minor/
 // Major/Reject) once the reviewers' re-check actually comes back -- not at
-// this first checkpoint. Screening-origin revisions (no reviewers involved
-// at all) keep Return to Author here instead of Move to Reviewer, since
-// that's still their only path to another round -- see the ACTIONS
-// selection below.
+// this first checkpoint.
+//
+// A screening-origin revision (no reviewers involved) instead offers just
+// Return to Author / Accept Submission -- no Reject here. Accept Submission
+// submits an ACCEPT recommendation straight to the Coordinator (same as the
+// peer-review-origin path below), skipping reviewer selection entirely, so
+// it flows into the same post-acceptance Production pipeline once the
+// Coordinator publishes the decision.
 //
 // SEND_TO_REVIEWER is offered only when this revision came from a
 // peer-review round (screening-origin revisions never had reviewers to send
@@ -54,16 +52,6 @@ const DEFAULT_CHECKLIST: string[] = [
 // (coordinator_send_revision_to_reviewers) -- see
 // 0043_editor_initiated_reviewer_recheck.sql.
 type RevisionAction = 'REJECT' | 'RETURN_TO_AUTHOR' | 'NEXT_STAGE' | 'SEND_TO_REVIEWER';
-// NEXT_STAGE's label depends on where this revision came from: a
-// screening-origin revision has no reviewers yet, so accepting it here only
-// moves it into reviewer *selection* -- "Accept Submission" is reserved for
-// the true final decision, which only happens once reviewers have actually
-// reviewed and the revision comes back to the Editor as peer-review-origin.
-function nextStageMeta(isPeerReviewOrigin: boolean) {
-  return isPeerReviewOrigin
-    ? { title: 'Accept Submission', confirmLabel: 'Confirm & Accept Submission' }
-    : { title: 'Move to Next Stage', confirmLabel: 'Confirm & Move to Next Stage' };
-}
 const ACTION_META: Record<RevisionAction, { title: string; confirmLabel: string; recommendation: ReviewerRecommendation; style: string }> = {
   REJECT: { title: 'Reject', confirmLabel: 'Confirm Rejection', recommendation: 'REJECT', style: 'bg-red-700 hover:bg-red-800' },
   RETURN_TO_AUTHOR: { title: 'Return to Author', confirmLabel: 'Confirm Return to Author', recommendation: 'MAJOR_REVISION', style: 'bg-amber-700 hover:bg-amber-800' },
@@ -91,7 +79,6 @@ export default function EditorRevisionReview({
   reviewerAssignments = [],
   profiles,
   onSubmitSuccess,
-  onMoveToNextStage,
 }: Props) {
   const latestRevision = getLatestRevision(revisions);
   const [files, setFiles] = useState<ManuscriptFileRow[]>([]);
@@ -132,9 +119,8 @@ export default function EditorRevisionReview({
   const peerReviewOriginRounds = revisions.filter(r => r.origin === 'PEER_REVIEW').length;
   const ACTIONS: RevisionAction[] = isPeerReviewOrigin
     ? (peerReviewOriginRounds >= 2 ? ['REJECT', 'NEXT_STAGE'] : ['REJECT', 'NEXT_STAGE', 'SEND_TO_REVIEWER'])
-    : ['REJECT', 'RETURN_TO_AUTHOR', 'NEXT_STAGE'];
-  const metaFor = (act: RevisionAction) =>
-    act === 'NEXT_STAGE' ? { ...ACTION_META.NEXT_STAGE, ...nextStageMeta(isPeerReviewOrigin) } : ACTION_META[act];
+    : ['RETURN_TO_AUTHOR', 'NEXT_STAGE'];
+  const metaFor = (act: RevisionAction) => ACTION_META[act];
 
   // The screening-stage revision loop always returns a manuscript with
   // MAJOR_REVISION as its decision_type (Return to Author has no
@@ -152,17 +138,7 @@ export default function EditorRevisionReview({
     setError('');
     try {
       await submitEditorRecommendation(manuscriptId, ACTION_META[selectedAction].recommendation, comments.trim(), checklist);
-      // "Accept Submission" only actually opens reviewer *selection* for a
-      // screening-origin revision (no reviewers exist yet). A peer-review-
-      // origin revision already has its 2 reviewers -- Accept there goes
-      // straight to the Coordinator's final Accept/Reject confirm, same as
-      // every other decision here -- see 0043_editor_initiated_reviewer_
-      // recheck.sql's ACCEPT-on-PEER_REVIEW-origin handling.
-      if (selectedAction === 'NEXT_STAGE' && latestRevision.origin !== 'PEER_REVIEW') {
-        (onMoveToNextStage || onSubmitSuccess)();
-      } else {
-        onSubmitSuccess();
-      }
+      onSubmitSuccess();
     } catch (e: any) {
       setError(e.message || 'Failed to submit decision');
     } finally {
@@ -199,8 +175,9 @@ export default function EditorRevisionReview({
             invited/accepted-but-not-yet-reported reviewer has nothing to
             display); the whole card is skipped when there are no reviewers
             at all (a screening-origin revision that never went to peer
-            review). */}
-        {reviewerAssignments.filter(r => r.status === 'SUBMITTED').length > 0 && (
+            review), and for Revision 3 specifically, whose reviewer names
+            aren't meant to be exposed here. */}
+        {latestRevision.revision_number !== 3 && reviewerAssignments.filter(r => r.status === 'SUBMITTED').length > 0 && (
           <div className="bg-white border border-slate-200 rounded-lg p-6">
             <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5" /> Reviewer Comments
@@ -247,7 +224,7 @@ export default function EditorRevisionReview({
           if (!priorEditorNote) return null;
           return (
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-6">
-              <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor's Previous Comments</h3>
+              <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor's Comments</h3>
               <p className="text-sm text-slate-600 whitespace-pre-wrap">{priorEditorNote}</p>
             </div>
           );
@@ -266,18 +243,6 @@ export default function EditorRevisionReview({
           ) : (
             <p className="text-sm text-slate-400 italic">The author did not provide a response note with this revision.</p>
           )}
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-lg p-6">
-          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor Comments</h3>
-          <textarea
-            value={comments}
-            onChange={(e) => setComments(e.target.value)}
-            placeholder="Enter your general comments about this revision..."
-            rows={6}
-            disabled={submitting}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
-          />
         </div>
 
         {/* 5. Files for review */}
@@ -318,6 +283,18 @@ export default function EditorRevisionReview({
           )}
         </div>
 
+        <div className="bg-white border border-slate-200 rounded-lg p-6">
+          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor Comments</h3>
+          <textarea
+            value={comments}
+            onChange={(e) => setComments(e.target.value)}
+            placeholder="Enter your general comments about this revision..."
+            rows={6}
+            disabled={submitting}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
+          />
+        </div>
+
         {/* 6. Editor Checklist */}
         <div className="bg-white border border-slate-200 rounded-lg p-6">
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor Checklist</h3>
@@ -345,7 +322,7 @@ export default function EditorRevisionReview({
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{error}</div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="flex flex-wrap justify-center gap-3">
             {ACTIONS.map((act) => {
               const meta = metaFor(act);
               const isSelected = selectedAction === act;
@@ -355,7 +332,7 @@ export default function EditorRevisionReview({
                   type="button"
                   disabled={submitting}
                   onClick={() => setSelectedAction(act)}
-                  className={`px-4 py-3 rounded-lg font-bold text-sm text-white transition disabled:opacity-50 flex items-center justify-center gap-2 ${meta.style} ${isSelected ? 'ring-2 ring-offset-2 ring-slate-900' : ''}`}
+                  className={`px-6 py-3 rounded-lg font-bold text-sm text-white transition disabled:opacity-50 flex items-center justify-center gap-2 ${meta.style} ${isSelected ? 'ring-2 ring-offset-2 ring-slate-900' : ''}`}
                 >
                   {isSelected && <CheckCircle className="w-4 h-4" />}
                   {meta.title}

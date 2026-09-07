@@ -119,7 +119,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   const [rows, setRows] = useState<EditorManuscriptDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
-  const [pendingTab, setPendingTab] = useState<'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | null>(null);
+  const [pendingTab, setPendingTab] = useState<'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     submissions: true,
@@ -503,7 +503,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   );
 }
 
-function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onOpen: (id: string, tab?: 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments') => void }) {
+function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onOpen: (id: string, tab?: 'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments') => void }) {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -531,13 +531,28 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
           {paginatedRows.map((details) => {
             const latestRevision = getLatestRevision(details.revisions);
             const isRevisionSubmitted = latestRevision?.status === 'UNDER_REVIEW';
+            // Once the Editor has actually recorded a fresh recommendation
+            // for this peer-review round, there's nothing left for THEM to
+            // do -- it's sitting with the Coordinator now. Same freshness
+            // check as DecisionTab.tsx's editorDecisionIsFreshForPeerReview:
+            // a recommendation only counts if it postdates the reviewers'
+            // own submissions, so a stale recommendation from an earlier
+            // round doesn't wrongly suppress "Reviews Ready" for a new one.
+            const latestReviewSubmittedAt = details.reviewers.reduce<string | null>((latest, r) => (
+              r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
+            ), null);
+            const editorDecisionIsFresh = !!(
+              details.assignment.recommendation && details.assignment.recommendation_submitted_at &&
+              latestReviewSubmittedAt && details.assignment.recommendation_submitted_at > latestReviewSubmittedAt
+            );
             // Same idea as the "Review Revision" callout above -- both
             // reviewers are in, so there's something new to act on here
             // (see the Reviewers tab), not just "open and look around".
-            const reviewsReady = !isRevisionSubmitted && details.manuscript.status === 'AWAITING_DECISION'
+            const reviewsReady = !isRevisionSubmitted && !editorDecisionIsFresh && details.manuscript.status === 'AWAITING_DECISION'
               && details.reviewers.length > 0 && details.reviewers.every((rv) => rv.status === 'SUBMITTED');
+            const awaitingCoordinator = !isRevisionSubmitted && editorDecisionIsFresh && details.manuscript.status === 'AWAITING_DECISION';
             return (
-              <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id, reviewsReady ? 'reviews' : undefined)}>
+              <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id, isRevisionSubmitted ? 'status' : reviewsReady ? 'reviews' : undefined)}>
                 <td className="px-4 py-3 font-bold text-slate-800">
                   {details.manuscript.title}
                   {reviewsReady && (
@@ -545,11 +560,29 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
                       Reviewers Submitted
                     </span>
                   )}
+                  {awaitingCoordinator && (
+                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold uppercase tracking-wide align-middle">
+                      Decision Submitted
+                    </span>
+                  )}
                 </td>
-                <td className="px-4 py-3"><StatusBadge manuscript={details.manuscript} latestRevision={latestRevision} /></td>
+                <td className="px-4 py-3">
+                  {awaitingCoordinator ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${STANDARD_STATUS_COLORS['EDITORIAL REVIEW']}`}>
+                        EDITORIAL REVIEW
+                      </span>
+                      <span className="inline-flex items-center px-2 py-1 rounded-full border border-slate-200 bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-wide">
+                        Rev {(latestRevision?.revision_number || 0) + 1}
+                      </span>
+                    </span>
+                  ) : (
+                    <StatusBadge manuscript={details.manuscript} latestRevision={latestRevision} />
+                  )}
+                </td>
                 <td className="px-4 py-3 text-xs font-bold text-slate-600">{details.assignment.status}</td>
-                <td className={`px-4 py-3 text-right font-bold text-xs ${isRevisionSubmitted ? 'text-indigo-600' : reviewsReady ? 'text-emerald-600' : 'text-[#008751]'}`}>
-                  {isRevisionSubmitted ? 'Review Revision →' : reviewsReady ? 'Reviews Ready →' : 'Open →'}
+                <td className={`px-4 py-3 text-right font-bold text-xs ${isRevisionSubmitted ? 'text-indigo-600' : reviewsReady ? 'text-emerald-600' : awaitingCoordinator ? 'text-slate-500' : 'text-[#008751]'}`}>
+                  {isRevisionSubmitted ? 'Review Revision →' : reviewsReady ? 'Reviews Ready →' : awaitingCoordinator ? 'Pending Decision →' : 'Open →'}
                 </td>
               </tr>
             );
@@ -598,13 +631,13 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
     </div>
   );
 }
-function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab, onInitialTabConsumed }: { details: EditorManuscriptDetails; onBack: () => void; onChanged: () => void; currentUser?: { name: string; email: string; role: Role } | null; initialTab?: 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | null; onInitialTabConsumed?: () => void }) {
+function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab, onInitialTabConsumed }: { details: EditorManuscriptDetails; onBack: () => void; onChanged: () => void; currentUser?: { name: string; email: string; role: Role } | null; initialTab?: 'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | null; onInitialTabConsumed?: () => void }) {
   const { manuscript, assignment, reviewers: initialReviewerAssignments } = details;
   const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>(initialReviewerAssignments || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [sidebarSection, setSidebarSection] = useState<'dashboard' | 'evaluation_timeline' | 'title_abstract' | 'authors' | 'manuscript' | 'references' | 'supplementary' | 'cover_letter' | 'discussions' | 'editor_evaluation' | 'reviews' | 'decision' | 'suggestions' | 'review_history' | 'metadata' | 'revisions' | 'production' | 'galley_files'>('dashboard');
-  const [activeTab, setActiveTab] = useState<'status' | 'files' | 'evaluation' | 'decision' | 'reviews' | 'revisions' | 'comments'>(initialTab || 'files');
+  const [activeTab, setActiveTab] = useState<'status' | 'files' | 'evaluation' | 'decision' | 'reviews' | 'revisions' | 'comments'>(initialTab || 'status');
 
   // A notification click can request a specific tab (see EditorWorkspace's
   // JMS_OPEN_MANUSCRIPT_EVENT listener) -- apply it once on mount and let
@@ -876,18 +909,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
             revisions={details.revisions || []}
             reviewerAssignments={reviewerAssignments || []}
             profiles={details.profiles}
-            onSubmitSuccess={onChanged}
-            onMoveToNextStage={() => {
-              // Don't force-navigate to Reviewers -- once this decision is
-              // submitted, submit_editor_recommendation() marks the revision
-              // COMPLETED (0040_peer_review_editor_comments.sql), so
-              // isRevisionReviewPage naturally flips false on the next
-              // render and the Editor lands back on the normal tabbed
-              // workspace, where the Evaluation tab's "Screening Submitted"
-              // badge picks up the freshly-updated assignment.recommendation
-              // ('ACCEPT') on its own -- same as the first-round fix above.
+            onSubmitSuccess={() => {
+              // submit_editor_recommendation() marks the revision COMPLETED
+              // (0040_peer_review_editor_comments.sql), so isRevisionReviewPage
+              // naturally flips false on the next render and the Editor lands
+              // back on the normal tabbed workspace either way.
               onChanged();
-              setJustMovedToNextStage(true);
               setShowRevisionReviewPage(false);
             }}
           />
@@ -951,11 +978,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                 Back
               </button>
               <div className="flex items-center gap-2 text-xs text-slate-600">
-                <span>Dashboard</span>
+                <button onClick={onBack} className="hover:text-slate-900 hover:underline">Dashboard</button>
                 <span>&gt;</span>
-                <span>Editorial Desk</span>
+                <button onClick={onBack} className="hover:text-slate-900 hover:underline">Editorial Desk</button>
                 <span>&gt;</span>
-                <span>Manuscripts</span>
+                <button onClick={onBack} className="hover:text-slate-900 hover:underline">Manuscripts</button>
                 <span>&gt;</span>
                 <span className="font-bold text-slate-900">{manuscript.id}</span>
               </div>
@@ -2440,12 +2467,6 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
               </div>
             )}
 
-            {/* Dashboard Content - shown when sidebarSection is 'dashboard' */}
-            {sidebarSection === 'dashboard' && (
-              <div className="text-center py-8 text-slate-500">
-                <p>Select a tab to view dashboard content</p>
-              </div>
-            )}
             </div>
           </div>
 

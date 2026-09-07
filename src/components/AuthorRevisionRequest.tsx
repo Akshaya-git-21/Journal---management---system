@@ -1,5 +1,5 @@
 import { useState, useEffect, ChangeEvent, DragEvent } from 'react';
-import { getRevisions, getRevisionFiles, uploadRevisionFile, deleteManuscriptFile, submitRevision, getReviewerAssignments, getAuthorEditorNotes, ManuscriptFileRow, RevisionRow, ReviewerAssignmentRow } from '../lib/workflow';
+import { getRevisions, getRevisionFiles, uploadRevisionFile, deleteManuscriptFile, submitRevision, getAuthorEditorNotes, ManuscriptFileRow, RevisionRow } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
 import { Loader2, Upload, CheckCircle, X, FileText } from 'lucide-react';
 
@@ -121,7 +121,6 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   const [draftSaved, setDraftSaved] = useState(false);
   const [manualChecklist, setManualChecklist] = useState({ addressedComments: false, confirmedDetails: false });
   const [confirmingSubmit, setConfirmingSubmit] = useState(false);
-  const [reviewerComments, setReviewerComments] = useState<ReviewerAssignmentRow[]>([]);
   const [editorNotes, setEditorNotes] = useState<{ screening_comments: string | null; action_reason: string | null } | null>(null);
 
   useEffect(() => {
@@ -148,32 +147,6 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
       loadRevisionFiles(selectedRevision.id);
     }
   }, [selectedRevision]);
-
-  // Reviewer feedback that led to this revision (Phase 2 Checkpoint C) --
-  // the most recent reviewer round actually completed before this revision
-  // was created. Kept separate from the Editor's Decision card below so the
-  // Author can tell which feedback came from which role. Reviewer identity
-  // isn't resolved/shown (double-blind).
-  //
-  // NOT simply "revision_number - 1": that assumes every revision has its
-  // own numbered reviewer round immediately before it, which breaks the
-  // moment an EDITOR_SCREENING-origin revision (e.g. "Return to Author"
-  // sent right after a peer-review round, with no reviewer round of its
-  // own) sits in between -- the reviewers' actual reviewer_assignments rows
-  // are still numbered for the ORIGINAL peer-review round (often 0), not
-  // this revision's number minus one. Take the latest SUBMITTED round
-  // strictly before this revision instead, whatever its number is.
-  useEffect(() => {
-    if (!selectedRevision || selectedRevision.revision_number <= 0) { setReviewerComments([]); return; }
-    getReviewerAssignments(manuscriptId)
-      .then(rows => {
-        const priorSubmitted = rows.filter(r => r.status === 'SUBMITTED' && (r.revision_number ?? 0) < selectedRevision.revision_number);
-        if (priorSubmitted.length === 0) { setReviewerComments([]); return; }
-        const latestRound = Math.max(...priorSubmitted.map(r => r.revision_number ?? 0));
-        setReviewerComments(priorSubmitted.filter(r => (r.revision_number ?? 0) === latestRound));
-      })
-      .catch(() => setReviewerComments([]));
-  }, [manuscriptId, selectedRevision?.id, selectedRevision?.revision_number]);
 
   const loadRevisions = async () => {
     try {
@@ -304,6 +277,10 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
     ? 'Return to Author'
     : isMinor ? 'Minor Revision' : selectedRevision.decision_type === 'MAJOR_REVISION' ? 'Major Revision' : 'Revision';
   const isSubmitted = selectedRevision.status === 'REVISION_SUBMITTED';
+  // decision_letter is buildAuthorNote()'s "Editor Comments:\n<note>" (see
+  // DecisionTab.tsx) -- strip that prefix since the card below already has
+  // its own "Editor Comments" label.
+  const decisionLetterNote = selectedRevision.decision_letter?.replace(/^Editor Comments:\n/, '').trim() || null;
 
   return (
     <div className="space-y-6">
@@ -357,11 +334,13 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
           comments/reason (see submit_editor_recommendation's
           is_revision_loop_round branch in
           0040_peer_review_editor_comments.sql -- action_reason is left
-          untouched on every later round). From round 2 onward the Editor's
-          comment for THAT round lives on the revision row itself
-          (manuscript_revisions.editor_comments), so use editorNotes only
-          for revision #1 and the revision's own field for every later
-          round -- otherwise every round would show round 1's stale text. */}
+          untouched on every later round). From round 2 onward, the Editor's
+          comment for the PRIOR round gets stamped onto that prior revision
+          row (manuscript_revisions.editor_comments), which is now COMPLETED
+          -- publish_decision() then creates THIS new revision row with only
+          decision_letter set (the Coordinator's note, built from that same
+          editor comment -- see buildAuthorNote() in DecisionTab.tsx), so
+          decision_letter is what actually carries it forward to the Author. */}
       <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
         <div>
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Editor's Decision</h3>
@@ -382,41 +361,17 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
           </div>
         )}
 
-        {((isScreeningOrigin && selectedRevision.revision_number > 1) || !isScreeningOrigin) && selectedRevision.editor_comments && (
+        {((isScreeningOrigin && selectedRevision.revision_number > 1) || !isScreeningOrigin) && decisionLetterNote && (
           <div>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Editor Comments</p>
-            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{selectedRevision.editor_comments}</p>
+            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{decisionLetterNote}</p>
           </div>
         )}
 
-        {/* The Coordinator's note to author (decision_letter) is just the
-            Editor Comments and each reviewer's Comments to Author
-            concatenated into one string (see buildAuthorNote() in
-            DecisionTab.tsx) -- both already render as their own labeled
-            blocks here (Editor Comments above, Reviewer 1/Reviewer 2 below),
-            so showing decision_letter too was pure duplication of the exact
-            same text under a third, unattributed "Note from Coordinator"
-            heading. Dropped entirely; nothing else reads decision_letter. */}
-        {((isScreeningOrigin && selectedRevision.revision_number > 1) || !isScreeningOrigin) && !selectedRevision.editor_comments && (
+        {((isScreeningOrigin && selectedRevision.revision_number > 1) || !isScreeningOrigin) && !decisionLetterNote && (
           <p className="text-sm text-slate-500 italic">No letter provided.</p>
         )}
       </div>
-
-      {/* Reviewer Comments -- kept visually separate from the Editor's
-          Decision card above so the Author knows which feedback came from
-          which role, per spec. Only present when this revision followed a
-          peer-review round. */}
-      {reviewerComments.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
-          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide">Reviewer Comments</h3>
-          {reviewerComments.map((r, idx) => (
-            <div key={r.id} className="border border-slate-200 rounded-lg p-4">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Reviewer {idx + 1}</p>
-              {r.comments_to_author && <p className="text-sm text-slate-700 leading-relaxed">{r.comments_to_author}</p>}
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Revision Checklist */}
       <div className="bg-white border border-slate-200 rounded-lg p-6">

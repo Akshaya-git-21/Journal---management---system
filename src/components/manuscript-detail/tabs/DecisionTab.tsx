@@ -244,7 +244,7 @@ export function DecisionTab({
   // revision row is created for the next cycle -- latestRevision then points
   // at that new (undecided) row, so the editor/coordinator decision data for
   // the cycle that was just closed out has to be read from here instead.
-  const decidedRevision = [...revisions].reverse().find(r => r.editor_decision) || null;
+  const decidedRevision = [...sortedRevisions].reverse().find(r => r.editor_decision) || null;
   // True while the Coordinator still needs to confirm the editor's decision
   // on the CURRENT revision cycle (submit_editor_recommendation parks the
   // manuscript at AWAITING_DECISION without opening the next cycle -- see
@@ -329,33 +329,37 @@ export function DecisionTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingScreeningConfirm, activeEditor?.action_reason]);
 
-  // Pre-fill the note-to-author with the Editor's comments AND each
-  // reviewer's Comments to Author for this round -- so what the Coordinator
-  // sends the Author already contains both, not just whatever the
-  // Coordinator happens to retype. Only comments_to_author is ever pulled
-  // in here (never comments_to_editor, which is explicitly confidential to
-  // the Editor) -- the Coordinator can still edit/trim this before sending.
+  // Pre-fill the note-to-author with just the Editor's own comment for this
+  // revision -- so what the Coordinator sends the Author already contains
+  // it, not just whatever the Coordinator happens to retype. No reviewer
+  // comments here: this round's "Return to Author" is the Editor's own
+  // unilateral call, not a peer-review decision. Some older revisions have
+  // a "Reviewer Comments:" section baked directly into editor_comments
+  // itself (stored that way before this screen stopped combining the two)
+  // -- strip it off so those stale rows don't keep resurfacing it either.
   useEffect(() => {
     if (pendingRevisionConfirm && !letter && decidedRevision) {
-      const roundReviewerComments = reviewerAssignments
-        .filter(r => (r.revision_number ?? 0) === decidedRevision.revision_number && r.status === 'SUBMITTED' && r.comments_to_author)
-        .map(r => r.comments_to_author as string);
-      const combined = buildAuthorNote(decidedRevision.editor_comments, roundReviewerComments);
+      const editorNoteOnly = decidedRevision.editor_comments?.split(/\n\nReviewer Comments:/)[0];
+      const combined = buildAuthorNote(editorNoteOnly, []);
       if (combined) setLetter(combined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingRevisionConfirm, decidedRevision?.id]);
 
   useEffect(() => {
-    if (pendingPeerReviewConfirm && !letter && activeEditor) {
-      const roundReviewerComments = reviewerAssignments
-        .filter(r => r.status === 'SUBMITTED' && r.comments_to_author)
-        .map(r => r.comments_to_author as string);
-      const combined = buildAuthorNote(activeEditor.peer_review_comments, roundReviewerComments);
+    // pendingRevisionConfirm takes precedence in the render below (its card
+    // is checked first) -- guard against it here too, since both can be
+    // simultaneously true for a manuscript that's both mid revision-loop and
+    // has a fresh peer-review recommendation, and without this a stale
+    // activeEditor.peer_review_comments from an earlier round could clobber
+    // the correct decidedRevision-based note the other effect just set.
+    if (pendingPeerReviewConfirm && !pendingRevisionConfirm && !letter && activeEditor) {
+      const editorNoteOnly = activeEditor.peer_review_comments?.split(/\n\nReviewer Comments:/)[0];
+      const combined = buildAuthorNote(editorNoteOnly, []);
       if (combined) setLetter(combined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingPeerReviewConfirm, activeEditor?.peer_review_comments]);
+  }, [pendingPeerReviewConfirm, pendingRevisionConfirm, activeEditor?.peer_review_comments]);
   const decided = ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
   const statusMeta = getCoordinatorStatusMeta(manuscript, editorAssignments, latestRevision, productionStatus);
   const canMoveToProduction = manuscript.status === 'ACCEPTED' && (!productionStatus || productionStatus === 'NOT_STARTED');
@@ -692,7 +696,23 @@ export function DecisionTab({
           </p>
         </div>
 
-        {!canDecide ? (
+        {/* Revision 3 specifically: evaluation submitted and both reviewer
+            re-checks are in, but the Editor hasn't recorded their decision
+            on this round yet. This revision-loop re-review keeps the
+            manuscript at EDITOR_REVIEW (not AWAITING_DECISION) while the
+            Editor is the one reviewing it -- see EditorRevisionReview.tsx's
+            isRevisionReviewPage gate. Scoped to exactly this round (not
+            every "Decision Unavailable" case) -- other rounds keep the
+            original checklist card below. */}
+        {!canDecide && hasEditorEvaluationForDisplay && !pendingEditorAcceptance
+          && (reviewerAssignments.length === 0 || hasRequiredReviews)
+          && (manuscript.status === 'AWAITING_DECISION' || manuscript.status === 'EDITOR_REVIEW')
+          && latestRevision?.revision_number === 3 ? (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 flex gap-3">
+            <Clock className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+            <p className="font-bold text-amber-900">Awaiting Editor Decision</p>
+          </div>
+        ) : !canDecide ? (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 flex gap-3">
             <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
             <div className="flex-1 space-y-2">

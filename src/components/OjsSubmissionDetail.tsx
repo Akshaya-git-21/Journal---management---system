@@ -465,6 +465,14 @@ export default function OjsSubmissionDetail({
       if (updates.manuscript) {
         setManuscriptDetails((prev) => prev ? { ...prev, manuscript: updates.manuscript } : null);
       }
+      if (updates.revisions) {
+        // Without this, allRevisions (sourced from manuscriptDetails.revisions)
+        // stayed frozen at whatever existed on first load -- a new revision
+        // cycle created later (e.g. Revision 2, Revision 3) never showed up
+        // in the "Revision N -- Uploaded Files" sections below until a full
+        // page reload, even though this table is already subscribed to.
+        setManuscriptDetails((prev) => prev ? { ...prev, revisions: updates.revisions! } : null);
+      }
       if (updates.discussions) {
         // manuscriptDetails.discussions itself was never updated here before
         // -- only the WhatsApp-style panel's separate allMessages/
