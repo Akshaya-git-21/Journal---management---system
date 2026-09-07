@@ -1308,7 +1308,7 @@ export default function OjsSubmissionDetail({
                 {/* Uploaded Files and Pre-Review Discussions Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full">
                   {/* Uploaded Files Panel */}
-                  <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl p-4 shadow-xs text-left flex flex-col h-[500px] overflow-hidden">
+                  <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl p-4 shadow-xs text-left flex flex-col">
                     <div className="shrink-0">
                       <input
                         type="file"
@@ -1339,12 +1339,12 @@ export default function OjsSubmissionDetail({
                       </div>
                     </div>
 
-                    {/* Scrollable region: as revisions accumulate (Revision 1,
-                        Revision 2, ...) this list keeps growing -- without a
-                        capped, scrollable container it pushed the card taller
-                        than its fixed-height Discussions sibling every time,
-                        making the two-column grid row uneven. */}
-                    <div className="flex-1 overflow-y-auto mt-3">
+                    {/* No height cap/scroll here -- as revisions accumulate
+                        (Revision 1, Revision 2, ...) every one of them needs
+                        to actually be visible without the Author having to
+                        notice and scroll a nested box, even if that makes
+                        this card taller than its Discussions sibling. */}
+                    <div className="mt-3">
                       <div className="overflow-x-auto rounded-lg border border-emerald-100">
                         <table className="w-full text-left text-xs border-collapse">
                           <thead>
