@@ -532,6 +532,18 @@ export default function OjsSubmissionDetail({
     return () => { cancelled = true; unsubscribe(); };
   }, [paper?.id]);
 
+  // Land the Author straight on the Production & Proofreading panel (view
+  // the proof, approve or request corrections with comments) the moment
+  // there's a proof waiting on them, instead of the generic Submission
+  // overview -- only while they're still sitting on that default tab, so
+  // this doesn't yank them away from a tab they picked themselves.
+  useEffect(() => {
+    if ((productionStatus === 'PROOF_SENT_TO_AUTHOR' || productionStatus === 'AUTHOR_PROOF_REVIEW') && activeTab === 'SUBMISSION') {
+      setActiveTab('production');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productionStatus]);
+
   // Files uploaded against the current revision cycle (author's revised
   // manuscript / response to reviewers), shown as their own section below
   // the original submission's Uploaded Files. Re-fetches and re-subscribes
