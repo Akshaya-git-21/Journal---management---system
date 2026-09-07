@@ -74,12 +74,14 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
   const awaitingReview = status === 'AUTHOR_PROOF_REVIEW' || status === 'PROOF_SENT_TO_AUTHOR';
 
   const submitCorrections = async () => {
-    if (!attachment) { setError('An attachment is required to submit Proof Corrections.'); return; }
+    if (!comments.trim()) { setError('Comments are required to submit Proof Corrections.'); return; }
     setBusy(true);
     setError('');
     try {
-      const { storagePath, publicUrl } = await uploadCorrectionAttachment(manuscriptId, attachment);
-      await authorSubmitCorrections(manuscriptId, comments, storagePath, publicUrl, attachment.name);
+      // Attachment is optional -- only upload one if the Author actually
+      // attached a file.
+      const uploaded = attachment ? await uploadCorrectionAttachment(manuscriptId, attachment) : null;
+      await authorSubmitCorrections(manuscriptId, comments, uploaded?.storagePath ?? '', uploaded?.publicUrl ?? '', attachment?.name ?? '');
       setComments(''); setAttachment(null); setMode('view');
       await load();
     } catch (e: any) {
@@ -180,11 +182,11 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
                 className="w-full rounded-lg border border-slate-200 px-3.5 py-2.5 text-sm outline-none focus:border-[#008751]"
               />
               <label className="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
-                <Upload className="w-4 h-4" /> {attachment ? attachment.name : 'Upload Proof Corrections (required)'}
+                <Upload className="w-4 h-4" /> {attachment ? attachment.name : 'Upload Proof Corrections (optional)'}
                 <input type="file" className="hidden" onChange={(e) => setAttachment(e.target.files?.[0] || null)} />
               </label>
               <div className="flex items-center gap-3">
-                <button disabled={busy || !comments.trim() || !attachment} onClick={submitCorrections} className="rounded-full bg-[#008751] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#007043] disabled:opacity-40">Submit Corrections</button>
+                <button disabled={busy || !comments.trim()} onClick={submitCorrections} className="rounded-full bg-[#008751] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#007043] disabled:opacity-40">Submit Corrections</button>
                 <button onClick={() => { setMode('view'); setComments(''); setAttachment(null); }} className="rounded-full border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
               </div>
             </div>
