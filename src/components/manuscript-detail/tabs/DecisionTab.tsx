@@ -1,9 +1,14 @@
 import { Fragment, useState, useEffect } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, StatusHistoryRow, ProfileRow, ScreeningResponse } from '../../../lib/workflow';
 import { publishDecision, coordinatorSendRevisionToReviewers, listActiveProfilesByRole } from '../../../lib/workflow';
-import { getProduction, startProduction, assignGDMember, subscribeToProduction, sendProofToAuthor } from '../../../lib/production';
+import {
+  getProduction, startProduction, assignGDMember, subscribeToProduction, sendProofToAuthor,
+  getProofs, getCorrections, ProofRow, CorrectionRow,
+  acceptCorrections, requestClarification, sendCorrectionsToEditor, sendForCorrections,
+  coordinatorReturnForFurtherCorrections
+} from '../../../lib/production';
 import { createAndActivateGDMemberAccount } from '../../../lib/auth';
-import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, PackageCheck, Loader2, CheckCircle2, CheckCircle, XCircle, ClipboardList, UserPlus, X, Clock, Send } from 'lucide-react';
+import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, PackageCheck, Loader2, CheckCircle2, CheckCircle, XCircle, ClipboardList, UserPlus, X, Clock, Send, MessageCircle, Eye, Download } from 'lucide-react';
 import { getRevisionDecisionLabel } from '../../../lib/decisionUtils';
 import { getCoordinatorStatusMeta, getManuscriptStatusLabel, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 
@@ -97,6 +102,15 @@ export function DecisionTab({
   const [moveToProductionError, setMoveToProductionError] = useState('');
   const [sendingProofToAuthor, setSendingProofToAuthor] = useState(false);
   const [sendProofToAuthorError, setSendProofToAuthorError] = useState('');
+  // Corrections management -- lets the Coordinator run the whole
+  // Author-corrections -> Editor verification -> GD Member -> updated proof
+  // loop directly from here instead of only from the separate Production
+  // section (same RPCs as ProductionWorkspace.tsx).
+  const [proofs, setProofs] = useState<ProofRow[]>([]);
+  const [corrections, setCorrections] = useState<CorrectionRow[]>([]);
+  const [correctionsBusy, setCorrectionsBusy] = useState(false);
+  const [correctionsError, setCorrectionsError] = useState('');
+  const [clarificationDraft, setClarificationDraft] = useState<Record<string, string>>({});
   // GD Member assignment gate -- clicking "Move to Production" must not
   // actually start production until a GD Member is assigned (see the
   // Coordinator's requirement: "if no GD Member is assigned, a popup should
@@ -119,12 +133,31 @@ export function DecisionTab({
 
   useEffect(() => {
     let cancelled = false;
-    if (manuscript.status !== 'ACCEPTED') { setProductionStatus(null); return; }
-    const refetch = () => getProduction(manuscript.id).then((p) => { if (!cancelled) setProductionStatus(p?.production_status ?? null); }).catch(() => {});
+    if (manuscript.status !== 'ACCEPTED') { setProductionStatus(null); setProofs([]); setCorrections([]); return; }
+    const refetch = () => {
+      getProduction(manuscript.id).then((p) => { if (!cancelled) setProductionStatus(p?.production_status ?? null); }).catch(() => {});
+      getProofs(manuscript.id).then((p) => { if (!cancelled) setProofs(p); }).catch(() => {});
+      getCorrections(manuscript.id).then((c) => { if (!cancelled) setCorrections(c); }).catch(() => {});
+    };
     refetch();
     const unsubscribe = subscribeToProduction(refetch);
     return () => { cancelled = true; unsubscribe(); };
   }, [manuscript.id, manuscript.status]);
+
+  const latestProductionProof = proofs[0];
+
+  const runCorrectionsAction = async (fn: () => Promise<any>) => {
+    if (correctionsBusy) return;
+    setCorrectionsBusy(true);
+    setCorrectionsError('');
+    try {
+      await fn();
+    } catch (e: any) {
+      setCorrectionsError(e.message || 'That action failed.');
+    } finally {
+      setCorrectionsBusy(false);
+    }
+  };
 
   const generateGdGatePassword = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
@@ -1050,6 +1083,131 @@ export function DecisionTab({
       )}
       {moveToProductionError && (
         <p className="text-xs font-semibold text-red-600">{moveToProductionError}</p>
+      )}
+
+      {/* 9. Proof Corrections -- the whole Author-corrections -> Editor
+          verification -> GD Member -> updated proof loop, runnable straight
+          from here instead of only from the separate Production section.
+          Same RPCs ProductionWorkspace.tsx's own corrections UI uses. */}
+      {!isEditor && corrections.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+          <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
+            <MessageCircle className="w-4 h-4" /> Proof Corrections
+          </h3>
+          {correctionsError && <p className="text-xs font-semibold text-red-600">{correctionsError}</p>}
+          <div className="space-y-4">
+            {corrections.map((c) => (
+              <div key={c.id} className="rounded-xl border border-slate-200 p-4 text-sm space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-bold text-slate-800">Proof v{c.proof_version} — submitted {new Date(c.submitted_at).toLocaleDateString()}</p>
+                  <span className={`shrink-0 text-[10px] font-bold uppercase px-2 py-1 rounded-full ${c.status === 'REVIEWED' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{c.status}</span>
+                </div>
+                <p className="text-slate-600 whitespace-pre-wrap">{c.comments}</p>
+                {c.attachment_public_url && (
+                  <a href={c.attachment_public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline">
+                    <Download className="w-3.5 h-3.5" /> {c.attachment_file_name || 'Correction attachment'}
+                  </a>
+                )}
+
+                {c.status === 'SUBMITTED' && (
+                  <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      disabled={correctionsBusy}
+                      onClick={() => runCorrectionsAction(() => acceptCorrections(manuscript.id, c.id))}
+                      className="self-start rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
+                    >
+                      Accept Minor Corrections
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={clarificationDraft[c.id] || ''}
+                        onChange={(e) => setClarificationDraft((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                        placeholder="Ask the author to clarify a correction..."
+                        className="flex-1 rounded-full border border-slate-200 px-4 py-2 text-xs outline-none focus:border-emerald-600"
+                      />
+                      <button
+                        disabled={correctionsBusy || !clarificationDraft[c.id]?.trim()}
+                        onClick={() => runCorrectionsAction(async () => {
+                          await requestClarification(manuscript.id, clarificationDraft[c.id]);
+                          setClarificationDraft((prev) => ({ ...prev, [c.id]: '' }));
+                        })}
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" /> Request Clarification
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-slate-100">
+                  <button
+                    disabled={correctionsBusy}
+                    onClick={() => runCorrectionsAction(() => sendCorrectionsToEditor(manuscript.id, c.id))}
+                    className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40"
+                  >
+                    <Send className="w-3.5 h-3.5" /> Send to Editor for Verification
+                  </button>
+                </div>
+
+                {c.editor_feedback_at && (
+                  <div className="rounded-xl bg-slate-50 border border-slate-100 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">Editor Feedback</p>
+                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${c.editor_verified ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {c.editor_verified ? 'Verified' : 'Not Verified'}
+                      </span>
+                    </div>
+                    <p className="text-slate-600 whitespace-pre-wrap">{c.editor_comments || 'No editorial comments.'}</p>
+                  </div>
+                )}
+
+                {c.editor_feedback_at && (
+                  <div className="rounded-xl border-2 border-slate-900 p-4 space-y-2">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500 font-bold">Send to GD Member for Corrections</p>
+                    <button
+                      disabled={correctionsBusy}
+                      onClick={() => runCorrectionsAction(() => sendForCorrections(manuscript.id, c.id))}
+                      className="inline-flex items-center gap-1 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
+                    >
+                      <Send className="w-3.5 h-3.5" /> Send for Corrections
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* GD Member has sent the corrected proof back -- send it on to the
+          Author for another round, or bounce it back to the GD Member
+          without troubling the Author. */}
+      {!isEditor && productionStatus === 'FINAL_PROOF_READY' && (
+        <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-6 space-y-3">
+          <p className="text-sm text-emerald-800 font-semibold">The GD Member has submitted the corrected proof. Final proof is ready for review.</p>
+          {latestProductionProof?.public_url && (
+            <a href={latestProductionProof.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100">
+              <Eye className="w-3.5 h-3.5" /> View Proof v{latestProductionProof.version}
+            </a>
+          )}
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <button
+              disabled={correctionsBusy}
+              onClick={() => runCorrectionsAction(() => sendProofToAuthor(manuscript.id))}
+              className="inline-flex items-center gap-1 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
+            >
+              <Send className="w-3.5 h-3.5" /> Send Final Proof to Author
+            </button>
+            <button
+              disabled={correctionsBusy}
+              onClick={() => runCorrectionsAction(() => coordinatorReturnForFurtherCorrections(manuscript.id))}
+              className="inline-flex items-center gap-1 rounded-full bg-amber-700 px-4 py-2 text-xs font-bold text-white hover:bg-amber-800 disabled:opacity-40"
+            >
+              Return for Further Corrections
+            </button>
+          </div>
+          {correctionsError && <p className="text-xs font-semibold text-red-600">{correctionsError}</p>}
+        </div>
       )}
 
       {showGDGateModal && (
