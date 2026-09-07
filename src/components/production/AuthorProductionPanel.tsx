@@ -12,6 +12,25 @@ function formatDate(iso: string | null | undefined) {
   return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+// A plain <a download> is silently ignored by the browser for a
+// cross-origin URL (Supabase storage's public_url is a different origin
+// than this app) -- it just navigates/opens the file instead of saving it.
+// Fetching it as a blob and downloading that local object URL works
+// regardless of origin.
+async function downloadFile(url: string, filename: string) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to download the proof file.');
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(objectUrl);
+}
+
 /** Author-facing proof review panel -- Final Proof Available / View / Download /
  * Request Corrections (mandatory attachment, "Proof Corrections" not "Revised
  * Manuscript") / Approve Final Proof with the required confirmation checkbox.
@@ -27,6 +46,7 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
   const [comments, setComments] = useState('');
   const [attachment, setAttachment] = useState<File | null>(null);
   const [confirmApprove, setConfirmApprove] = useState(false);
+  const [downloadingProof, setDownloadingProof] = useState(false);
 
   const load = async () => {
     try {
@@ -83,6 +103,19 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
     }
   };
 
+  const handleDownloadProof = async () => {
+    if (!latestProof?.public_url || downloadingProof) return;
+    setDownloadingProof(true);
+    setError('');
+    try {
+      await downloadFile(latestProof.public_url, latestProof.file_name);
+    } catch (e: any) {
+      setError(e.message || 'Failed to download the proof file.');
+    } finally {
+      setDownloadingProof(false);
+    }
+  };
+
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-6 text-sm text-left space-y-5 animate-in fade-in duration-100">
       <h2 className="text-lg font-bold text-slate-900 tracking-tight border-b border-slate-100 pb-3">Production &amp; Proofreading</h2>
@@ -117,7 +150,14 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
             {latestProof.public_url && (
               <div className="flex items-center gap-2 shrink-0">
                 <a href={latestProof.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-4 h-4" /> View Proof</a>
-                <a href={latestProof.public_url} download className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download className="w-4 h-4" /> Download Proof</a>
+                <button
+                  type="button"
+                  onClick={handleDownloadProof}
+                  disabled={downloadingProof}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {downloadingProof ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Download Proof
+                </button>
               </div>
             )}
           </div>
