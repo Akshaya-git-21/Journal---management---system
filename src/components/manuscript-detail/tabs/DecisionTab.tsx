@@ -380,16 +380,13 @@ export function DecisionTab({
   const decided = ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
   const statusMeta = getCoordinatorStatusMeta(manuscript, editorAssignments, latestRevision, productionStatus);
   const canMoveToProduction = manuscript.status === 'ACCEPTED' && (!productionStatus || productionStatus === 'NOT_STARTED');
-  // Shown for the whole "PROOFREADING" stretch (not just the instant a new
-  // proof lands) so the Coordinator always has this action in view here
-  // instead of having to go find the Production tab -- but only truly
-  // actionable (see send_proof_to_author() in 0047/0059/0065) when there's
-  // actually a new/updated proof to send; otherwise disabled with a note,
-  // since e.g. PROOF_SENT_TO_AUTHOR means the Author already has the current
-  // one and is the one who needs to act next.
+  // Shown and clickable for the whole "PROOFREADING" stretch -- including
+  // PROOF_SENT_TO_AUTHOR, where it's a resend/re-notify of the current proof
+  // rather than a new one (see send_proof_to_author() in 0067, which now
+  // treats that case as a no-op status change plus a fresh notification).
   const showSendProofToAuthor = !isEditor && productionStatus && statusMeta.label === 'PROOFREADING';
   const canSendProofToAuthor = !isEditor && !!productionStatus &&
-    ['PROOF_GENERATED', 'PROOF_SUBMITTED_TO_COORDINATOR', 'PROOF_UPDATED', 'FINAL_PROOF_READY'].includes(productionStatus);
+    ['PROOF_GENERATED', 'PROOF_SUBMITTED_TO_COORDINATOR', 'PROOF_UPDATED', 'FINAL_PROOF_READY', 'PROOF_SENT_TO_AUTHOR'].includes(productionStatus);
   const finalDecisionLabel =
     manuscript.status === 'ACCEPTED' ? 'ACCEPT' :
     manuscript.status === 'REJECTED' ? 'REJECT' :
@@ -1012,15 +1009,11 @@ export function DecisionTab({
                     type="button"
                     onClick={handleSendProofToAuthor}
                     disabled={sendingProofToAuthor || !canSendProofToAuthor}
-                    title={canSendProofToAuthor ? undefined : 'The Author already has the current proof and hasn’t responded yet.'}
                     className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {sendingProofToAuthor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                    {sendingProofToAuthor ? 'Sending...' : 'Send Proof to Author'}
+                    {sendingProofToAuthor ? 'Sending...' : productionStatus === 'PROOF_SENT_TO_AUTHOR' ? 'Resend Proof to Author' : 'Send Proof to Author'}
                   </button>
-                  {!canSendProofToAuthor && (
-                    <p className="mt-2 text-xs text-slate-500">The Author already has the current proof and hasn&rsquo;t responded yet.</p>
-                  )}
                   {sendProofToAuthorError && (
                     <p className="mt-2 text-xs font-semibold text-red-600">{sendProofToAuthorError}</p>
                   )}
