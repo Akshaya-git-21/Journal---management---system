@@ -3,7 +3,7 @@ import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow,
 import { publishDecision, coordinatorSendRevisionToReviewers, listActiveProfilesByRole } from '../../../lib/workflow';
 import {
   getProduction, startProduction, assignGDMember, subscribeToProduction, sendProofToAuthor,
-  getProofs, getCorrections, ProofRow, CorrectionRow,
+  getProofs, getCorrections, ProofRow, CorrectionRow, ProductionRow,
   acceptCorrections, requestClarification, sendCorrectionsToEditor, sendForCorrections,
   coordinatorReturnForFurtherCorrections
 } from '../../../lib/production';
@@ -98,6 +98,7 @@ export function DecisionTab({
   const [reviewerDecisionsExpanded, setReviewerDecisionsExpanded] = useState(true);
   const [finalDecisionExpanded, setFinalDecisionExpanded] = useState(true);
   const [productionStatus, setProductionStatus] = useState<string | null>(null);
+  const [production, setProduction] = useState<ProductionRow | null>(null);
   const [movingToProduction, setMovingToProduction] = useState(false);
   const [moveToProductionError, setMoveToProductionError] = useState('');
   const [sendingProofToAuthor, setSendingProofToAuthor] = useState(false);
@@ -110,6 +111,7 @@ export function DecisionTab({
   const [corrections, setCorrections] = useState<CorrectionRow[]>([]);
   const [correctionsBusy, setCorrectionsBusy] = useState(false);
   const [correctionsError, setCorrectionsError] = useState('');
+  const [correctionsSuccess, setCorrectionsSuccess] = useState('');
   const [clarificationDraft, setClarificationDraft] = useState<Record<string, string>>({});
   // GD Member assignment gate -- clicking "Move to Production" must not
   // actually start production until a GD Member is assigned (see the
@@ -133,9 +135,9 @@ export function DecisionTab({
 
   useEffect(() => {
     let cancelled = false;
-    if (manuscript.status !== 'ACCEPTED') { setProductionStatus(null); setProofs([]); setCorrections([]); return; }
+    if (manuscript.status !== 'ACCEPTED') { setProductionStatus(null); setProduction(null); setProofs([]); setCorrections([]); return; }
     const refetch = () => {
-      getProduction(manuscript.id).then((p) => { if (!cancelled) setProductionStatus(p?.production_status ?? null); }).catch(() => {});
+      getProduction(manuscript.id).then((p) => { if (!cancelled) { setProductionStatus(p?.production_status ?? null); setProduction(p); } }).catch(() => {});
       getProofs(manuscript.id).then((p) => { if (!cancelled) setProofs(p); }).catch(() => {});
       getCorrections(manuscript.id).then((c) => { if (!cancelled) setCorrections(c); }).catch(() => {});
     };
@@ -146,12 +148,17 @@ export function DecisionTab({
 
   const latestProductionProof = proofs[0];
 
-  const runCorrectionsAction = async (fn: () => Promise<any>) => {
+  const runCorrectionsAction = async (fn: () => Promise<any>, successMessage?: string) => {
     if (correctionsBusy) return;
     setCorrectionsBusy(true);
     setCorrectionsError('');
+    setCorrectionsSuccess('');
     try {
       await fn();
+      if (successMessage) {
+        setCorrectionsSuccess(successMessage);
+        setTimeout(() => setCorrectionsSuccess(''), 4000);
+      }
     } catch (e: any) {
       setCorrectionsError(e.message || 'That action failed.');
     } finally {
@@ -1094,6 +1101,9 @@ export function DecisionTab({
           <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
             <MessageCircle className="w-4 h-4" /> Proof Corrections
           </h3>
+          {correctionsSuccess && (
+            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> {correctionsSuccess}</p>
+          )}
           {correctionsError && <p className="text-xs font-semibold text-red-600">{correctionsError}</p>}
           <div className="space-y-4">
             {corrections.map((c) => (
@@ -1113,7 +1123,7 @@ export function DecisionTab({
                   <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
                     <button
                       disabled={correctionsBusy}
-                      onClick={() => runCorrectionsAction(() => acceptCorrections(manuscript.id, c.id))}
+                      onClick={() => runCorrectionsAction(() => acceptCorrections(manuscript.id, c.id), 'Corrections accepted.')}
                       className="self-start rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
                     >
                       Accept Minor Corrections
@@ -1130,7 +1140,7 @@ export function DecisionTab({
                         onClick={() => runCorrectionsAction(async () => {
                           await requestClarification(manuscript.id, clarificationDraft[c.id]);
                           setClarificationDraft((prev) => ({ ...prev, [c.id]: '' }));
-                        })}
+                        }, 'Clarification request sent to the Author.')}
                         className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                       >
                         <MessageCircle className="w-3.5 h-3.5" /> Request Clarification
@@ -1139,14 +1149,20 @@ export function DecisionTab({
                   </div>
                 )}
 
-                <div className="pt-2 border-t border-slate-100">
-                  <button
-                    disabled={correctionsBusy}
-                    onClick={() => runCorrectionsAction(() => sendCorrectionsToEditor(manuscript.id, c.id))}
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40"
-                  >
-                    <Send className="w-3.5 h-3.5" /> Send to Editor for Verification
-                  </button>
+                <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
+                  {production?.sent_to_editor_at && production.sent_to_editor_correction_id === c.id ? (
+                    <span className="text-[10px] font-bold uppercase text-emerald-700 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Editor {new Date(production.sent_to_editor_at).toLocaleDateString()}
+                    </span>
+                  ) : (
+                    <button
+                      disabled={correctionsBusy}
+                      onClick={() => runCorrectionsAction(() => sendCorrectionsToEditor(manuscript.id, c.id), 'Sent to the Editor for verification.')}
+                      className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40"
+                    >
+                      <Send className="w-3.5 h-3.5" /> Send to Editor for Verification
+                    </button>
+                  )}
                 </div>
 
                 {c.editor_feedback_at && (
@@ -1166,7 +1182,7 @@ export function DecisionTab({
                     <p className="text-[11px] uppercase tracking-wide text-slate-500 font-bold">Send to GD Member for Corrections</p>
                     <button
                       disabled={correctionsBusy}
-                      onClick={() => runCorrectionsAction(() => sendForCorrections(manuscript.id, c.id))}
+                      onClick={() => runCorrectionsAction(() => sendForCorrections(manuscript.id, c.id), 'Sent to the GD Member for corrections.')}
                       className="inline-flex items-center gap-1 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
                     >
                       <Send className="w-3.5 h-3.5" /> Send for Corrections
@@ -1193,19 +1209,22 @@ export function DecisionTab({
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <button
               disabled={correctionsBusy}
-              onClick={() => runCorrectionsAction(() => sendProofToAuthor(manuscript.id))}
+              onClick={() => runCorrectionsAction(() => sendProofToAuthor(manuscript.id), 'Final proof sent to the Author.')}
               className="inline-flex items-center gap-1 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
             >
               <Send className="w-3.5 h-3.5" /> Send Final Proof to Author
             </button>
             <button
               disabled={correctionsBusy}
-              onClick={() => runCorrectionsAction(() => coordinatorReturnForFurtherCorrections(manuscript.id))}
+              onClick={() => runCorrectionsAction(() => coordinatorReturnForFurtherCorrections(manuscript.id), 'Returned to the GD Member for further corrections.')}
               className="inline-flex items-center gap-1 rounded-full bg-amber-700 px-4 py-2 text-xs font-bold text-white hover:bg-amber-800 disabled:opacity-40"
             >
               Return for Further Corrections
             </button>
           </div>
+          {correctionsSuccess && (
+            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> {correctionsSuccess}</p>
+          )}
           {correctionsError && <p className="text-xs font-semibold text-red-600">{correctionsError}</p>}
         </div>
       )}
