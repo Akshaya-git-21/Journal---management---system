@@ -1,12 +1,12 @@
 import { Fragment, useState, useEffect } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, StatusHistoryRow, ProfileRow, ScreeningResponse } from '../../../lib/workflow';
-import { publishDecision, coordinatorSendRevisionToReviewers, listActiveProfilesByRole, getProfilesByIds } from '../../../lib/workflow';
+import { publishDecision, coordinatorSendRevisionToReviewers, listActiveProfilesByRole, getProfilesByIds, sendToPublisher } from '../../../lib/workflow';
 import {
   getProduction, startProduction, assignGDMember, subscribeToProduction, sendProofToAuthor,
-  coordinatorNotifyGDMember, coordinatorSendToEditor, coordinatorSendToAuthorFinal, ProductionRow
+  coordinatorNotifyGDMember, coordinatorSendToEditor, coordinatorSendToAuthorFinal, editorSendCorrectionsToGD, coordinatorSendToGdForFinalize, ProductionRow
 } from '../../../lib/production';
 import ProofReviewTimeline from '../../production/ProofReviewTimeline';
-import { createAndActivateGDMemberAccount } from '../../../lib/auth';
+import { createAndActivateGDMemberAccount, createAndActivatePublisherAccount } from '../../../lib/auth';
 import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, PackageCheck, Loader2, CheckCircle2, CheckCircle, XCircle, ClipboardList, UserPlus, X, Clock, Send, MessageCircle, Eye, Download } from 'lucide-react';
 import { getRevisionDecisionLabel } from '../../../lib/decisionUtils';
 import { getCoordinatorStatusMeta, getManuscriptStatusLabel, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
@@ -110,6 +110,27 @@ export function DecisionTab({
   const [sendToEditorError, setSendToEditorError] = useState('');
   const [sendingToAuthorFinal, setSendingToAuthorFinal] = useState(false);
   const [sendToAuthorFinalError, setSendToAuthorFinalError] = useState('');
+  const [sendingToGdForFinalize, setSendingToGdForFinalize] = useState(false);
+  const [sendToGdForFinalizeError, setSendToGdForFinalizeError] = useState('');
+  const [sendingCorrectionsToGD, setSendingCorrectionsToGD] = useState(false);
+  const [sendCorrectionsToGDError, setSendCorrectionsToGDError] = useState('');
+  // "Choose Publisher" gate -- shown once READY_FOR_PUBLICATION, mirrors the
+  // GD Member assignment gate above (pick existing or create new), just
+  // targeting the Publisher role and send_to_publisher() instead.
+  const [showPublisherGateModal, setShowPublisherGateModal] = useState(false);
+  const [publisherGateMode, setPublisherGateMode] = useState<'PICK' | 'CREATE'>('PICK');
+  const [publisherGateMembers, setPublisherGateMembers] = useState<ProfileRow[]>([]);
+  const [publisherGateLoadingMembers, setPublisherGateLoadingMembers] = useState(false);
+  const [selectedPublisherForGate, setSelectedPublisherForGate] = useState('');
+  const [publisherGateName, setPublisherGateName] = useState('');
+  const [publisherGateEmail, setPublisherGateEmail] = useState('');
+  const [publisherGateOrganization, setPublisherGateOrganization] = useState('');
+  const [publisherGatePassword, setPublisherGatePassword] = useState('');
+  const [publisherGateBusy, setPublisherGateBusy] = useState(false);
+  const [publisherGateError, setPublisherGateError] = useState('');
+  const [createdPublisherCredentials, setCreatedPublisherCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [assignedPublisherProfile, setAssignedPublisherProfile] = useState<ProfileRow | null>(null);
+  const [readyForPublishClicked, setReadyForPublishClicked] = useState(false);
   // GD Member assignment gate -- clicking "Move to Production" must not
   // actually start production until a GD Member is assigned (see the
   // Coordinator's requirement: "if no GD Member is assigned, a popup should
@@ -151,6 +172,15 @@ export function DecisionTab({
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [production?.assigned_to]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!manuscript.assigned_publisher_id) { setAssignedPublisherProfile(null); return; }
+    getProfilesByIds([manuscript.assigned_publisher_id]).then((map) => {
+      if (!cancelled) setAssignedPublisherProfile(map[manuscript.assigned_publisher_id as string] || null);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [manuscript.assigned_publisher_id]);
 
   const generateGdGatePassword = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
@@ -264,6 +294,106 @@ export function DecisionTab({
       setSendToAuthorFinalError(e.message || 'Failed to send the proof to the Author.');
     } finally {
       setSendingToAuthorFinal(false);
+    }
+  };
+
+  const handleSendToGdForFinalize = async () => {
+    if (sendingToGdForFinalize) return;
+    setSendingToGdForFinalize(true);
+    setSendToGdForFinalizeError('');
+    try {
+      const updated = await coordinatorSendToGdForFinalize(manuscript.id);
+      setProductionStatus(updated.production_status);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendToGdForFinalizeError(e.message || 'Failed to send the proof to the GD Member.');
+    } finally {
+      setSendingToGdForFinalize(false);
+    }
+  };
+
+  const handleSendCorrectionsToGD = async () => {
+    if (sendingCorrectionsToGD) return;
+    setSendingCorrectionsToGD(true);
+    setSendCorrectionsToGDError('');
+    try {
+      const updated = await editorSendCorrectionsToGD(manuscript.id);
+      setProductionStatus(updated.production_status);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendCorrectionsToGDError(e.message || 'Failed to send the corrections to the GD Member.');
+    } finally {
+      setSendingCorrectionsToGD(false);
+    }
+  };
+
+  const generatePublisherGatePassword = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
+    return Array.from({ length: 12 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
+  };
+
+  const openPublisherGateModal = async () => {
+    setPublisherGateMode('PICK');
+    setSelectedPublisherForGate('');
+    setPublisherGateName('');
+    setPublisherGateEmail('');
+    setPublisherGateOrganization('');
+    setPublisherGatePassword(generatePublisherGatePassword());
+    setPublisherGateError('');
+    setCreatedPublisherCredentials(null);
+    setShowPublisherGateModal(true);
+    setPublisherGateLoadingMembers(true);
+    try {
+      const members = await listActiveProfilesByRole('PUBLISHER');
+      setPublisherGateMembers(members);
+      if (members.length === 0) setPublisherGateMode('CREATE');
+    } catch {
+      setPublisherGateMembers([]);
+    } finally {
+      setPublisherGateLoadingMembers(false);
+    }
+  };
+
+  const finalizeChoosePublisher = async (publisherId: string) => {
+    setPublisherGateBusy(true);
+    setPublisherGateError('');
+    try {
+      await sendToPublisher(manuscript.id, publisherId);
+      onWorkflowChange();
+      return true;
+    } catch (e: any) {
+      setPublisherGateError(e.message || 'Failed to assign the Publisher.');
+      return false;
+    } finally {
+      setPublisherGateBusy(false);
+    }
+  };
+
+  const handleAssignExistingPublisher = async () => {
+    if (!selectedPublisherForGate) return;
+    const ok = await finalizeChoosePublisher(selectedPublisherForGate);
+    if (ok) setShowPublisherGateModal(false);
+  };
+
+  const handleCreateAndAssignPublisher = async () => {
+    const normalizedName = publisherGateName.trim();
+    const normalizedEmail = publisherGateEmail.trim().toLowerCase();
+    if (!normalizedName) { setPublisherGateError('Please enter the Publisher name.'); return; }
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) { setPublisherGateError('Please enter a valid email address.'); return; }
+    const password = publisherGatePassword.trim() || generatePublisherGatePassword();
+    if (password.length < 8) { setPublisherGateError('Password must be at least 8 characters.'); return; }
+
+    setPublisherGateBusy(true);
+    setPublisherGateError('');
+    try {
+      const profile = await createAndActivatePublisherAccount(normalizedEmail, password, normalizedName, publisherGateOrganization.trim());
+      if (!profile) throw new Error('Publisher account was created but could not be looked up.');
+      const ok = await finalizeChoosePublisher(profile.id);
+      if (ok) setCreatedPublisherCredentials({ email: normalizedEmail, password });
+    } catch (e: any) {
+      setPublisherGateError(e.message || 'Failed to create the Publisher account.');
+    } finally {
+      setPublisherGateBusy(false);
     }
   };
 
@@ -1064,7 +1194,11 @@ export function DecisionTab({
           {finalDecisionExpanded && (
             <div className="px-6 pb-6 space-y-1">
               <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Status</p>
-              <p className="text-lg font-black text-slate-900">{statusMeta.label}</p>
+              {manuscript.status === 'PUBLISHED' ? (
+                <p className="text-2xl font-black text-emerald-600 tracking-tight">PUBLISHED &mdash; LIVE</p>
+              ) : (
+                <p className="text-lg font-black text-slate-900">{statusMeta.label}</p>
+              )}
               {statusMeta.nextStep && (
                 <>
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-500 pt-3">Next Step</p>
@@ -1122,6 +1256,31 @@ export function DecisionTab({
                   <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Editor for approval -- Proof v{production?.current_proof_version}.
                 </p>
               )}
+              {/* Module 77/81: the Editor's corrections are recorded but not
+                  yet routed to the GD Member -- the Coordinator must
+                  explicitly send them on, same pattern as every other step
+                  here (the Editor can also do this from their own page). */}
+              {!isEditor && productionStatus === 'EDITOR_CORRECTIONS_PENDING_SEND' && (
+                <div className="pt-3">
+                  <button
+                    type="button"
+                    onClick={handleSendCorrectionsToGD}
+                    disabled={sendingCorrectionsToGD}
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {sendingCorrectionsToGD ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    {sendingCorrectionsToGD ? 'Sending...' : `Send to ${assignedGDMemberProfile?.name || 'GD Member'} for Editorial Correction`}
+                  </button>
+                  {sendCorrectionsToGDError && (
+                    <p className="mt-2 text-xs font-semibold text-red-600">{sendCorrectionsToGDError}</p>
+                  )}
+                </div>
+              )}
+              {!isEditor && productionStatus === 'EDITOR_CORRECTIONS_REQUESTED' && (
+                <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to {assignedGDMemberProfile?.name || 'the GD Member'} for editorial correction.
+                </p>
+              )}
               {/* Module 79: Editor's approval no longer auto-routes to the
                   Author's Final Review -- the Coordinator must explicitly
                   send it on. */}
@@ -1144,6 +1303,34 @@ export function DecisionTab({
               {!isEditor && productionStatus === 'PROOF_SENT_TO_AUTHOR_FINAL' && (
                 <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author for final confirmation -- Proof v{production?.current_proof_version}.
+                </p>
+              )}
+              {/* Module 82: both approvals are in, but the Coordinator must
+                  explicitly send it to the GD Member before their "Move to
+                  Publish" button will accept -- same explicit-handoff
+                  pattern as every other step here. */}
+              {!isEditor && productionStatus === 'AUTHOR_FINAL_APPROVED' && (
+                <div className="pt-3">
+                  <p className="text-xs font-semibold text-emerald-700 mb-2">
+                    Final Proof Approved by Author and Editor -- Proof v{production?.current_proof_version} is ready for publication.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleSendToGdForFinalize}
+                    disabled={sendingToGdForFinalize}
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {sendingToGdForFinalize ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    {sendingToGdForFinalize ? 'Sending...' : `Send to ${assignedGDMemberProfile?.name || 'GD Member'} for Finalize`}
+                  </button>
+                  {sendToGdForFinalizeError && (
+                    <p className="mt-2 text-xs font-semibold text-red-600">{sendToGdForFinalizeError}</p>
+                  )}
+                </div>
+              )}
+              {!isEditor && productionStatus === 'SENT_TO_GD_FOR_FINALIZE' && (
+                <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to {assignedGDMemberProfile?.name || 'the GD Member'} for finalize.
                 </p>
               )}
             </div>
@@ -1249,7 +1436,7 @@ export function DecisionTab({
           full history), not manually routing each step. See
           ProductionWorkspace.tsx for the same panel plus the Coordinator
           Override escape hatch for a stuck manuscript. */}
-      {!isEditor && production && ['PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW', 'AUTHOR_APPROVED', 'CORRECTIONS_IN_PROGRESS', 'PROOF_SENT_TO_EDITOR', 'EDITOR_CORRECTIONS_PENDING_SEND', 'EDITOR_CORRECTIONS_REQUESTED', 'PROOF_READY_FOR_EDITOR', 'EDITOR_APPROVED', 'PROOF_SENT_TO_AUTHOR_FINAL', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED', 'READY_FOR_PUBLICATION'].includes(productionStatus || '') && (
+      {!isEditor && production && ['PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW', 'AUTHOR_APPROVED', 'CORRECTIONS_IN_PROGRESS', 'PROOF_SENT_TO_EDITOR', 'EDITOR_CORRECTIONS_PENDING_SEND', 'EDITOR_CORRECTIONS_REQUESTED', 'PROOF_READY_FOR_EDITOR', 'EDITOR_APPROVED', 'PROOF_SENT_TO_AUTHOR_FINAL', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED', 'AUTHOR_FINAL_APPROVED', 'SENT_TO_GD_FOR_FINALIZE', 'READY_FOR_PUBLICATION'].includes(productionStatus || '') && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
           <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
             <MessageCircle className="w-4 h-4" /> Proof &amp; Review Status
@@ -1264,27 +1451,36 @@ export function DecisionTab({
               <p className="text-slate-700">{production.author_final_approved_version ? `Proof v${production.author_final_approved_version}` : 'Not yet approved'}</p>
             </div>
           </div>
+          {/* Module 82: once the GD Member has moved this to
+              READY_FOR_PUBLICATION themselves (Module 80's "Move to
+              Publish"), the Coordinator sees it as its own "Ready for
+              Publish" status and picks (or creates) the Publisher who'll
+              handle it -- reusing the existing send_to_publisher() RPC and
+              Publisher roster (CoordinatorWorkspace.tsx's Publishers
+              screen), same pattern as the GD Member assignment gate above. */}
           {!isEditor && productionStatus === 'READY_FOR_PUBLICATION' && (
-            <div className="mt-4 rounded-xl border-2 border-emerald-300 bg-emerald-50 p-4 space-y-2">
-              <p className="text-sm font-bold text-emerald-800 flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4" /> Final Proof Approved by Author and Editor -- Proof v{production.current_proof_version} is ready for publication.
-              </p>
-              {!hasNotifiedGDMember ? (
+            <div className="mt-4">
+              {assignedPublisherProfile ? (
+                <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Assigned to Publisher {assignedPublisherProfile.name}.
+                </p>
+              ) : !readyForPublishClicked ? (
                 <button
                   type="button"
-                  onClick={handleNotifyGDMember}
-                  disabled={notifyingGDMember}
-                  className="inline-flex items-center gap-2 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  onClick={() => setReadyForPublishClicked(true)}
+                  className="inline-flex items-center gap-2 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800"
                 >
-                  {notifyingGDMember ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                  {notifyingGDMember ? 'Sending...' : 'Move to Publish'}
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Ready for Publish
                 </button>
               ) : (
-                <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to {assignedGDMemberProfile?.name || 'the GD Member'} for finalize.
-                </p>
+                <button
+                  type="button"
+                  onClick={openPublisherGateModal}
+                  className="inline-flex items-center gap-2 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800"
+                >
+                  <UserPlus className="w-3.5 h-3.5" /> Choose Publisher
+                </button>
               )}
-              {notifyGDMemberError && <p className="text-xs font-semibold text-red-600">{notifyGDMemberError}</p>}
             </div>
           )}
           <ProofReviewTimeline manuscriptId={manuscript.id} variant="compact" />
@@ -1316,6 +1512,32 @@ export function DecisionTab({
           onClose={() => { if (!gdGateBusy && !movingToProduction) setShowGDGateModal(false); }}
           onAssignExisting={handleAssignExistingInGate}
           onCreateAndAssign={handleCreateAndAssignInGate}
+        />
+      )}
+
+      {showPublisherGateModal && (
+        <PublisherGateModal
+          mode={publisherGateMode}
+          onModeChange={setPublisherGateMode}
+          members={publisherGateMembers}
+          loadingMembers={publisherGateLoadingMembers}
+          selectedId={selectedPublisherForGate}
+          onSelectedIdChange={setSelectedPublisherForGate}
+          name={publisherGateName}
+          onNameChange={setPublisherGateName}
+          email={publisherGateEmail}
+          onEmailChange={setPublisherGateEmail}
+          organization={publisherGateOrganization}
+          onOrganizationChange={setPublisherGateOrganization}
+          password={publisherGatePassword}
+          onPasswordChange={setPublisherGatePassword}
+          onGeneratePassword={() => setPublisherGatePassword(generatePublisherGatePassword())}
+          busy={publisherGateBusy}
+          error={publisherGateError}
+          createdCredentials={createdPublisherCredentials}
+          onClose={() => { if (!publisherGateBusy) setShowPublisherGateModal(false); }}
+          onAssignExisting={handleAssignExistingPublisher}
+          onCreateAndAssign={handleCreateAndAssignPublisher}
         />
       )}
     </div>
@@ -1521,6 +1743,199 @@ function GDMemberGateModal({
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 {busy ? 'Creating & Assigning...' : 'Create Account & Move to Production'}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "Choose Publisher" gate -- shown once the manuscript is Ready for Publish.
+ * Same Assign Existing / Create New pattern as GDMemberGateModal above, just
+ * targeting the Publisher role: existing Publishers come from the same
+ * roster CoordinatorWorkspace.tsx's Publishers screen manages
+ * (listActiveProfilesByRole('PUBLISHER')), and a newly created one is
+ * immediately usable both here and there via createAndActivatePublisherAccount().
+ */
+function PublisherGateModal({
+  mode, onModeChange, members, loadingMembers, selectedId, onSelectedIdChange,
+  name, onNameChange, email, onEmailChange, organization, onOrganizationChange,
+  password, onPasswordChange, onGeneratePassword,
+  busy, error, createdCredentials, onClose, onAssignExisting, onCreateAndAssign
+}: {
+  mode: 'PICK' | 'CREATE'; onModeChange: (m: 'PICK' | 'CREATE') => void;
+  members: ProfileRow[]; loadingMembers: boolean;
+  selectedId: string; onSelectedIdChange: (v: string) => void;
+  name: string; onNameChange: (v: string) => void;
+  email: string; onEmailChange: (v: string) => void;
+  organization: string; onOrganizationChange: (v: string) => void;
+  password: string; onPasswordChange: (v: string) => void;
+  onGeneratePassword: () => void;
+  busy: boolean; error: string;
+  createdCredentials: { email: string; password: string } | null;
+  onClose: () => void;
+  onAssignExisting: () => void;
+  onCreateAndAssign: () => void;
+}) {
+  if (createdCredentials) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+        <div className="w-full max-w-lg rounded-[30px] overflow-hidden bg-white shadow-2xl border border-slate-200">
+          <div className="relative bg-slate-950 px-8 py-6">
+            <div className="uppercase tracking-[0.35em] text-xs text-emerald-300 font-semibold">Publication</div>
+            <h2 className="mt-3 text-xl font-black text-white">Publisher created &amp; assigned</h2>
+            <button onClick={onClose} className="absolute right-5 top-5 rounded-full p-2 text-slate-400 hover:bg-white/10">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="space-y-4 px-8 py-8 bg-slate-50">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">
+              No email delivery is connected yet -- copy this password now, it won't be shown again.
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Email</p>
+              <p className="mt-2 font-semibold text-slate-900 break-words">{createdCredentials.email}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Password</p>
+              <p className="mt-2 font-semibold text-slate-900 break-words">{createdCredentials.password}</p>
+            </div>
+            <button onClick={onClose} className="w-full rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043]">
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-[30px] overflow-hidden bg-white shadow-2xl border border-slate-200">
+        <div className="relative bg-slate-950 px-8 py-6">
+          <div className="uppercase tracking-[0.35em] text-xs text-emerald-300 font-semibold">Publication</div>
+          <h2 className="mt-3 text-xl font-black text-white">Choose Publisher</h2>
+          <button onClick={onClose} disabled={busy} className="absolute right-5 top-5 rounded-full p-2 text-slate-400 hover:bg-white/10 disabled:opacity-40">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="space-y-5 px-8 py-8 bg-slate-50">
+          <p className="text-sm text-slate-600">
+            Select an existing Publisher or create a new one. They'll be able to handle this manuscript's publication.
+          </p>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => onModeChange('PICK')}
+              disabled={busy}
+              className={`rounded-full px-4 py-2.5 text-xs font-bold transition ${mode === 'PICK' ? 'bg-[#008751] text-white' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'}`}
+            >
+              Assign Existing Publisher
+            </button>
+            <button
+              type="button"
+              onClick={() => onModeChange('CREATE')}
+              disabled={busy}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-xs font-bold transition ${mode === 'CREATE' ? 'bg-[#008751] text-white' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'}`}
+            >
+              <UserPlus className="w-3.5 h-3.5" /> Create New Publisher
+            </button>
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-red-700">{error}</p>
+            </div>
+          )}
+
+          {mode === 'PICK' ? (
+            loadingMembers ? (
+              <div className="flex items-center justify-center py-8 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading Publishers...</div>
+            ) : members.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-400 bg-white border border-dashed border-slate-200 rounded-xl">
+                No active Publisher accounts yet -- create one instead.
+              </div>
+            ) : (
+              <>
+                <select
+                  value={selectedId}
+                  onChange={(e) => onSelectedIdChange(e.target.value)}
+                  disabled={busy}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+                >
+                  <option value="">Select Publisher</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={onAssignExisting}
+                  disabled={busy || !selectedId}
+                  className="w-full rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {busy ? 'Assigning...' : 'Assign Publisher'}
+                </button>
+              </>
+            )
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold mb-1.5">Name</label>
+                <input
+                  value={name}
+                  onChange={(e) => onNameChange(e.target.value)}
+                  placeholder="Jordan Lee"
+                  disabled={busy}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold mb-1.5">Organization</label>
+                <input
+                  value={organization}
+                  onChange={(e) => onOrganizationChange(e.target.value)}
+                  placeholder="Publishing House Inc."
+                  disabled={busy}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold mb-1.5">Username / Email</label>
+                <input
+                  value={email}
+                  onChange={(e) => onEmailChange(e.target.value)}
+                  placeholder="publisher@example.com"
+                  disabled={busy}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold mb-1.5">Generate Password</label>
+                <div className="flex gap-2">
+                  <input
+                    value={password}
+                    onChange={(e) => onPasswordChange(e.target.value)}
+                    disabled={busy}
+                    className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+                  />
+                  <button type="button" onClick={onGeneratePassword} disabled={busy} className="rounded-2xl border border-slate-300 bg-white px-3 py-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                    Generate
+                  </button>
+                </div>
+              </div>
+              <button
+                onClick={onCreateAndAssign}
+                disabled={busy}
+                className="w-full rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043] disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {busy ? 'Creating & Assigning...' : 'Create Account & Assign Publisher'}
               </button>
             </div>
           )}

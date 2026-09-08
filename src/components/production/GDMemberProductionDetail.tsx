@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Loader2, CheckCircle2, Circle, Check, Download, Eye, AlertTriangle, CheckSquare, Upload, ClipboardCheck, FileText, ArrowRight } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, Circle, Check, Download, Eye, AlertTriangle, CheckSquare, Upload, ClipboardCheck, FileText, ArrowRight, Send } from 'lucide-react';
 import { ManuscriptRow, ProfileRow, ManuscriptFileRow, getManuscript, getProfilesByIds, getManuscriptFiles, getRevisionFiles, getRevisions } from '../../lib/workflow';
 import {
   ProductionRow, ProductionChecklistItemRow, ChecklistItemStatus, ProofRow, CorrectionRow, JournalTemplateRow,
   getProduction, getChecklist, getProofs, getCorrections, getJournalTemplates,
   setChecklistItemStatus, gdMemberCompleteChecklist, advanceProductionStage,
   uploadProof, gdMemberUploadProofV2, gdMemberSetProofNotes,
-  gdMemberAcceptAssignment, gdMemberSelectTemplate, gdMemberSetWorkStatus
+  gdMemberAcceptAssignment, gdMemberSelectTemplate, gdMemberSetWorkStatus, gdMemberMoveToPublish
 } from '../../lib/production';
 import { getManuscriptStatusLabel, STANDARD_STATUS_COLORS } from '../../lib/manuscriptStatusLabel';
 
@@ -36,7 +36,8 @@ function stepIndex(status: string | undefined, gdWorkStatus?: string) {
     case 'CLARIFICATION_REQUESTED': case 'PRODUCTION_REVIEW': case 'PROOF_UPDATED':
     case 'CORRECTIONS_IN_PROGRESS': case 'FINAL_PROOF_READY':
     case 'PROOF_SENT_TO_EDITOR': case 'EDITOR_CORRECTIONS_REQUESTED': case 'EDITOR_CORRECTIONS_PENDING_SEND': case 'PROOF_READY_FOR_EDITOR': return 6;
-    case 'AUTHOR_APPROVED': case 'EDITOR_APPROVED': case 'PROOF_SENT_TO_AUTHOR_FINAL': case 'AUTHOR_FINAL_CORRECTIONS_REQUESTED': return 7;
+    case 'AUTHOR_APPROVED': case 'EDITOR_APPROVED': case 'PROOF_SENT_TO_AUTHOR_FINAL': case 'AUTHOR_FINAL_CORRECTIONS_REQUESTED':
+    case 'AUTHOR_FINAL_APPROVED': case 'SENT_TO_GD_FOR_FINALIZE': return 7;
     case 'READY_FOR_PUBLICATION': case 'PUBLISHED': return 8;
     default: return 0;
   }
@@ -84,11 +85,15 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack, onOpenP
   const [completingChecklist, setCompletingChecklist] = useState(false);
   const [completeError, setCompleteError] = useState('');
   const [uploadingProof, setUploadingProof] = useState(false);
+  const [stagedProofFile, setStagedProofFile] = useState<{ storagePath: string; publicUrl: string; fileName: string } | null>(null);
+  const [submittingProof, setSubmittingProof] = useState(false);
   const [proofError, setProofError] = useState('');
   const [notesDraft, setNotesDraft] = useState('');
   const [notesDirty, setNotesDirty] = useState(false);
   const [savingNotes, setSavingNotes] = useState(false);
   const [uploadingCorrectedProof, setUploadingCorrectedProof] = useState(false);
+  const [stagedCorrectedProofFile, setStagedCorrectedProofFile] = useState<{ storagePath: string; publicUrl: string; fileName: string } | null>(null);
+  const [submittingCorrectedProof, setSubmittingCorrectedProof] = useState(false);
   const [correctionError, setCorrectionError] = useState('');
   const [togglingCorrectionKey, setTogglingCorrectionKey] = useState<string | null>(null);
   // Module 71: accept assignment -> choose template -> self-reported work
@@ -105,7 +110,8 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack, onOpenP
   const [acceptedFiles, setAcceptedFiles] = useState<ManuscriptFileRow[]>([]);
   const [advancingStage, setAdvancingStage] = useState(false);
   const [advanceStageError, setAdvanceStageError] = useState('');
-  const [movedToPublish, setMovedToPublish] = useState(false);
+  const [movingToPublish, setMovingToPublish] = useState(false);
+  const [moveToPublishError, setMoveToPublishError] = useState('');
 
   const load = async () => {
     try {
@@ -184,6 +190,19 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack, onOpenP
     }
   };
 
+  const handleMoveToPublish = async () => {
+    setMovingToPublish(true);
+    setMoveToPublishError('');
+    try {
+      await gdMemberMoveToPublish(manuscriptId);
+      await load();
+    } catch (e: any) {
+      setMoveToPublishError(e.message || 'Failed to move to publish.');
+    } finally {
+      setMovingToPublish(false);
+    }
+  };
+
   const handleAdvanceToTypesetting = async () => {
     setAdvancingStage(true);
     setAdvanceStageError('');
@@ -197,23 +216,36 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack, onOpenP
     }
   };
 
-  // Module 69: a single upload call now does both "upload" and "submit" --
-  // the RPC itself decides whether this routes to the Author (very first
-  // version) or the Editor (any correction round, regardless of who
-  // requested it), so there's no separate submit step or draft/submitted
-  // RPC pair to pick between anymore.
-  const handleUploadProof = async (file: File) => {
+  // Module 81: uploading now only stages the file (storage + a "here's what
+  // I'm about to send" preview) -- the GD Member must explicitly click
+  // Submit before gd_member_upload_proof_v2() actually creates the proof
+  // version and routes it onward.
+  const handleStageProof = async (file: File) => {
     setUploadingProof(true);
     setProofError('');
     try {
       const { storagePath, publicUrl } = await uploadProof(manuscriptId, file);
-      await gdMemberUploadProofV2(manuscriptId, storagePath, publicUrl, file.name, notesDraft);
-      setNotesDirty(false);
-      await load();
+      setStagedProofFile({ storagePath, publicUrl, fileName: file.name });
     } catch (e: any) {
       setProofError(e.message || 'Failed to upload the proof PDF.');
     } finally {
       setUploadingProof(false);
+    }
+  };
+
+  const handleSubmitProof = async () => {
+    if (!stagedProofFile) return;
+    setSubmittingProof(true);
+    setProofError('');
+    try {
+      await gdMemberUploadProofV2(manuscriptId, stagedProofFile.storagePath, stagedProofFile.publicUrl, stagedProofFile.fileName, notesDraft);
+      setStagedProofFile(null);
+      setNotesDirty(false);
+      await load();
+    } catch (e: any) {
+      setProofError(e.message || 'Failed to submit the proof.');
+    } finally {
+      setSubmittingProof(false);
     }
   };
 
@@ -231,18 +263,32 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack, onOpenP
     }
   };
 
-  const handleUploadCorrectedProof = async (file: File) => {
+  const handleStageCorrectedProof = async (file: File) => {
     setUploadingCorrectedProof(true);
     setCorrectionError('');
     try {
       const { storagePath, publicUrl } = await uploadProof(manuscriptId, file);
-      await gdMemberUploadProofV2(manuscriptId, storagePath, publicUrl, file.name, notesDraft);
-      setNotesDirty(false);
-      await load();
+      setStagedCorrectedProofFile({ storagePath, publicUrl, fileName: file.name });
     } catch (e: any) {
       setCorrectionError(e.message || 'Failed to upload the corrected proof PDF.');
     } finally {
       setUploadingCorrectedProof(false);
+    }
+  };
+
+  const handleSubmitCorrectedProof = async () => {
+    if (!stagedCorrectedProofFile) return;
+    setSubmittingCorrectedProof(true);
+    setCorrectionError('');
+    try {
+      await gdMemberUploadProofV2(manuscriptId, stagedCorrectedProofFile.storagePath, stagedCorrectedProofFile.publicUrl, stagedCorrectedProofFile.fileName, notesDraft);
+      setStagedCorrectedProofFile(null);
+      setNotesDirty(false);
+      await load();
+    } catch (e: any) {
+      setCorrectionError(e.message || 'Failed to submit the corrected proof.');
+    } finally {
+      setSubmittingCorrectedProof(false);
     }
   };
 
@@ -599,10 +645,9 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack, onOpenP
 
                 return (
                   <>
-                    {/* Upload proof PDF -- Module 69: this single upload IS
-                        the submit action. It routes straight to the Author
-                        (Proof v1) the moment it's uploaded, so there's no
-                        separate draft/replace/submit cycle any more. */}
+                    {/* Module 81: uploading a file only stages it -- View it
+                        here, then click Submit to actually send Proof v1 on
+                        (gd_member_upload_proof_v2 isn't called until then). */}
                     <div>
                       <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Proof PDF</p>
                       {currentProof ? (
@@ -615,11 +660,24 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack, onOpenP
                             <a href={currentProof.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-3.5 h-3.5" /> View</a>
                           )}
                         </div>
+                      ) : canUpload && stagedProofFile ? (
+                        <div className="flex items-center justify-between rounded-2xl border border-[#008751] bg-emerald-50 px-4 py-3 text-sm">
+                          <p className="font-bold text-slate-800">{stagedProofFile.fileName}</p>
+                          <button
+                            type="button"
+                            disabled={submittingProof}
+                            onClick={handleSubmitProof}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40"
+                          >
+                            {submittingProof ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                            {submittingProof ? 'Submitting...' : 'Submit'}
+                          </button>
+                        </div>
                       ) : canUpload ? (
                         <label className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-xs font-bold text-white cursor-pointer ${uploadingProof ? 'bg-slate-400 cursor-not-allowed' : 'bg-[#008751] hover:bg-[#007043]'}`}>
                           {uploadingProof ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                           {uploadingProof ? 'Uploading...' : 'Upload Proof PDF'}
-                          <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={uploadingProof} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadProof(f); e.target.value = ''; }} />
+                          <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={uploadingProof} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleStageProof(f); e.target.value = ''; }} />
                         </label>
                       ) : (
                         <p className="text-sm text-slate-400">No proof was uploaded.</p>
@@ -809,11 +867,26 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack, onOpenP
                   <>
                     <div>
                       <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Corrected Proof PDF</p>
-                      <label className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-xs font-bold text-white cursor-pointer ${uploadingCorrectedProof ? 'bg-slate-400 cursor-not-allowed' : 'bg-[#008751] hover:bg-[#007043]'}`}>
-                        {uploadingCorrectedProof ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                        {uploadingCorrectedProof ? 'Uploading & sending to Editor...' : 'Upload Corrected PDF -- sends straight to Editor'}
-                        <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={uploadingCorrectedProof} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadCorrectedProof(f); e.target.value = ''; }} />
-                      </label>
+                      {stagedCorrectedProofFile ? (
+                        <div className="flex items-center justify-between rounded-2xl border border-[#008751] bg-emerald-50 px-4 py-3 text-sm">
+                          <p className="font-bold text-slate-800">{stagedCorrectedProofFile.fileName}</p>
+                          <button
+                            type="button"
+                            disabled={submittingCorrectedProof}
+                            onClick={handleSubmitCorrectedProof}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40"
+                          >
+                            {submittingCorrectedProof ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                            {submittingCorrectedProof ? 'Submitting...' : 'Submit'}
+                          </button>
+                        </div>
+                      ) : (
+                        <label className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-xs font-bold text-white cursor-pointer ${uploadingCorrectedProof ? 'bg-slate-400 cursor-not-allowed' : 'bg-[#008751] hover:bg-[#007043]'}`}>
+                          {uploadingCorrectedProof ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                          {uploadingCorrectedProof ? 'Uploading...' : 'Upload Corrected PDF'}
+                          <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={uploadingCorrectedProof} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleStageCorrectedProof(f); e.target.value = ''; }} />
+                        </label>
+                      )}
                       {correctionError && <p className="mt-2 text-xs font-semibold text-red-600">{correctionError}</p>}
                     </div>
 
@@ -869,34 +942,29 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack, onOpenP
              manuscript can still be opened here from the unfiltered
              Production Queue once it's reached that stage, so point the
              GD Member at the right page instead of showing nothing. */}
-          {(status === 'READY_FOR_PUBLICATION' || status === 'PUBLISHED') && (
+          {(status === 'AUTHOR_FINAL_APPROVED' || status === 'SENT_TO_GD_FOR_FINALIZE' || status === 'READY_FOR_PUBLICATION' || status === 'PUBLISHED') && (
             <div className="bg-white border-2 border-[#008751] bg-emerald-50 rounded-3xl p-6 text-center space-y-3">
               <p className="text-sm font-semibold text-emerald-800">
-                {status === 'PUBLISHED' ? 'This manuscript has been published.' : `Proof v${production?.current_proof_version} is approved and ready for publication.`}
+                {status === 'PUBLISHED' ? 'This manuscript has been published.' :
+                 status === 'AUTHOR_FINAL_APPROVED' ? `Proof v${production?.current_proof_version} is approved. Waiting for the Coordinator to send it to you to finalize.` :
+                 `Proof v${production?.current_proof_version} is approved and ready for publication.`}
               </p>
-              {status === 'READY_FOR_PUBLICATION' && !movedToPublish ? (
-                <button
-                  type="button"
-                  onClick={() => setMovedToPublish(true)}
-                  className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#007043]"
-                >
-                  <CheckCircle2 className="w-4 h-4" /> Move to Publish
-                </button>
-              ) : status === 'READY_FOR_PUBLICATION' && movedToPublish ? (
-                <div className="space-y-2">
-                  <p className="text-xs font-bold text-emerald-700 flex items-center justify-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Moved to Publish
-                  </p>
-                  {onOpenPublication && (
-                    <button
-                      type="button"
-                      onClick={onOpenPublication}
-                      className="text-xs font-bold text-[#008751] hover:underline"
-                    >
-                      Go to Publication section &rarr;
-                    </button>
-                  )}
-                </div>
+              {status === 'SENT_TO_GD_FOR_FINALIZE' ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={movingToPublish}
+                    onClick={handleMoveToPublish}
+                    className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-60"
+                  >
+                    {movingToPublish ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Move to Publish
+                  </button>
+                  {moveToPublishError && <p className="text-xs font-semibold text-red-600">{moveToPublishError}</p>}
+                </>
+              ) : status === 'READY_FOR_PUBLICATION' ? (
+                <p className="text-xs font-bold text-emerald-700 flex items-center justify-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Moved to Publish
+                </p>
               ) : null}
             </div>
           )}

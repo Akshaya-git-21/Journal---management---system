@@ -59,6 +59,8 @@ const PROOFREADING_PRODUCTION_STATUSES = new Set([
   'PROOF_READY_FOR_EDITOR',
   // Module 79 -- Editor's approval waits for an explicit "Send for Author Confirmation" click.
   'EDITOR_APPROVED',
+  // Module 80/82 -- Author's final approval waits for the Coordinator to send it to the GD Member, then for the GD Member's "Move to Publish" click.
+  'AUTHOR_FINAL_APPROVED', 'SENT_TO_GD_FOR_FINALIZE',
 ]);
 
 /**

@@ -153,6 +153,7 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
   const productionByManuscript = new Map<string, ProductionRow>(production.map((p) => [p.manuscript_id, p]));
   const queue = manuscripts.filter((m) => m.production_stage === 'SENT_TO_PUBLISHER' || gdAssignedManuscriptIds.has(m.id));
   const published = manuscripts.filter((m) => m.status === 'PUBLISHED');
+  const scheduled = manuscripts.filter((m) => productionByManuscript.get(m.id)?.production_status === 'READY_FOR_PUBLICATION');
   const doiPending = queue.filter((m) => !m.doi);
 
   const focusedManuscript = manuscripts.find((m) => m.id === focusedId) || null;
@@ -347,38 +348,15 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
             </div>
 
             <nav className="space-y-3">
+              {/* Publisher access is restricted to Publication Management
+                  only -- DOI/Website/Reports/Journal/System nav groups
+                  removed from the sidebar per that access restriction
+                  (the tab content for those still exists below, just
+                  unreachable, in case that restriction is ever lifted). */}
               <NavGroup title="Publication Management" icon={<ClipboardList className="w-4 h-4" />} expanded={expandedNavGroups.publication} onToggle={() => toggleNavGroup('publication')}>
                 <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Publication Queue" active={activeTab === 'QUEUE'} count={queue.length} onClick={() => setActiveTab('QUEUE')} />
-                <NavItem icon={<Clock className="w-4 h-4" />} label="Scheduled Publications" active={activeTab === 'SCHEDULED'} count={0} onClick={() => setActiveTab('SCHEDULED')} />
+                <NavItem icon={<Clock className="w-4 h-4" />} label="Scheduled Publications" active={activeTab === 'SCHEDULED'} count={scheduled.length} onClick={() => setActiveTab('SCHEDULED')} />
                 <NavItem icon={<CheckCircle2 className="w-4 h-4" />} label="Published Articles" active={activeTab === 'PUBLISHED'} count={published.length} onClick={() => setActiveTab('PUBLISHED')} />
-              </NavGroup>
-
-              <NavGroup title="DOI Management" icon={<Hash className="w-4 h-4" />} expanded={expandedNavGroups.doi} onToggle={() => toggleNavGroup('doi')}>
-                <NavItem icon={<Hash className="w-4 h-4" />} label="DOI Registration Pipeline" active={activeTab === 'DOI_PIPELINE'} count={doiPending.length} onClick={() => setActiveTab('DOI_PIPELINE')} />
-                <NavItem icon={<History className="w-4 h-4" />} label="DOI Tracking Registry" active={activeTab === 'DOI_REGISTRY'} count={published.length} onClick={() => setActiveTab('DOI_REGISTRY')} />
-              </NavGroup>
-
-              <NavGroup title="Website Management" icon={<LayoutGrid className="w-4 h-4" />} expanded={expandedNavGroups.website} onToggle={() => toggleNavGroup('website')}>
-                <NavItem icon={<LayoutGrid className="w-4 h-4" />} label="Website Articles" active={activeTab === 'WEBSITE_ARTICLES'} count={published.length} onClick={() => setActiveTab('WEBSITE_ARTICLES')} />
-                <NavItem icon={<Eye className="w-4 h-4" />} label="Website Preview" active={activeTab === 'WEBSITE_PREVIEW'} onClick={() => setActiveTab('WEBSITE_PREVIEW')} />
-                <NavItem icon={<ExternalLink className="w-4 h-4" />} label="Public Website" active={activeTab === 'PUBLIC_WEBSITE'} onClick={() => setActiveTab('PUBLIC_WEBSITE')} />
-              </NavGroup>
-
-              <NavGroup title="Reports" icon={<BarChart3 className="w-4 h-4" />} expanded={expandedNavGroups.reports} onToggle={() => toggleNavGroup('reports')}>
-                <NavItem icon={<BarChart3 className="w-4 h-4" />} label="Publication Reports" active={activeTab === 'REPORTS'} onClick={() => setActiveTab('REPORTS')} />
-                <NavItem icon={<Download className="w-4 h-4" />} label="Download Reports" active={activeTab === 'DOWNLOAD_REPORTS'} onClick={() => setActiveTab('DOWNLOAD_REPORTS')} />
-              </NavGroup>
-
-              <NavGroup title="Journal Management" icon={<Settings className="w-4 h-4" />} expanded={expandedNavGroups.journal} onToggle={() => toggleNavGroup('journal')}>
-                <NavItem icon={<Settings className="w-4 h-4" />} label="Journal Settings" active={activeTab === 'JOURNAL_SETTINGS'} onClick={() => setActiveTab('JOURNAL_SETTINGS')} />
-                <NavItem icon={<Users className="w-4 h-4" />} label="Editorial Board" active={activeTab === 'EDITORIAL_BOARD'} count={editors.length} onClick={() => setActiveTab('EDITORIAL_BOARD')} />
-                <NavItem icon={<CheckSquare className="w-4 h-4" />} label="Journal Policies" active={activeTab === 'JOURNAL_POLICIES'} onClick={() => setActiveTab('JOURNAL_POLICIES')} />
-                <NavItem icon={<LayoutGrid className="w-4 h-4" />} label="Journal Sections" active={activeTab === 'JOURNAL_SECTIONS'} onClick={() => setActiveTab('JOURNAL_SECTIONS')} />
-              </NavGroup>
-
-              <NavGroup title="System Administration" icon={<ShieldAlert className="w-4 h-4" />} expanded={expandedNavGroups.system} onToggle={() => toggleNavGroup('system')}>
-                <NavItem icon={<ShieldAlert className="w-4 h-4" />} label="Roles & Permissions" active={activeTab === 'ROLES'} onClick={() => setActiveTab('ROLES')} />
-                <NavItem icon={<Database className="w-4 h-4" />} label="Backup & Restore" active={activeTab === 'BACKUP'} onClick={() => setActiveTab('BACKUP')} />
               </NavGroup>
             </nav>
           </aside>
@@ -389,11 +367,38 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
             {loading ? (
               <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>
             ) : activeTab === 'SCHEDULED' ? (
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400 font-bold">Scheduled Publications</p>
-                <div className="mt-4 p-10 text-center text-sm text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-2xl">
-                  Scheduled publishing is not available yet. Articles go live immediately once confirmed in the Publication Queue.
-                </div>
+                {/* Coordinator-accepted-for-publication manuscripts --
+                    production_status = READY_FOR_PUBLICATION (both Editor and
+                    Author final approval are in, and the Coordinator has
+                    assigned a Publisher) but not yet actually published.
+                    Opening one jumps to the Publication Queue's wizard for it. */}
+                {(() => {
+                  return scheduled.length === 0 ? (
+                    <div className="p-10 text-center text-sm text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-2xl">
+                      No manuscripts are scheduled yet. A manuscript appears here once the Coordinator confirms it's ready for publication.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {scheduled.map((m) => (
+                        <button
+                          key={m.id}
+                          onClick={() => { setFocusedId(m.id); setActiveTab('QUEUE'); }}
+                          className="w-full flex items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-left hover:bg-slate-50"
+                        >
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">{m.title}</p>
+                            <p className="text-xs text-slate-400 font-mono">{m.id}</p>
+                          </div>
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-emerald-700">
+                            <Clock className="w-3.5 h-3.5" /> Ready to Publish
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             ) : activeTab === 'PUBLISHED' ? (
               <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">

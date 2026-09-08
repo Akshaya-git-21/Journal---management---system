@@ -22,7 +22,11 @@ export type ProductionStatus =
   // Module 78 -- GD's corrected proof (editor-stage loop) waits for an explicit "Send to Editor" click.
   | 'PROOF_READY_FOR_EDITOR'
   // Module 79 -- Editor's approval waits for an explicit "Send for Author Confirmation" click.
-  | 'EDITOR_APPROVED';
+  | 'EDITOR_APPROVED'
+  // Module 80 -- Author's final approval waits for the GD Member's explicit "Move to Publish" click.
+  | 'AUTHOR_FINAL_APPROVED'
+  // Module 82 -- Coordinator must explicitly send the author-approved proof to the GD Member before they can move it to publish.
+  | 'SENT_TO_GD_FOR_FINALIZE';
 
 /** Whose turn it is to act next, independent of the exact production_status
  * string -- set atomically by the Module 69 RPCs, never inferred client-side.
@@ -474,6 +478,21 @@ export const editorSendCorrectionsToGD = (manuscriptId: string) =>
  * coordinator_send_to_author_final() in 0079_coordinator_sends_to_author_final.sql. */
 export const coordinatorSendToAuthorFinal = (manuscriptId: string) =>
   rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_send_to_author_final', { p_manuscript_id: manuscriptId }));
+
+/** GD Member-only (Module 80): explicit "Move to Publish" click once the
+ * Author has given Final Approval (AUTHOR_FINAL_APPROVED) -- moves the
+ * manuscript to READY_FOR_PUBLICATION for the Coordinator to pick up. See
+ * gd_member_move_to_publish() in 0080_gd_member_moves_to_publish.sql. */
+export const gdMemberMoveToPublish = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('gd_member_move_to_publish', { p_manuscript_id: manuscriptId }));
+
+/** Coordinator-only (Module 82): explicit "Send to GD for Finalize" click
+ * once the Author has given final approval (AUTHOR_FINAL_APPROVED) --
+ * required before the GD Member's "Move to Publish" button will accept.
+ * See coordinator_send_to_gd_for_finalize() in
+ * 0082_coordinator_sends_to_gd_for_finalize.sql. */
+export const coordinatorSendToGdForFinalize = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_send_to_gd_for_finalize', { p_manuscript_id: manuscriptId }));
 
 // ------------------------------------------
 // File uploads -- same manuscript-files bucket, new path prefix
