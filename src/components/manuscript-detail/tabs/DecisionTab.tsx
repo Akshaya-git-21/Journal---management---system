@@ -1,12 +1,11 @@
 import { Fragment, useState, useEffect } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, StatusHistoryRow, ProfileRow, ScreeningResponse } from '../../../lib/workflow';
-import { publishDecision, coordinatorSendRevisionToReviewers, listActiveProfilesByRole } from '../../../lib/workflow';
+import { publishDecision, coordinatorSendRevisionToReviewers, listActiveProfilesByRole, getProfilesByIds } from '../../../lib/workflow';
 import {
   getProduction, startProduction, assignGDMember, subscribeToProduction, sendProofToAuthor,
-  getProofs, getCorrections, ProofRow, CorrectionRow, ProductionRow,
-  acceptCorrections, requestClarification, sendCorrectionsToEditor, sendForCorrections,
-  coordinatorReturnForFurtherCorrections
+  coordinatorNotifyGDMember, coordinatorSendToEditor, coordinatorSendToAuthorFinal, ProductionRow
 } from '../../../lib/production';
+import ProofReviewTimeline from '../../production/ProofReviewTimeline';
 import { createAndActivateGDMemberAccount } from '../../../lib/auth';
 import { AlertCircle, Users, UserCheck, Gavel, FileCheck, ChevronDown, ChevronRight, PackageCheck, Loader2, CheckCircle2, CheckCircle, XCircle, ClipboardList, UserPlus, X, Clock, Send, MessageCircle, Eye, Download } from 'lucide-react';
 import { getRevisionDecisionLabel } from '../../../lib/decisionUtils';
@@ -99,20 +98,18 @@ export function DecisionTab({
   const [finalDecisionExpanded, setFinalDecisionExpanded] = useState(true);
   const [productionStatus, setProductionStatus] = useState<string | null>(null);
   const [production, setProduction] = useState<ProductionRow | null>(null);
+  const [assignedGDMemberProfile, setAssignedGDMemberProfile] = useState<ProfileRow | null>(null);
   const [movingToProduction, setMovingToProduction] = useState(false);
   const [moveToProductionError, setMoveToProductionError] = useState('');
   const [sendingProofToAuthor, setSendingProofToAuthor] = useState(false);
   const [sendProofToAuthorError, setSendProofToAuthorError] = useState('');
-  // Corrections management -- lets the Coordinator run the whole
-  // Author-corrections -> Editor verification -> GD Member -> updated proof
-  // loop directly from here instead of only from the separate Production
-  // section (same RPCs as ProductionWorkspace.tsx).
-  const [proofs, setProofs] = useState<ProofRow[]>([]);
-  const [corrections, setCorrections] = useState<CorrectionRow[]>([]);
-  const [correctionsBusy, setCorrectionsBusy] = useState(false);
-  const [correctionsError, setCorrectionsError] = useState('');
-  const [correctionsSuccess, setCorrectionsSuccess] = useState('');
-  const [clarificationDraft, setClarificationDraft] = useState<Record<string, string>>({});
+  const [notifyingGDMember, setNotifyingGDMember] = useState(false);
+  const [notifyGDMemberError, setNotifyGDMemberError] = useState('');
+  const [hasNotifiedGDMember, setHasNotifiedGDMember] = useState(false);
+  const [sendingToEditor, setSendingToEditor] = useState(false);
+  const [sendToEditorError, setSendToEditorError] = useState('');
+  const [sendingToAuthorFinal, setSendingToAuthorFinal] = useState(false);
+  const [sendToAuthorFinalError, setSendToAuthorFinalError] = useState('');
   // GD Member assignment gate -- clicking "Move to Production" must not
   // actually start production until a GD Member is assigned (see the
   // Coordinator's requirement: "if no GD Member is assigned, a popup should
@@ -125,6 +122,8 @@ export function DecisionTab({
   const [gdGateMembers, setGdGateMembers] = useState<ProfileRow[]>([]);
   const [gdGateLoadingMembers, setGdGateLoadingMembers] = useState(false);
   const [selectedGdMemberForGate, setSelectedGdMemberForGate] = useState('');
+  const [gdGateStartDate, setGdGateStartDate] = useState('');
+  const [gdGateEndDate, setGdGateEndDate] = useState('');
   const [gdGateName, setGdGateName] = useState('');
   const [gdGateEmail, setGdGateEmail] = useState('');
   const [gdGatePassword, setGdGatePassword] = useState('');
@@ -135,36 +134,23 @@ export function DecisionTab({
 
   useEffect(() => {
     let cancelled = false;
-    if (manuscript.status !== 'ACCEPTED') { setProductionStatus(null); setProduction(null); setProofs([]); setCorrections([]); return; }
+    if (manuscript.status !== 'ACCEPTED') { setProductionStatus(null); setProduction(null); return; }
     const refetch = () => {
       getProduction(manuscript.id).then((p) => { if (!cancelled) { setProductionStatus(p?.production_status ?? null); setProduction(p); } }).catch(() => {});
-      getProofs(manuscript.id).then((p) => { if (!cancelled) setProofs(p); }).catch(() => {});
-      getCorrections(manuscript.id).then((c) => { if (!cancelled) setCorrections(c); }).catch(() => {});
     };
     refetch();
     const unsubscribe = subscribeToProduction(refetch);
     return () => { cancelled = true; unsubscribe(); };
   }, [manuscript.id, manuscript.status]);
 
-  const latestProductionProof = proofs[0];
-
-  const runCorrectionsAction = async (fn: () => Promise<any>, successMessage?: string) => {
-    if (correctionsBusy) return;
-    setCorrectionsBusy(true);
-    setCorrectionsError('');
-    setCorrectionsSuccess('');
-    try {
-      await fn();
-      if (successMessage) {
-        setCorrectionsSuccess(successMessage);
-        setTimeout(() => setCorrectionsSuccess(''), 4000);
-      }
-    } catch (e: any) {
-      setCorrectionsError(e.message || 'That action failed.');
-    } finally {
-      setCorrectionsBusy(false);
-    }
-  };
+  useEffect(() => {
+    let cancelled = false;
+    if (!production?.assigned_to) { setAssignedGDMemberProfile(null); return; }
+    getProfilesByIds([production.assigned_to]).then((map) => {
+      if (!cancelled) setAssignedGDMemberProfile(map[production.assigned_to as string] || null);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [production?.assigned_to]);
 
   const generateGdGatePassword = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
@@ -174,6 +160,8 @@ export function DecisionTab({
   const openGDGateModal = async () => {
     setGdGateMode('PICK');
     setSelectedGdMemberForGate('');
+    setGdGateStartDate('');
+    setGdGateEndDate('');
     setGdGateName('');
     setGdGateEmail('');
     setGdGatePassword(generateGdGatePassword());
@@ -193,11 +181,13 @@ export function DecisionTab({
   };
 
   const finalizeMoveToProduction = async (gdMemberId: string) => {
+    if (!gdGateStartDate || !gdGateEndDate) { setGdGateError('Please choose a start date and end date for the task.'); return false; }
+    if (gdGateEndDate < gdGateStartDate) { setGdGateError('End date cannot be before the start date.'); return false; }
     setMovingToProduction(true);
     setMoveToProductionError('');
     try {
       const p = await startProduction(manuscript.id);
-      await assignGDMember(manuscript.id, gdMemberId);
+      await assignGDMember(manuscript.id, gdMemberId, gdGateStartDate, gdGateEndDate);
       setProductionStatus(p.production_status);
       onWorkflowChange();
       return true;
@@ -212,22 +202,14 @@ export function DecisionTab({
   const handleMoveToProduction = async () => {
     if (movingToProduction || !canMoveToProduction) return;
     setMoveToProductionError('');
-    try {
-      const existing = await getProduction(manuscript.id);
-      if (existing?.assigned_to) {
-        // Already assigned (e.g. re-opened after a failed publish attempt) --
-        // no need to gate again, just proceed.
-        await finalizeMoveToProduction(existing.assigned_to);
-      } else {
-        await openGDGateModal();
-      }
-    } catch (e: any) {
-      setMoveToProductionError(e.message || 'Failed to move manuscript to production.');
-    }
+    // Always go through the gate -- a start/end date must be chosen every
+    // time a GD Member is (re)assigned, even if one already happens to be
+    // assigned from an earlier attempt.
+    await openGDGateModal();
   };
 
   const handleSendProofToAuthor = async () => {
-    if (sendingProofToAuthor || !proofToSend) return;
+    if (sendingProofToAuthor) return;
     setSendingProofToAuthor(true);
     setSendProofToAuthorError('');
     try {
@@ -238,6 +220,50 @@ export function DecisionTab({
       setSendProofToAuthorError(e.message || 'Failed to send the proof to the author.');
     } finally {
       setSendingProofToAuthor(false);
+    }
+  };
+
+  const handleNotifyGDMember = async () => {
+    if (notifyingGDMember) return;
+    setNotifyingGDMember(true);
+    setNotifyGDMemberError('');
+    try {
+      await coordinatorNotifyGDMember(manuscript.id);
+      setHasNotifiedGDMember(true);
+    } catch (e: any) {
+      setNotifyGDMemberError(e.message || 'Failed to notify the GD Member.');
+    } finally {
+      setNotifyingGDMember(false);
+    }
+  };
+
+  const handleSendToEditor = async () => {
+    if (sendingToEditor) return;
+    setSendingToEditor(true);
+    setSendToEditorError('');
+    try {
+      const updated = await coordinatorSendToEditor(manuscript.id);
+      setProductionStatus(updated.production_status);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendToEditorError(e.message || 'Failed to send the proof to the Editor.');
+    } finally {
+      setSendingToEditor(false);
+    }
+  };
+
+  const handleSendToAuthorFinal = async () => {
+    if (sendingToAuthorFinal) return;
+    setSendingToAuthorFinal(true);
+    setSendToAuthorFinalError('');
+    try {
+      const updated = await coordinatorSendToAuthorFinal(manuscript.id);
+      setProductionStatus(updated.production_status);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendToAuthorFinalError(e.message || 'Failed to send the proof to the Author.');
+    } finally {
+      setSendingToAuthorFinal(false);
     }
   };
 
@@ -420,14 +446,15 @@ export function DecisionTab({
   const decided = ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
   const statusMeta = getCoordinatorStatusMeta(manuscript, editorAssignments, latestRevision, productionStatus);
   const canMoveToProduction = manuscript.status === 'ACCEPTED' && (!productionStatus || productionStatus === 'NOT_STARTED');
-  // A one-time action -- once the current proof has actually reached the
-  // Author (PROOF_SENT_TO_AUTHOR), the button disappears entirely rather
-  // than staying around to be clicked again; only a plain "already sent"
-  // line shows instead. It only reappears once there's something new to
-  // send (a corrections-round proof update, etc.).
+  // Module 75: purely status-driven, no client-side latch -- this must work
+  // for a repeating loop (GD uploads -> PROOF_GENERATED -> Coordinator
+  // sends -> PROOF_SENT_TO_AUTHOR/AUTHOR_PROOF_REVIEW -> Author requests
+  // corrections -> GD uploads again -> PROOF_GENERATED again -> ...), so the
+  // button must naturally reappear each round rather than staying hidden
+  // forever after the first click.
   const proofToSend = !isEditor && !!productionStatus &&
     ['PROOF_GENERATED', 'PROOF_SUBMITTED_TO_COORDINATOR', 'PROOF_UPDATED', 'FINAL_PROOF_READY'].includes(productionStatus);
-  const proofAlreadySent = !isEditor && productionStatus === 'PROOF_SENT_TO_AUTHOR';
+  const proofAlreadySent = !isEditor && (productionStatus === 'PROOF_SENT_TO_AUTHOR' || productionStatus === 'AUTHOR_PROOF_REVIEW');
   const finalDecisionLabel =
     manuscript.status === 'ACCEPTED' ? 'ACCEPT' :
     manuscript.status === 'REJECTED' ? 'REJECT' :
@@ -1044,6 +1071,12 @@ export function DecisionTab({
                   <p className="text-sm font-bold text-slate-700">{statusMeta.nextStep}</p>
                 </>
               )}
+              {/* Module 75: driven purely by production_status, so this
+                  correctly repeats every correction round -- button shows
+                  while a proof is generated and waiting on the Coordinator
+                  (PROOF_GENERATED etc.), swaps to the confirmation line once
+                  it's actually with the Author, and the button reappears
+                  again the moment GD uploads the next round. */}
               {proofToSend && (
                 <div className="pt-3">
                   <button
@@ -1053,7 +1086,7 @@ export function DecisionTab({
                     className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {sendingProofToAuthor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                    {sendingProofToAuthor ? 'Sending...' : 'Send Proof to Author'}
+                    {sendingProofToAuthor ? 'Sending...' : 'Send to Author'}
                   </button>
                   {sendProofToAuthorError && (
                     <p className="mt-2 text-xs font-semibold text-red-600">{sendProofToAuthorError}</p>
@@ -1062,7 +1095,55 @@ export function DecisionTab({
               )}
               {proofAlreadySent && (
                 <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Proof sent to the Author -- awaiting their response.
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author for proofreading -- Proof v{production?.current_proof_version}.
+                </p>
+              )}
+              {/* Module 76/78: neither Author approval nor a GD-corrected
+                  proof (editor-stage loop) auto-routes to the Editor -- the
+                  Coordinator must explicitly send it on either way. */}
+              {!isEditor && (productionStatus === 'AUTHOR_APPROVED' || productionStatus === 'PROOF_READY_FOR_EDITOR') && (
+                <div className="pt-3">
+                  <button
+                    type="button"
+                    onClick={handleSendToEditor}
+                    disabled={sendingToEditor}
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {sendingToEditor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    {sendingToEditor ? 'Sending...' : `Send to Editor -- Proof v${production?.current_proof_version}`}
+                  </button>
+                  {sendToEditorError && (
+                    <p className="mt-2 text-xs font-semibold text-red-600">{sendToEditorError}</p>
+                  )}
+                </div>
+              )}
+              {!isEditor && productionStatus === 'PROOF_SENT_TO_EDITOR' && (
+                <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Editor for approval -- Proof v{production?.current_proof_version}.
+                </p>
+              )}
+              {/* Module 79: Editor's approval no longer auto-routes to the
+                  Author's Final Review -- the Coordinator must explicitly
+                  send it on. */}
+              {!isEditor && productionStatus === 'EDITOR_APPROVED' && (
+                <div className="pt-3">
+                  <button
+                    type="button"
+                    onClick={handleSendToAuthorFinal}
+                    disabled={sendingToAuthorFinal}
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {sendingToAuthorFinal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    {sendingToAuthorFinal ? 'Sending...' : `Editor Approved -- Send for Author Confirmation (Proof v${production?.current_proof_version})`}
+                  </button>
+                  {sendToAuthorFinalError && (
+                    <p className="mt-2 text-xs font-semibold text-red-600">{sendToAuthorFinalError}</p>
+                  )}
+                </div>
+              )}
+              {!isEditor && productionStatus === 'PROOF_SENT_TO_AUTHOR_FINAL' && (
+                <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author for final confirmation -- Proof v{production?.current_proof_version}.
                 </p>
               )}
             </div>
@@ -1092,181 +1173,121 @@ export function DecisionTab({
         <p className="text-xs font-semibold text-red-600">{moveToProductionError}</p>
       )}
 
-      {/* 9. Proof Corrections -- the whole Author-corrections -> Editor
-          verification -> GD Member -> updated proof loop, runnable straight
-          from here instead of only from the separate Production section.
-          Same RPCs ProductionWorkspace.tsx's own corrections UI uses. */}
-      {!isEditor && corrections.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-          <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
-            <MessageCircle className="w-4 h-4" /> Proof Corrections
-          </h3>
-          {correctionsSuccess && (
-            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> {correctionsSuccess}</p>
-          )}
-          {correctionsError && <p className="text-xs font-semibold text-red-600">{correctionsError}</p>}
-          <div className="space-y-4">
-            {corrections.map((c) => (
-              <div key={c.id} className="rounded-xl border border-slate-200 p-4 text-sm space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-bold text-slate-800">Proof v{c.proof_version} — submitted {new Date(c.submitted_at).toLocaleDateString()}</p>
-                  <span className={`shrink-0 text-[10px] font-bold uppercase px-2 py-1 rounded-full ${c.status === 'REVIEWED' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{c.status}</span>
-                </div>
-                <p className="text-slate-600 whitespace-pre-wrap">{c.comments}</p>
-                {c.attachment_public_url && (
-                  <a href={c.attachment_public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline">
-                    <Download className="w-3.5 h-3.5" /> {c.attachment_file_name || 'Correction attachment'}
-                  </a>
-                )}
-
-                {c.status === 'SUBMITTED' && (
-                  <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
-                    <button
-                      disabled={correctionsBusy}
-                      onClick={() => runCorrectionsAction(() => acceptCorrections(manuscript.id, c.id), 'Corrections accepted.')}
-                      className="self-start rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
-                    >
-                      Accept Minor Corrections
-                    </button>
-                    <div className="flex items-center gap-2">
-                      <input
-                        value={clarificationDraft[c.id] || ''}
-                        onChange={(e) => setClarificationDraft((prev) => ({ ...prev, [c.id]: e.target.value }))}
-                        placeholder="Ask the author to clarify a correction..."
-                        className="flex-1 rounded-full border border-slate-200 px-4 py-2 text-xs outline-none focus:border-emerald-600"
-                      />
-                      <button
-                        disabled={correctionsBusy || !clarificationDraft[c.id]?.trim()}
-                        onClick={() => runCorrectionsAction(async () => {
-                          await requestClarification(manuscript.id, clarificationDraft[c.id]);
-                          setClarificationDraft((prev) => ({ ...prev, [c.id]: '' }));
-                        }, 'Clarification request sent to the Author.')}
-                        className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                      >
-                        <MessageCircle className="w-3.5 h-3.5" /> Request Clarification
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
-                  {production?.sent_to_editor_at && production.sent_to_editor_correction_id === c.id ? (
-                    <span className="text-[10px] font-bold uppercase text-emerald-700 flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Editor {new Date(production.sent_to_editor_at).toLocaleDateString()}
-                    </span>
-                  ) : (
-                    <button
-                      disabled={correctionsBusy}
-                      onClick={() => runCorrectionsAction(() => sendCorrectionsToEditor(manuscript.id, c.id), 'Sent to the Editor for verification.')}
-                      className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40"
-                    >
-                      <Send className="w-3.5 h-3.5" /> Send to Editor for Verification
-                    </button>
-                  )}
-                </div>
-
-                {c.editor_feedback_at && (
-                  <div className="rounded-xl bg-slate-50 border border-slate-100 p-3 space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <p className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">Editor Feedback</p>
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${c.editor_verified ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                        {c.editor_verified ? 'Verified' : 'Not Verified'}
-                      </span>
-                    </div>
-                    <p className="text-slate-600 whitespace-pre-wrap">{c.editor_comments || 'No editorial comments.'}</p>
-                  </div>
-                )}
-
-                {c.editor_feedback_at && (
-                  <div className="rounded-xl border-2 border-slate-900 p-4 space-y-2">
-                    <p className="text-[11px] uppercase tracking-wide text-slate-500 font-bold">Send to GD Member for Corrections</p>
-                    {/* PRODUCTION_REVIEW is the only status this is actionable
-                        from -- once clicked, production_status moves to
-                        CORRECTIONS_IN_PROGRESS (and beyond as the GD Member
-                        works), so anything else means it's already been sent
-                        and shouldn't be clickable again. */}
-                    {productionStatus === 'PRODUCTION_REVIEW' ? (
-                      <button
-                        disabled={correctionsBusy}
-                        onClick={() => runCorrectionsAction(() => sendForCorrections(manuscript.id, c.id), 'Sent to the GD Member for corrections.')}
-                        className="inline-flex items-center gap-1 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
-                      >
-                        <Send className="w-3.5 h-3.5" /> Send for Corrections
-                      </button>
-                    ) : (
-                      <span className="text-[10px] font-bold uppercase text-emerald-700 flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Submitted
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {/* Once "Send Final Proof to Author" is clicked, the round-trip
-                comes back here too (same layout as the Proof Versions list
-                in ProductionWorkspace.tsx) as another item in this same
-                list, alongside the correction round(s) above, instead of a
-                separate card of its own. Stays up for the whole time the
-                Author has this round's proof (PROOF_SENT_TO_AUTHOR, then
-                AUTHOR_PROOF_REVIEW once they open it) -- only disappears
-                once they've actually acted (approved it, or requested
-                another round of corrections). */}
-            {(productionStatus === 'PROOF_SENT_TO_AUTHOR' || productionStatus === 'AUTHOR_PROOF_REVIEW') && latestProductionProof && (
-              <div className="rounded-xl border-2 border-slate-900 p-4 text-sm space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-bold text-slate-800">Proof v{latestProductionProof.version} — final proof</p>
-                  <span className="shrink-0 text-[10px] font-bold uppercase text-emerald-700 flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Awaiting Author&rsquo;s acceptance
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  {latestProductionProof.file_name}
-                  {latestProductionProof.sent_to_author_at ? ` • Sent ${new Date(latestProductionProof.sent_to_author_at).toLocaleDateString()}` : ''}
-                </p>
-                {latestProductionProof.public_url && (
-                  <div className="flex items-center gap-2">
-                    <a href={latestProductionProof.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-3.5 h-3.5" /> View</a>
-                    <a href={latestProductionProof.public_url} download className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Download className="w-3.5 h-3.5" /> Download</a>
-                  </div>
-                )}
-              </div>
-            )}
+      {/* Module 71: the GD Member's task window, acceptance, and their own
+          self-reported NOT_STARTED/IN_PROGRESS/COMPLETED work status while
+          they do the actual formatting work offline -- separate from the
+          detailed production_status/checklist machinery. */}
+      {!isEditor && production?.assigned_to && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6">
+          <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-3">GD Member Status</h3>
+          <div className="grid gap-3 sm:grid-cols-4 text-sm">
+            <div className="rounded-xl border border-slate-200 p-3">
+              <p className="text-[10px] font-bold uppercase text-slate-400">GD Member</p>
+              <p className="font-bold text-slate-800">{assignedGDMemberProfile?.name || '--'}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3">
+              <p className="text-[10px] font-bold uppercase text-slate-400">Task Window</p>
+              <p className="text-slate-700">
+                {production.assigned_start_date ? new Date(production.assigned_start_date).toLocaleDateString() : '--'}
+                {' – '}
+                {production.assigned_end_date ? new Date(production.assigned_end_date).toLocaleDateString() : '--'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3">
+              <p className="text-[10px] font-bold uppercase text-slate-400">Accepted</p>
+              <p className={`font-bold ${production.gd_accepted_at ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {production.gd_accepted_at ? new Date(production.gd_accepted_at).toLocaleDateString() : 'Not yet'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3">
+              <p className="text-[10px] font-bold uppercase text-slate-400">Work Status</p>
+              <p className={`font-bold ${
+                production.gd_work_status === 'COMPLETED' ? 'text-emerald-600' :
+                production.gd_work_status === 'IN_PROGRESS' ? 'text-amber-600' : 'text-slate-400'
+              }`}>
+                {production.gd_work_status === 'IN_PROGRESS' ? 'In Progress' : production.gd_work_status === 'COMPLETED' ? 'Completed' : 'Not Started'}
+              </p>
+            </div>
           </div>
+          {production.gd_work_status === 'COMPLETED' && production.current_proof_version === 0 && (
+            <p className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">
+              Waiting for final proof upload
+            </p>
+          )}
+          {/* Corrections (from the Author or Editor) already route to the
+              assigned GD Member automatically -- see author_submit_corrections()/
+              editor_review_proof() in 0069_editor_final_approval_workflow.sql.
+              This button doesn't change that; it's a manual nudge (re-sends
+              the notification) for "they say they never saw it". */}
+          {['CORRECTIONS_IN_PROGRESS', 'EDITOR_CORRECTIONS_REQUESTED', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED'].includes(productionStatus || '') && (
+            <div className="mt-4">
+              {!hasNotifiedGDMember ? (
+                <button
+                  type="button"
+                  onClick={handleNotifyGDMember}
+                  disabled={notifyingGDMember}
+                  className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {notifyingGDMember ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  {notifyingGDMember ? 'Sending...' : `Send Correction to ${assignedGDMemberProfile?.name || 'GD Member'}`}
+                </button>
+              ) : (
+                <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to {assignedGDMemberProfile?.name || 'the GD Member'} for correction.
+                </p>
+              )}
+              {notifyGDMemberError && <p className="mt-2 text-xs font-semibold text-red-600">{notifyGDMemberError}</p>}
+            </div>
+          )}
         </div>
       )}
 
-      {/* GD Member has sent the corrected proof back -- send it on to the
-          Author for another round, or bounce it back to the GD Member
-          without troubling the Author. */}
-      {!isEditor && productionStatus === 'FINAL_PROOF_READY' && (
-        <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-6 space-y-3">
-          <p className="text-sm text-emerald-800 font-semibold">The GD Member has submitted the corrected proof. Final proof is ready for review.</p>
-          {latestProductionProof?.public_url && (
-            <a href={latestProductionProof.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100">
-              <Eye className="w-3.5 h-3.5" /> View Proof v{latestProductionProof.version}
-            </a>
-          )}
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <button
-              disabled={correctionsBusy}
-              onClick={() => runCorrectionsAction(() => sendProofToAuthor(manuscript.id), 'Final proof sent to the Author.')}
-              className="inline-flex items-center gap-1 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
-            >
-              <Send className="w-3.5 h-3.5" /> Send Final Proof to Author
-            </button>
-            <button
-              disabled={correctionsBusy}
-              onClick={() => runCorrectionsAction(() => coordinatorReturnForFurtherCorrections(manuscript.id), 'Returned to the GD Member for further corrections.')}
-              className="inline-flex items-center gap-1 rounded-full bg-amber-700 px-4 py-2 text-xs font-bold text-white hover:bg-amber-800 disabled:opacity-40"
-            >
-              Return for Further Corrections
-            </button>
+      {/* 9. Proof & Review Status -- Module 69: this loop (GD -> Author ->
+          Editor -> Author Final Review -> Publication) is now driven
+          entirely by backend RPCs the GD Member/Editor/Author call
+          directly; the Coordinator's role here is oversight (status +
+          full history), not manually routing each step. See
+          ProductionWorkspace.tsx for the same panel plus the Coordinator
+          Override escape hatch for a stuck manuscript. */}
+      {!isEditor && production && ['PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW', 'AUTHOR_APPROVED', 'CORRECTIONS_IN_PROGRESS', 'PROOF_SENT_TO_EDITOR', 'EDITOR_CORRECTIONS_PENDING_SEND', 'EDITOR_CORRECTIONS_REQUESTED', 'PROOF_READY_FOR_EDITOR', 'EDITOR_APPROVED', 'PROOF_SENT_TO_AUTHOR_FINAL', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED', 'READY_FOR_PUBLICATION'].includes(productionStatus || '') && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+          <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
+            <MessageCircle className="w-4 h-4" /> Proof &amp; Review Status
+          </h3>
+          <div className="grid gap-3 sm:grid-cols-2 text-sm">
+            <div className="rounded-xl border border-slate-200 p-3">
+              <p className="text-[10px] font-bold uppercase text-slate-400">Editor Approval</p>
+              <p className="text-slate-700">{production.editor_approved_version ? `Proof v${production.editor_approved_version}` : 'Not yet approved'}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3">
+              <p className="text-[10px] font-bold uppercase text-slate-400">Author Final Approval</p>
+              <p className="text-slate-700">{production.author_final_approved_version ? `Proof v${production.author_final_approved_version}` : 'Not yet approved'}</p>
+            </div>
           </div>
-          {correctionsSuccess && (
-            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> {correctionsSuccess}</p>
+          {!isEditor && productionStatus === 'READY_FOR_PUBLICATION' && (
+            <div className="mt-4 rounded-xl border-2 border-emerald-300 bg-emerald-50 p-4 space-y-2">
+              <p className="text-sm font-bold text-emerald-800 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4" /> Final Proof Approved by Author and Editor -- Proof v{production.current_proof_version} is ready for publication.
+              </p>
+              {!hasNotifiedGDMember ? (
+                <button
+                  type="button"
+                  onClick={handleNotifyGDMember}
+                  disabled={notifyingGDMember}
+                  className="inline-flex items-center gap-2 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {notifyingGDMember ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  {notifyingGDMember ? 'Sending...' : 'Move to Publish'}
+                </button>
+              ) : (
+                <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to {assignedGDMemberProfile?.name || 'the GD Member'} for finalize.
+                </p>
+              )}
+              {notifyGDMemberError && <p className="text-xs font-semibold text-red-600">{notifyGDMemberError}</p>}
+            </div>
           )}
-          {correctionsError && <p className="text-xs font-semibold text-red-600">{correctionsError}</p>}
+          <ProofReviewTimeline manuscriptId={manuscript.id} variant="compact" />
         </div>
       )}
 
@@ -1278,6 +1299,10 @@ export function DecisionTab({
           loadingMembers={gdGateLoadingMembers}
           selectedId={selectedGdMemberForGate}
           onSelectedIdChange={setSelectedGdMemberForGate}
+          startDate={gdGateStartDate}
+          onStartDateChange={setGdGateStartDate}
+          endDate={gdGateEndDate}
+          onEndDateChange={setGdGateEndDate}
           name={gdGateName}
           onNameChange={setGdGateName}
           email={gdGateEmail}
@@ -1305,12 +1330,15 @@ export function DecisionTab({
  */
 function GDMemberGateModal({
   mode, onModeChange, members, loadingMembers, selectedId, onSelectedIdChange,
+  startDate, onStartDateChange, endDate, onEndDateChange,
   name, onNameChange, email, onEmailChange, password, onPasswordChange, onGeneratePassword,
   busy, error, createdCredentials, onClose, onAssignExisting, onCreateAndAssign
 }: {
   mode: 'PICK' | 'CREATE'; onModeChange: (m: 'PICK' | 'CREATE') => void;
   members: ProfileRow[]; loadingMembers: boolean;
   selectedId: string; onSelectedIdChange: (v: string) => void;
+  startDate: string; onStartDateChange: (v: string) => void;
+  endDate: string; onEndDateChange: (v: string) => void;
   name: string; onNameChange: (v: string) => void;
   email: string; onEmailChange: (v: string) => void;
   password: string; onPasswordChange: (v: string) => void;
@@ -1396,6 +1424,30 @@ function GDMemberGateModal({
             </div>
           )}
 
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold mb-1.5">Start Date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => onStartDateChange(e.target.value)}
+                disabled={busy}
+                className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-[0.35em] text-slate-500 font-bold mb-1.5">End Date</label>
+              <input
+                type="date"
+                value={endDate}
+                min={startDate || undefined}
+                onChange={(e) => onEndDateChange(e.target.value)}
+                disabled={busy}
+                className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-[#008751]"
+              />
+            </div>
+          </div>
+
           {mode === 'PICK' ? (
             loadingMembers ? (
               <div className="flex items-center justify-center py-8 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading GD Members...</div>
@@ -1418,7 +1470,7 @@ function GDMemberGateModal({
                 </select>
                 <button
                   onClick={onAssignExisting}
-                  disabled={busy || !selectedId}
+                  disabled={busy || !selectedId || !startDate || !endDate || endDate < startDate}
                   className="w-full rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
@@ -1464,7 +1516,7 @@ function GDMemberGateModal({
               </div>
               <button
                 onClick={onCreateAndAssign}
-                disabled={busy}
+                disabled={busy || !startDate || !endDate || endDate < startDate}
                 className="w-full rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043] disabled:opacity-40 flex items-center justify-center gap-2"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}

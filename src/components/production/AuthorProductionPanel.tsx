@@ -3,7 +3,7 @@ import { Loader2, Eye, Download, CheckCircle2, AlertTriangle, Upload } from 'luc
 import {
   ProductionRow, ProofRow, CorrectionRow,
   getProduction, getProofs, getCorrections,
-  authorOpenProof, authorApproveProof, authorSubmitCorrections,
+  authorOpenProof, authorApproveProof, authorSubmitCorrections, authorFinalReviewProof,
   uploadCorrectionAttachment
 } from '../../lib/production';
 
@@ -74,15 +74,21 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
   const status = production?.production_status;
   const latestProof = proofs[0];
   const awaitingReview = status === 'AUTHOR_PROOF_REVIEW' || status === 'PROOF_SENT_TO_AUTHOR';
-  // Between the Author submitting corrections and a fresh proof actually
-  // reaching them again -- shows the "In Correction" marker plus their
-  // submitted comments/attachment instead of the misleading "Final Proof
-  // Available" banner (that proof is the one they already responded to).
-  const inCorrection = !awaitingReview && (
+  // Module 69 -- Final Review is a distinct step from the first-round
+  // review above: it only appears once the Editor has approved a version,
+  // and approving it here (rather than the first-round review) is what
+  // makes the manuscript Ready for Publication (Rule 5).
+  const awaitingFinalReview = status === 'PROOF_SENT_TO_AUTHOR_FINAL';
+  // Between the Author (or Editor) requesting corrections and a fresh
+  // proof actually reaching the Author again -- shows the "In Correction"
+  // marker instead of a review prompt. Covers the Editor's own
+  // correction sub-loop too (Author never sees a review prompt during it).
+  const inCorrection = !awaitingReview && !awaitingFinalReview && (
     status === 'CORRECTIONS_SUBMITTED' || status === 'PRODUCTION_REVIEW' ||
-    status === 'CLARIFICATION_REQUESTED' || status === 'CORRECTIONS_IN_PROGRESS'
+    status === 'CLARIFICATION_REQUESTED' || status === 'CORRECTIONS_IN_PROGRESS' ||
+    status === 'EDITOR_CORRECTIONS_REQUESTED' || status === 'AUTHOR_FINAL_CORRECTIONS_REQUESTED'
   );
-  const latestCorrection = corrections[0];
+  const latestCorrection = corrections.find((c) => c.proof_version === production?.current_proof_version) || null;
 
   const submitCorrections = async () => {
     if (!comments.trim()) { setError('Comments are required to submit Proof Corrections.'); return; }
@@ -92,7 +98,11 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
       // Attachment is optional -- only upload one if the Author actually
       // attached a file.
       const uploaded = attachment ? await uploadCorrectionAttachment(manuscriptId, attachment) : null;
-      await authorSubmitCorrections(manuscriptId, comments, uploaded?.storagePath ?? '', uploaded?.publicUrl ?? '', attachment?.name ?? '');
+      if (awaitingFinalReview) {
+        await authorFinalReviewProof(manuscriptId, 'CORRECTIONS_REQUIRED', comments, uploaded?.storagePath ?? '', uploaded?.publicUrl ?? '', attachment?.name ?? '');
+      } else {
+        await authorSubmitCorrections(manuscriptId, comments, uploaded?.storagePath ?? '', uploaded?.publicUrl ?? '', attachment?.name ?? '');
+      }
       setComments(''); setAttachment(null); setMode('view');
       await load();
     } catch (e: any) {
@@ -106,7 +116,11 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
     setBusy(true);
     setError('');
     try {
-      await authorApproveProof(manuscriptId);
+      if (awaitingFinalReview) {
+        await authorFinalReviewProof(manuscriptId, 'APPROVE');
+      } else {
+        await authorApproveProof(manuscriptId);
+      }
       setConfirmApprove(false); setMode('view');
       await load();
     } catch (e: any) {
@@ -141,18 +155,27 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
         <p className="text-slate-500 leading-relaxed">Your manuscript is currently being prepared for production (copyediting, formatting, typesetting). You&rsquo;ll be notified once your proof is ready for review.</p>
       ) : status === 'AUTHOR_APPROVED' || status === 'READY_FOR_PUBLICATION' ? (
         <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-700 font-medium flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 shrink-0" /> You approved Proof v{latestProof.version}. It is now with the editorial team for final publication.
+          <CheckCircle2 className="w-4 h-4 shrink-0" /> You gave final approval on Proof v{latestProof.version}. Both editorial and your final approval are in -- it is ready for publication.
         </div>
       ) : status === 'PUBLISHED' ? (
         <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-700 font-medium flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 shrink-0" /> Your manuscript has been published.
+        </div>
+      ) : status === 'PROOF_SENT_TO_EDITOR' ? (
+        <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 shrink-0" /> Your approval was recorded. The editorial team is reviewing Proof v{latestProof.version} before it comes back to you for final confirmation.
         </div>
       ) : (
         <div className="space-y-5">
           {inCorrection ? (
             <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl leading-relaxed text-amber-900">
               <strong className="block font-bold text-sm mb-1">In Correction</strong>
-              <span className="text-sm">Your requested corrections are with the editorial team. You&rsquo;ll be notified once an updated proof is ready.</span>
+              <span className="text-sm">The requested corrections are with the production team. You&rsquo;ll be notified once an updated proof is ready.</span>
+            </div>
+          ) : awaitingFinalReview ? (
+            <div className="bg-[#eefcf4] border border-emerald-100 p-4 rounded-xl leading-relaxed text-[#004d2e]">
+              <strong className="block text-[#004d2b] font-bold text-sm mb-1">Editor-Approved Proof — Final Review</strong>
+              <span className="text-sm">The editorial team has approved this proof. Please give your final confirmation before it moves to publication.</span>
             </div>
           ) : (
             <div className="bg-[#eefcf4] border border-emerald-100 p-4 rounded-xl leading-relaxed text-[#004d2e]">
@@ -182,7 +205,7 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
             )}
           </div>
 
-          {inCorrection && latestCorrection && (
+          {inCorrection && latestCorrection && latestCorrection.correction_source !== 'EDITOR' && (
             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <p className="font-bold text-slate-900">Your Submitted Correction</p>
@@ -203,9 +226,11 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
             </div>
           )}
 
-          {awaitingReview && mode === 'view' && (
+          {(awaitingReview || awaitingFinalReview) && mode === 'view' && (
             <div className="flex flex-wrap items-center gap-3">
-              <button onClick={() => setMode('approving')} className="rounded-full bg-[#008751] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#007043]">Approve Final Proof</button>
+              <button onClick={() => setMode('approving')} className="rounded-full bg-[#008751] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#007043]">
+                {awaitingFinalReview ? 'Approve Final Submission' : 'Approve Final Proof'}
+              </button>
               <button onClick={() => setMode('correcting')} className="rounded-full border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Request Corrections</button>
             </div>
           )}
@@ -235,7 +260,7 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
               <label className="flex items-start gap-2.5 text-amber-800 leading-relaxed">
                 <input type="checkbox" checked={confirmApprove} onChange={(e) => setConfirmApprove(e.target.checked)} className="mt-0.5" />
-                <span>I confirm that I have reviewed the final proof and approve it for publication.</span>
+                <span>{awaitingFinalReview ? 'I confirm that I have reviewed the editor-approved proof and give my final approval for publication.' : 'I confirm that I have reviewed the final proof and approve it for publication.'}</span>
               </label>
               <div className="flex items-center gap-3">
                 <button disabled={busy || !confirmApprove} onClick={approve} className="rounded-full bg-[#008751] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#007043] disabled:opacity-40">Approve &amp; Finish</button>

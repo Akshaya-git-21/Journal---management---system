@@ -21,7 +21,7 @@ export type StandardStatus = typeof STANDARD_STATUSES[number];
 
 /** Shared badge coloring so every workspace renders the same status the
  * same way -- no more per-workspace STATUS_STYLES duplicates. */
-export const STANDARD_STATUS_COLORS: Record<StandardStatus | 'DRAFT' | 'PRODUCTION PREPARATION' | 'EDITOR ASSIGNED', string> = {
+export const STANDARD_STATUS_COLORS: Record<StandardStatus | 'DRAFT' | 'PRODUCTION PREPARATION' | 'EDITOR ASSIGNED' | 'IN PUBLISH', string> = {
   DRAFT: 'bg-slate-100 text-slate-600 border-slate-200',
   SUBMITTED: 'bg-amber-50 text-amber-700 border-amber-200',
   'EDITORIAL REVIEW': 'bg-blue-50 text-blue-700 border-blue-200',
@@ -33,6 +33,7 @@ export const STANDARD_STATUS_COLORS: Record<StandardStatus | 'DRAFT' | 'PRODUCTI
   PUBLISHED: 'bg-emerald-100 text-emerald-800 border-emerald-300',
   'PRODUCTION PREPARATION': 'bg-teal-50 text-teal-700 border-teal-200',
   'EDITOR ASSIGNED': 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  'IN PUBLISH': 'bg-violet-50 text-violet-700 border-violet-200',
 };
 
 interface ManuscriptStatusLike {
@@ -49,6 +50,15 @@ const PROOFREADING_PRODUCTION_STATUSES = new Set([
   'PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW', 'CORRECTIONS_SUBMITTED',
   'PRODUCTION_REVIEW', 'PROOF_UPDATED', 'CLARIFICATION_REQUESTED',
   'AUTHOR_APPROVED', 'READY_FOR_PUBLICATION', 'CORRECTIONS_IN_PROGRESS', 'FINAL_PROOF_READY',
+  // Module 69 -- Proof -> GD -> Author -> Editor -> Final Author Approval loop.
+  'PROOF_SENT_TO_EDITOR', 'EDITOR_CORRECTIONS_REQUESTED',
+  'PROOF_SENT_TO_AUTHOR_FINAL', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED',
+  // Module 77 -- Editor's corrections wait for an explicit "Send to GD Member" click.
+  'EDITOR_CORRECTIONS_PENDING_SEND',
+  // Module 78 -- GD's corrected proof (editor-stage loop) waits for an explicit "Send to Editor" click.
+  'PROOF_READY_FOR_EDITOR',
+  // Module 79 -- Editor's approval waits for an explicit "Send for Author Confirmation" click.
+  'EDITOR_APPROVED',
 ]);
 
 /**
@@ -72,7 +82,7 @@ export function getManuscriptStatusLabel(manuscript: ManuscriptStatusLike, lates
     // don't pass productionStatus (Editor/Reviewer/Author views) are
     // unaffected, so this is purely additive to the Coordinator's own view.
     if (manuscript.display_status === 'ACCEPTED' && productionStatus && productionStatus !== 'NOT_STARTED') {
-      return PROOFREADING_PRODUCTION_STATUSES.has(productionStatus) ? 'PROOFREADING' : 'PRODUCTION PREPARATION';
+      return productionStatus === 'READY_FOR_PUBLICATION' ? 'IN PUBLISH' : PROOFREADING_PRODUCTION_STATUSES.has(productionStatus) ? 'PROOFREADING' : 'PRODUCTION PREPARATION';
     }
     return manuscript.display_status;
   }
@@ -80,7 +90,7 @@ export function getManuscriptStatusLabel(manuscript: ManuscriptStatusLike, lates
   const status = manuscript.status;
   if (status === 'ACCEPTED') {
     if (productionStatus && productionStatus !== 'NOT_STARTED') {
-      return PROOFREADING_PRODUCTION_STATUSES.has(productionStatus) ? 'PROOFREADING' : 'PRODUCTION PREPARATION';
+      return productionStatus === 'READY_FOR_PUBLICATION' ? 'IN PUBLISH' : PROOFREADING_PRODUCTION_STATUSES.has(productionStatus) ? 'PROOFREADING' : 'PRODUCTION PREPARATION';
     }
     return manuscript.production_stage === 'SENT_TO_PUBLISHER' ? 'PROOFREADING' : 'ACCEPTED';
   }
@@ -94,7 +104,7 @@ export function getManuscriptStatusLabel(manuscript: ManuscriptStatusLike, lates
 
 export function getManuscriptStatusMeta(manuscript: ManuscriptStatusLike, latestRevision?: RevisionRow | null, productionStatus?: string | null): { label: string; nextStep: string } {
   const label = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
-  if (label === 'PRODUCTION PREPARATION') return { label, nextStep: 'Coordinator preparing manuscript for production' };
+  if (label === 'PRODUCTION PREPARATION') return { label, nextStep: '' };
   if (label === 'ACCEPTED') return { label, nextStep: 'Production' };
   if (label === 'IN REVISION') {
     const nextStep = latestRevision?.status === 'AWAITING_AUTHOR_UPLOAD' ? 'Author to submit revision' : 'Coordinator to forward';

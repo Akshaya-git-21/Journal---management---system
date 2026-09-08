@@ -97,11 +97,11 @@ export default function GDMemberWorkspace({ currentUser }: GDMemberWorkspaceProp
         <div className="flex-1 bg-[#00170f] md:p-3 overflow-hidden flex flex-col min-h-0">
           <main className="flex-1 bg-slate-50 md:rounded-3xl border border-[#002b1d]/20 p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
             {showTemplate ? (
-              <JournalTemplateSection canUpload={false} />
+              <JournalTemplateSection canUpload />
             ) : selectedId && (activeView === 'READY' || activeView === 'PUBLISHED') ? (
               <GDMemberPublicationDetail manuscriptId={selectedId} onBack={() => setSelectedId(null)} />
             ) : selectedId ? (
-              <GDMemberProductionDetail manuscriptId={selectedId} onBack={() => setSelectedId(null)} />
+              <GDMemberProductionDetail manuscriptId={selectedId} onBack={() => setSelectedId(null)} onOpenPublication={() => setActiveView('READY')} />
             ) : (
               <GDMemberProductionSection view={activeView} onOpen={setSelectedId} />
             )}

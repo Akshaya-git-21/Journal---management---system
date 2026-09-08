@@ -1,35 +1,56 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Loader2, CheckCircle2, Circle, Check, Upload, Download, Eye, MessageCircle, Send, AlertTriangle, UserCog } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, Circle, Check, Upload, Download, Eye, Send, AlertTriangle, UserCog, ShieldAlert } from 'lucide-react';
 import {
   ManuscriptRow, ProfileRow, ContributorRow,
-  getManuscript, getContributors, getProfilesByIds, getDiscussions, DiscussionRow,
+  getManuscript, getContributors, getProfilesByIds,
   listActiveProfilesByRole
 } from '../../lib/workflow';
 import {
-  ProductionRow, ProductionChecklistItemRow, ProofRow, CorrectionRow, ChecklistItemStatus,
+  ProductionRow, ProductionChecklistItemRow, ProofRow, CorrectionRow, ChecklistItemStatus, ProductionStatus,
   getProduction, getChecklist, getProofs, getCorrections,
   startProduction, updateChecklistItem, advanceProductionStage,
-  uploadProof, generateProof, sendProofToAuthor,
-  acceptCorrections, requestClarification, assignGDMember,
-  coordinatorReturnProofToGDMember, sendCorrectionsToEditor, sendForCorrections,
-  coordinatorReturnForFurtherCorrections, coordinatorConfirmProofreadingCompleted
+  uploadProof, generateProof, sendProofToAuthor, assignGDMember,
+  coordinatorReturnProofToGDMember,
+  coordinatorReturnForFurtherCorrections, coordinatorConfirmProofreadingCompleted,
+  coordinatorOverrideRoute
 } from '../../lib/production';
 import { getManuscriptStatusLabel } from '../../lib/manuscriptStatusLabel';
+import ProofReviewTimeline from './ProofReviewTimeline';
 
-const STEPS = ['Accepted', 'Copyediting', 'Formatting', 'Typesetting', 'Proof Generated', 'Author Proofreading', 'Final Approval', 'Publication'];
+const OVERRIDE_STATUSES: ProductionStatus[] = [
+  'PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW', 'AUTHOR_APPROVED', 'CORRECTIONS_IN_PROGRESS', 'PROOF_SENT_TO_EDITOR',
+  'EDITOR_CORRECTIONS_PENDING_SEND', 'EDITOR_CORRECTIONS_REQUESTED', 'PROOF_READY_FOR_EDITOR', 'EDITOR_APPROVED', 'PROOF_SENT_TO_AUTHOR_FINAL', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED', 'READY_FOR_PUBLICATION',
+];
 
-function stepIndex(status: string | undefined) {
+function pendingReviewLabel(role: ProductionRow['pending_review_role']) {
+  switch (role) {
+    case 'AUTHOR_FIRST': return 'Awaiting Author review';
+    case 'EDITOR': return 'Awaiting Editor decision';
+    case 'AUTHOR_FINAL': return 'Awaiting Author final review';
+    default: return null;
+  }
+}
+
+const STEPS = ['Accepted', 'Copyediting', 'Production Checklist', 'Formatting', 'Typesetting', 'Proof Generated', 'Author Proofreading', 'Final Approval', 'Publication'];
+
+// Module 71/72: production_status alone can't distinguish "GD Member still
+// doing offline formatting work" from "work status marked Completed, now
+// working through the Production Checklist" -- both are production_status
+// = 'COPYEDITING'. gd_work_status is what actually separates those two
+// stepper tabs.
+function stepIndex(status: string | undefined, gdWorkStatus?: string) {
   switch (status) {
     case undefined: case 'NOT_STARTED': case 'IN_PRODUCTION': return 0;
-    case 'COPYEDITING': return 1;
-    case 'FORMATTING': return 2;
-    case 'TYPESETTING': return 3;
-    case 'PROOF_GENERATED': case 'PROOF_SUBMITTED_TO_COORDINATOR': return 4;
+    case 'COPYEDITING': return gdWorkStatus === 'COMPLETED' ? 2 : 1;
+    case 'FORMATTING': return 3;
+    case 'TYPESETTING': return 4;
+    case 'PROOF_GENERATED': case 'PROOF_SUBMITTED_TO_COORDINATOR': return 5;
     case 'PROOF_SENT_TO_AUTHOR': case 'AUTHOR_PROOF_REVIEW': case 'CORRECTIONS_SUBMITTED':
     case 'CLARIFICATION_REQUESTED': case 'PRODUCTION_REVIEW': case 'PROOF_UPDATED':
-    case 'CORRECTIONS_IN_PROGRESS': case 'FINAL_PROOF_READY': return 5;
-    case 'AUTHOR_APPROVED': return 6;
-    case 'READY_FOR_PUBLICATION': case 'PUBLISHED': return 7;
+    case 'CORRECTIONS_IN_PROGRESS': case 'FINAL_PROOF_READY':
+    case 'PROOF_SENT_TO_EDITOR': case 'EDITOR_CORRECTIONS_REQUESTED': case 'EDITOR_CORRECTIONS_PENDING_SEND': case 'PROOF_READY_FOR_EDITOR': return 6;
+    case 'AUTHOR_APPROVED': case 'EDITOR_APPROVED': case 'PROOF_SENT_TO_AUTHOR_FINAL': case 'AUTHOR_FINAL_CORRECTIONS_REQUESTED': return 7;
+    case 'READY_FOR_PUBLICATION': case 'PUBLISHED': return 8;
     default: return 0;
   }
 }
@@ -67,30 +88,32 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
   const [checklist, setChecklist] = useState<ProductionChecklistItemRow[]>([]);
   const [proofs, setProofs] = useState<ProofRow[]>([]);
   const [corrections, setCorrections] = useState<CorrectionRow[]>([]);
-  const [discussions, setDiscussions] = useState<DiscussionRow[]>([]);
   const [editorProfile, setEditorProfile] = useState<ProfileRow | null>(null);
   const [gdMembers, setGdMembers] = useState<ProfileRow[]>([]);
   const [assignedGDMember, setAssignedGDMember] = useState<ProfileRow | null>(null);
   const [selectedGDMemberId, setSelectedGDMemberId] = useState('');
+  const [assignStartDate, setAssignStartDate] = useState('');
+  const [assignEndDate, setAssignEndDate] = useState('');
   const [assigningGDMember, setAssigningGDMember] = useState(false);
   const [assignError, setAssignError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [clarificationDraft, setClarificationDraft] = useState<Record<string, string>>({});
   const [returnNote, setReturnNote] = useState('');
   const [showReturnForm, setShowReturnForm] = useState(false);
+  const [showOverride, setShowOverride] = useState(false);
+  const [overrideStatus, setOverrideStatus] = useState<ProductionStatus | ''>('');
+  const [overrideReason, setOverrideReason] = useState('');
 
   const load = async () => {
     try {
-      const [m, contrib, prod, cl, pf, corr, disc, gdMemberProfiles] = await Promise.all([
+      const [m, contrib, prod, cl, pf, corr, gdMemberProfiles] = await Promise.all([
         getManuscript(manuscriptId),
         getContributors(manuscriptId),
         getProduction(manuscriptId),
         getChecklist(manuscriptId),
         getProofs(manuscriptId),
         getCorrections(manuscriptId),
-        getDiscussions(manuscriptId),
         listActiveProfilesByRole('GD_MEMBER'),
       ]);
       setManuscript(m);
@@ -99,7 +122,6 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
       setChecklist(cl);
       setProofs(pf);
       setCorrections(corr);
-      setDiscussions(disc.filter((d) => d.channel === 'PRODUCTION'));
       setGdMembers(gdMemberProfiles);
       const profileIds = [m?.assigned_editor_id, prod?.assigned_to].filter((v): v is string => !!v);
       if (profileIds.length > 0) {
@@ -121,11 +143,15 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
 
   const handleAssignGDMember = async () => {
     if (!selectedGDMemberId) return;
+    if (!assignStartDate || !assignEndDate) { setAssignError('Please choose a start date and end date for the task.'); return; }
+    if (assignEndDate < assignStartDate) { setAssignError('End date cannot be before the start date.'); return; }
     setAssigningGDMember(true);
     setAssignError('');
     try {
-      await assignGDMember(manuscriptId, selectedGDMemberId);
+      await assignGDMember(manuscriptId, selectedGDMemberId, assignStartDate, assignEndDate);
       setSelectedGDMemberId('');
+      setAssignStartDate('');
+      setAssignEndDate('');
       await load();
       onChanged();
     } catch (e: any) {
@@ -154,11 +180,10 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
 
   const correspondingAuthor = contributors.find((c) => c.contributor_role?.toLowerCase().includes('corresponding')) || contributors[0];
   const status = production?.production_status;
-  const idx = stepIndex(status);
+  const idx = stepIndex(status, production?.gd_work_status);
   const copyeditingChecklist = checklist.filter((c) => c.stage === 'COPYEDITING');
   const allChecklistDone = copyeditingChecklist.length > 0 && copyeditingChecklist.every((c) => c.status === 'COMPLETED');
   const latestProof = proofs[0];
-  const openCorrections = corrections.filter((c) => c.status === 'SUBMITTED');
 
   const handleProofFile = async (file: File) => {
     await run(async () => {
@@ -171,6 +196,14 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
     await run(() => coordinatorReturnProofToGDMember(manuscriptId, returnNote));
     setReturnNote('');
     setShowReturnForm(false);
+  };
+
+  const handleOverride = async () => {
+    if (!overrideStatus || !overrideReason.trim()) return;
+    await run(() => coordinatorOverrideRoute(manuscriptId, overrideStatus, overrideReason));
+    setOverrideStatus('');
+    setOverrideReason('');
+    setShowOverride(false);
   };
 
   return (
@@ -207,6 +240,18 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
                 <p className="text-xs uppercase tracking-wide text-slate-400">Assigned GD Member</p>
                 <p className="text-lg font-black text-slate-900">{assignedGDMember.name}</p>
                 <p className="text-xs text-slate-500">Status: {getManuscriptStatusLabel(manuscript, undefined, production.production_status)}</p>
+                {(production.assigned_start_date || production.assigned_end_date) && (
+                  <p className="text-xs text-slate-500 mt-1">Task Window: {formatDate(production.assigned_start_date)} &ndash; {formatDate(production.assigned_end_date)}</p>
+                )}
+                <p className="text-xs text-slate-500 mt-1">
+                  Accepted: <span className={`font-bold ${production.gd_accepted_at ? 'text-emerald-600' : 'text-amber-600'}`}>{production.gd_accepted_at ? `Yes (${formatDate(production.gd_accepted_at)})` : 'Not yet'}</span>
+                  {' • '}Work Status: <span className="font-bold text-slate-700">{production.gd_work_status === 'IN_PROGRESS' ? 'In Progress' : production.gd_work_status === 'COMPLETED' ? 'Completed' : 'Not Started'}</span>
+                </p>
+                {production.gd_work_status === 'COMPLETED' && production.current_proof_version === 0 && (
+                  <p className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-bold text-amber-700">
+                    Waiting for final proof upload
+                  </p>
+                )}
                 {/* Read-only -- set by the Publisher (set_publisher_task_status(),
                     0057_publisher_task_status.sql), not editable here. Distinct
                     from the GD Member's item-by-item checklist above. */}
@@ -219,7 +264,7 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
                   </span>
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={selectedGDMemberId}
                   onChange={(e) => setSelectedGDMemberId(e.target.value)}
@@ -230,8 +275,10 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
                     <option key={g.id} value={g.id}>{g.name}</option>
                   ))}
                 </select>
+                <input type="date" value={assignStartDate} onChange={(e) => setAssignStartDate(e.target.value)} className="rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#008751]" title="Start date" />
+                <input type="date" value={assignEndDate} min={assignStartDate || undefined} onChange={(e) => setAssignEndDate(e.target.value)} className="rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#008751]" title="End date" />
                 <button
-                  disabled={!selectedGDMemberId || assigningGDMember}
+                  disabled={!selectedGDMemberId || !assignStartDate || !assignEndDate || assigningGDMember}
                   onClick={handleAssignGDMember}
                   className="rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
@@ -242,7 +289,7 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
           ) : gdMembers.length === 0 ? (
             <p className="text-sm text-slate-400">No active GD Member accounts yet -- create one from the GD Members roster to assign this manuscript.</p>
           ) : (
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:flex-wrap">
               <select
                 value={selectedGDMemberId}
                 onChange={(e) => setSelectedGDMemberId(e.target.value)}
@@ -253,8 +300,10 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
                   <option key={g.id} value={g.id}>{g.name}</option>
                 ))}
               </select>
+              <input type="date" value={assignStartDate} onChange={(e) => setAssignStartDate(e.target.value)} className="rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#008751]" title="Start date" />
+              <input type="date" value={assignEndDate} min={assignStartDate || undefined} onChange={(e) => setAssignEndDate(e.target.value)} className="rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#008751]" title="End date" />
               <button
-                disabled={!selectedGDMemberId || assigningGDMember}
+                disabled={!selectedGDMemberId || !assignStartDate || !assignEndDate || assigningGDMember}
                 onClick={handleAssignGDMember}
                 className="rounded-full bg-[#008751] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40 disabled:cursor-not-allowed"
               >
@@ -484,126 +533,74 @@ export default function ProductionWorkspace({ manuscriptId, onBack, onChanged }:
             </div>
           )}
 
-          {/* Corrections */}
-          {corrections.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-3xl p-6">
-              <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-4">Author Proof Corrections</h2>
-              <div className="space-y-4">
-                {corrections.map((c) => (
-                  <div key={c.id} className="rounded-2xl border border-slate-200 p-4 text-sm space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="font-bold text-slate-800">Proof v{c.proof_version} — submitted {formatDate(c.submitted_at)}</p>
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${c.status === 'REVIEWED' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{c.status}</span>
-                    </div>
-                    <p className="text-slate-600 whitespace-pre-wrap">{c.comments}</p>
-                    {c.attachment_public_url && (
-                      <a href={c.attachment_public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-[#008751] hover:underline">
-                        <Download className="w-3.5 h-3.5" /> {c.attachment_file_name || 'Proof Corrections attachment'}
-                      </a>
-                    )}
-                    {c.status === 'SUBMITTED' && (
-                      <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button disabled={busy} onClick={() => run(() => acceptCorrections(manuscriptId, c.id))} className="rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40">
-                            Accept Minor Corrections
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <input
-                            value={clarificationDraft[c.id] || ''}
-                            onChange={(e) => setClarificationDraft((prev) => ({ ...prev, [c.id]: e.target.value }))}
-                            placeholder="Ask the author to clarify a correction..."
-                            className="flex-1 rounded-full border border-slate-200 px-4 py-2 text-xs outline-none focus:border-[#008751]"
-                          />
-                          <button
-                            disabled={busy || !clarificationDraft[c.id]?.trim()}
-                            onClick={() => run(async () => { await requestClarification(manuscriptId, clarificationDraft[c.id]); setClarificationDraft((prev) => ({ ...prev, [c.id]: '' })); })}
-                            className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                          >
-                            <MessageCircle className="w-3.5 h-3.5" /> Request Clarification
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {/* Task 12: forward this correction round (comments + annotated PDF)
-                       plus the current proof PDF to the assigned Editor for verification. */}
-                    <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
-                      <button
-                        disabled={busy}
-                        onClick={() => run(() => sendCorrectionsToEditor(manuscriptId, c.id))}
-                        className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40"
-                      >
-                        <Send className="w-3.5 h-3.5" /> Send to Editor for Verification
-                      </button>
-                      {production?.sent_to_editor_at && production.sent_to_editor_correction_id === c.id && (
-                        <span className="text-[10px] font-bold uppercase text-slate-400">
-                          Sent to Editor {formatDate(production.sent_to_editor_at)}
-                        </span>
-                      )}
-                    </div>
-                    {/* Task 13: the assigned Editor's feedback on this correction round. */}
-                    {c.editor_feedback_at && (
-                      <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <p className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">Editor Feedback</p>
-                          <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${c.editor_verified ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                            {c.editor_verified ? 'Verified' : 'Not Verified'}
-                          </span>
-                        </div>
-                        <p className="text-slate-600 whitespace-pre-wrap">{c.editor_comments || 'No editorial comments.'}</p>
-                        <p className="text-[11px] text-slate-400">Submitted {formatDate(c.editor_feedback_at)}</p>
-                      </div>
-                    )}
-                    {/* Task 14: once the Editor has weighed in, consolidate Author +
-                       Editor comments and the current proof into one package and hand
-                       it back to the GD Member -- they shouldn't have to hunt across
-                       the Coordinator's own separate cards to find all of it. */}
-                    {c.editor_feedback_at && (
-                      <div className="rounded-2xl border-2 border-slate-900 p-4 space-y-3">
-                        <p className="text-[11px] uppercase tracking-wide text-slate-500 font-bold">Corrections Package for GD Member</p>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase text-slate-400">Author Comments</p>
-                          <p className="text-slate-700">{c.comments}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase text-slate-400">Editor Comments</p>
-                          <p className="text-slate-700">{c.editor_comments || 'No editorial comments.'}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase text-slate-400">Current Proof</p>
-                          {latestProof?.public_url ? (
-                            <a href={latestProof.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-[#008751] hover:underline">
-                              <Eye className="w-3.5 h-3.5" /> Proof v{latestProof.version} — {latestProof.file_name}
-                            </a>
-                          ) : (
-                            <p className="text-slate-400">No proof available.</p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 pt-1">
-                          <button
-                            disabled={busy}
-                            onClick={() => run(() => sendForCorrections(manuscriptId, c.id))}
-                            className="inline-flex items-center gap-1 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40"
-                          >
-                            <Send className="w-3.5 h-3.5" /> Send for Corrections
-                          </button>
-                          {status === 'CORRECTIONS_IN_PROGRESS' && (
-                            <span className="text-[10px] font-bold uppercase text-slate-400">Sent to GD Member</span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+          {/* Module 69: this loop is now driven entirely by the GD
+             Member/Editor/Author RPCs -- the Coordinator's role is
+             oversight (status + full history) plus a narrow override for
+             stuck manuscripts, not manually routing every step. */}
+          {production && OVERRIDE_STATUSES.includes(production.production_status) && (
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">Review Status</h2>
+                {pendingReviewLabel(production.pending_review_role) && (
+                  <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                    {pendingReviewLabel(production.pending_review_role)}
+                  </span>
+                )}
               </div>
-              {discussions.length > 0 && (
-                <div className="mt-4 rounded-2xl bg-slate-50 border border-slate-100 p-4 space-y-2">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">Clarification history</p>
-                  {discussions.map((d) => (
-                    <p key={d.id} className="text-xs text-slate-600"><span className="font-semibold">{formatDate(d.created_at)}:</span> {d.message}</p>
-                  ))}
+              <div className="grid gap-3 sm:grid-cols-2 text-sm">
+                <div className="rounded-2xl border border-slate-200 p-3">
+                  <p className="text-[10px] font-bold uppercase text-slate-400">Editor Approval</p>
+                  <p className="text-slate-700">{production.editor_approved_version ? `Proof v${production.editor_approved_version} — ${formatDate(production.editor_approved_at)}` : 'Not yet approved'}</p>
                 </div>
-              )}
+                <div className="rounded-2xl border border-slate-200 p-3">
+                  <p className="text-[10px] font-bold uppercase text-slate-400">Author Final Approval</p>
+                  <p className="text-slate-700">{production.author_final_approved_version ? `Proof v${production.author_final_approved_version} — ${formatDate(production.author_final_approved_at)}` : 'Not yet approved'}</p>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowOverride((v) => !v)}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-400 hover:text-slate-600"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5" /> Coordinator Override
+                </button>
+                {showOverride && (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs text-slate-500">Force the review routing for a stuck manuscript. Every override is permanently logged with your reason.</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={overrideStatus}
+                        onChange={(e) => setOverrideStatus(e.target.value as ProductionStatus)}
+                        className="rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:border-[#008751]"
+                      >
+                        <option value="">Target status...</option>
+                        {OVERRIDE_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      <input
+                        value={overrideReason}
+                        onChange={(e) => setOverrideReason(e.target.value)}
+                        placeholder="Reason for override (required)..."
+                        className="flex-1 min-w-[200px] rounded-full border border-slate-200 px-4 py-2 text-xs outline-none focus:border-[#008751]"
+                      />
+                      <button
+                        disabled={busy || !overrideStatus || !overrideReason.trim()}
+                        onClick={handleOverride}
+                        className="rounded-full bg-amber-700 px-4 py-2 text-xs font-bold text-white hover:bg-amber-800 disabled:opacity-40"
+                      >
+                        Apply Override
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {(proofs.length > 0 || corrections.length > 0) && (
+            <div className="bg-white border border-slate-200 rounded-3xl p-6">
+              <ProofReviewTimeline manuscriptId={manuscriptId} variant="full" />
             </div>
           )}
 

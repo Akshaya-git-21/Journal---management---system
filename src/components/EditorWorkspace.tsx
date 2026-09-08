@@ -657,10 +657,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
     return () => { cancelled = true; unsubscribe(); };
   }, [manuscript.id]);
 
-  // True once the Coordinator has routed a correction to this Editor and
-  // they haven't yet submitted their editorial feedback on it.
-  const pendingProductionVerification = !!production?.sent_to_editor_at &&
-    !productionCorrections.find((c) => c.id === production.sent_to_editor_correction_id)?.editor_feedback_at;
+  // Module 69: whether a proof is currently awaiting this Editor's decision
+  // is now the single production_status value PROOF_SENT_TO_EDITOR --
+  // backend-enforced by editor_review_proof(), not inferred from a
+  // once-only feedback flag on a specific correction row (which would never
+  // clear once the Editor's decision moved the workflow on).
+  const pendingProductionVerification = production?.production_status === 'PROOF_SENT_TO_EDITOR';
 
   // A notification click can request a specific tab (see EditorWorkspace's
   // JMS_OPEN_MANUSCRIPT_EVENT listener) -- apply it once on mount and let
@@ -1109,7 +1111,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                 const reviewsSubmittedCount = activeReviews.filter(r => r.status === 'SUBMITTED').length;
 
                 const getStatusDescription = (): string => {
-                  if (pendingProductionVerification) return 'The Coordinator sent you the Author\'s proof corrections to verify.';
+                  if (pendingProductionVerification) return 'A proof is ready for your review -- Approve/Publish or request corrections.';
                   if (!evaluationDone) return 'Complete your editorial screening evaluation.';
                   if (readyToSelectReviewers) return 'Select 2 reviewers to begin peer review.';
                   if (isRevisionReviewPage) return `Revision ${revisionN} is ready for your review.`;
@@ -1145,8 +1147,8 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
 
                         {pendingProductionVerification && (
                           <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
-                            <p className="text-sm font-bold text-teal-900 mb-1">Proofreading corrections ready for your review</p>
-                            <p className="text-xs text-teal-800 mb-3">The Coordinator sent over the Author's proof corrections (and the current proof PDF) for you to verify.</p>
+                            <p className="text-sm font-bold text-teal-900 mb-1">Proof ready for your review</p>
+                            <p className="text-xs text-teal-800 mb-3">Approve/Publish sends it to the Author for final review; Corrections Required sends it back to the GD Member.</p>
                             <button
                               onClick={() => setSidebarSection('production')}
                               className="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2.5 rounded-lg transition"

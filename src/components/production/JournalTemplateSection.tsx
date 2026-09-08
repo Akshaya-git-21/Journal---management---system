@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileText, Upload, Download, Eye, Loader2, Trash2, ClipboardCheck } from 'lucide-react';
+import { FileText, Upload, Download, Eye, Loader2, Trash2, ClipboardCheck, Pencil } from 'lucide-react';
 import { JournalTemplateRow, getJournalTemplates, uploadJournalTemplate, deleteJournalTemplate } from '../../lib/production';
 
 function formatDate(iso: string | null | undefined) {
@@ -21,7 +21,6 @@ export default function JournalTemplateSection({ canUpload }: { canUpload: boole
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
-  const [showHistory, setShowHistory] = useState(false);
 
   const load = async () => {
     try {
@@ -82,7 +81,7 @@ export default function JournalTemplateSection({ canUpload }: { canUpload: boole
         {canUpload && (
           <label className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold text-white shadow-sm self-start cursor-pointer ${uploading ? 'bg-slate-400 cursor-not-allowed' : 'bg-[#008751] hover:bg-[#007043]'}`}>
             {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            {uploading ? 'Uploading...' : current ? 'Replace Template' : 'Upload Template'}
+            {uploading ? 'Uploading...' : 'Upload Template'}
             <input
               type="file"
               accept="application/pdf,.pdf"
@@ -116,27 +115,43 @@ export default function JournalTemplateSection({ canUpload }: { canUpload: boole
                   <p className="text-xs text-slate-400 mt-1">Uploaded {formatDate(current.uploaded_at)}</p>
                 </div>
               </div>
-              {current.public_url && (
-                <div className="flex items-center gap-2 shrink-0">
-                  <a href={current.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-                    <Eye className="w-3.5 h-3.5" /> View
-                  </a>
-                  <a href={current.public_url} download className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-                    <Download className="w-3.5 h-3.5" /> Download
-                  </a>
-                </div>
-              )}
+              <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                {current.public_url && (
+                  <>
+                    <a href={current.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                      <Eye className="w-3.5 h-3.5" /> View
+                    </a>
+                    <a href={current.public_url} download className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                      <Download className="w-3.5 h-3.5" /> Download
+                    </a>
+                  </>
+                )}
+                {canUpload && (
+                  <>
+                    <label className={`inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold cursor-pointer ${uploading ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 hover:bg-slate-50'}`}>
+                      {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Pencil className="w-3.5 h-3.5" />} Edit
+                      <input
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        className="hidden"
+                        disabled={uploading}
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }}
+                      />
+                    </label>
+                    <button onClick={() => handleDelete(current)} className="inline-flex items-center gap-1.5 rounded-full border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50">
+                      <Trash2 className="w-3.5 h-3.5" /> Delete
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
           {history.length > 0 && (
             <div className="bg-white border border-slate-200 rounded-2xl p-6">
-              <button type="button" onClick={() => setShowHistory((v) => !v)} className="text-xs font-bold text-slate-500 hover:text-slate-800">
-                {showHistory ? 'Hide' : 'Show'} previous versions ({history.length})
-              </button>
-              {showHistory && (
-                <div className="mt-4 space-y-2">
-                  {history.map((t) => (
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-4">All Templates ({templates.length})</p>
+              <div className="space-y-2">
+                {history.map((t) => (
                     <div key={t.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 px-4 py-2.5 text-sm">
                       <div>
                         <p className="text-slate-700">{t.file_name}</p>
@@ -155,9 +170,8 @@ export default function JournalTemplateSection({ canUpload }: { canUpload: boole
                         )}
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                ))}
+              </div>
             </div>
           )}
         </>

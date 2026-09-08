@@ -13,7 +13,22 @@ export type ProductionStatus =
   | 'PROOF_GENERATED' | 'PROOF_SUBMITTED_TO_COORDINATOR' | 'PROOF_SENT_TO_AUTHOR' | 'AUTHOR_PROOF_REVIEW'
   | 'CORRECTIONS_SUBMITTED' | 'PRODUCTION_REVIEW' | 'PROOF_UPDATED'
   | 'CLARIFICATION_REQUESTED' | 'AUTHOR_APPROVED' | 'READY_FOR_PUBLICATION' | 'PUBLISHED'
-  | 'CORRECTIONS_IN_PROGRESS' | 'FINAL_PROOF_READY';
+  | 'CORRECTIONS_IN_PROGRESS' | 'FINAL_PROOF_READY'
+  // Module 69 -- Proof -> GD -> Author -> Editor -> Final Author Approval loop.
+  | 'PROOF_SENT_TO_EDITOR' | 'EDITOR_CORRECTIONS_REQUESTED'
+  | 'PROOF_SENT_TO_AUTHOR_FINAL' | 'AUTHOR_FINAL_CORRECTIONS_REQUESTED'
+  // Module 77 -- Editor's corrections wait for an explicit "Send to GD Member" click.
+  | 'EDITOR_CORRECTIONS_PENDING_SEND'
+  // Module 78 -- GD's corrected proof (editor-stage loop) waits for an explicit "Send to Editor" click.
+  | 'PROOF_READY_FOR_EDITOR'
+  // Module 79 -- Editor's approval waits for an explicit "Send for Author Confirmation" click.
+  | 'EDITOR_APPROVED';
+
+/** Whose turn it is to act next, independent of the exact production_status
+ * string -- set atomically by the Module 69 RPCs, never inferred client-side.
+ * Null while the ball is with the GD Member (uploading) or Coordinator
+ * (legacy pre-Module-69 stages). See 0069_editor_final_approval_workflow.sql. */
+export type PendingReviewRole = 'AUTHOR_FIRST' | 'EDITOR' | 'AUTHOR_FINAL' | null;
 
 export interface ProductionRow {
   manuscript_id: string;
@@ -41,6 +56,35 @@ export interface ProductionRow {
   accepted_at: string;
   created_at: string;
   updated_at: string;
+  /** Module 69 -- the proof version the assigned Editor most recently
+   * approved; null once superseded by a newer upload or a fresh Author
+   * Final Review correction request (Rule 6). Publication requires this to
+   * equal author_final_approved_version and current_proof_version. */
+  editor_approved_version: number | null;
+  editor_approved_at: string | null;
+  editor_approved_by: string | null;
+  /** Module 69 -- the proof version the Author most recently gave FINAL
+   * approval to (distinct from the first-round author_approve_proof). */
+  author_final_approved_version: number | null;
+  author_final_approved_at: string | null;
+  /** Module 69 -- single source of truth for whose turn it is; see
+   * PendingReviewRole. */
+  pending_review_role: PendingReviewRole;
+  /** Module 71 -- the task window the Coordinator set when assigning (or
+   * reassigning) the GD Member; reset to null on every reassignment. */
+  assigned_start_date: string | null;
+  assigned_end_date: string | null;
+  /** Module 71 -- set once the assigned GD Member accepts the assignment;
+   * null again after a reassignment (a new GD Member must accept fresh). A
+   * hard gate client-side: nothing else in production is usable before this. */
+  gd_accepted_at: string | null;
+  /** Module 71 -- which journal template (journal_templates.id) the GD
+   * Member picked for this manuscript, chosen after accepting. */
+  selected_template_id: string | null;
+  /** Module 71 -- the GD Member's own self-reported status while they work
+   * offline; purely informational for the Coordinator, independent of
+   * production_status/the checklist. */
+  gd_work_status: 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED';
 }
 
 export type ChecklistItemStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
@@ -98,6 +142,33 @@ export interface CorrectionRow {
   editor_verified: boolean | null;
   editor_feedback_by: string | null;
   editor_feedback_at: string | null;
+  /** Module 69 -- who requested this correction round: the Author (first
+   * review or Final Review) or the Editor. Null on legacy pre-Module-69 rows. */
+  correction_source: 'AUTHOR' | 'EDITOR' | null;
+}
+
+export type ProofReviewerRole = 'AUTHOR_FIRST' | 'EDITOR' | 'AUTHOR_FINAL' | 'COORDINATOR_OVERRIDE';
+export type ProofReviewDecision = 'APPROVED' | 'CORRECTIONS_REQUESTED' | 'OVERRIDE';
+
+/** Module 69 -- one row per Author/Editor/Coordinator-override decision,
+ * append-only and never overwritten (Rule 7's full history). See
+ * manuscript_proof_reviews in 0069_editor_final_approval_workflow.sql. */
+export interface ProofReviewRow {
+  id: string;
+  manuscript_id: string;
+  proof_version: number;
+  reviewer_role: ProofReviewerRole;
+  decision: ProofReviewDecision;
+  comments: string;
+  attachment_storage_path: string | null;
+  attachment_public_url: string | null;
+  attachment_file_name: string | null;
+  correction_source: 'AUTHOR' | 'EDITOR' | null;
+  decided_by: string;
+  decided_at: string;
+  /** Set when a later upload/decision invalidated this approval (Rule 6). */
+  superseded_at: string | null;
+  superseded_by_version: number | null;
 }
 
 /** Journal-wide PDF template (Task 7) -- not per-manuscript. Coordinator
@@ -131,8 +202,27 @@ export const startProduction = (manuscriptId: string) =>
  * manuscript's production work. See assign_gd_member() in
  * 0051_assign_gd_member.sql -- also the sole gate for GD Member visibility
  * (a GD Member sees only manuscripts where assigned_to = their own id). */
-export const assignGDMember = (manuscriptId: string, gdMemberId: string) =>
-  rpcOrThrow<ProductionRow>(supabase.rpc('assign_gd_member', { p_manuscript_id: manuscriptId, p_gd_member_id: gdMemberId }));
+export const assignGDMember = (manuscriptId: string, gdMemberId: string, startDate: string, endDate: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('assign_gd_member', {
+    p_manuscript_id: manuscriptId, p_gd_member_id: gdMemberId, p_start_date: startDate, p_end_date: endDate
+  }));
+
+/** GD Member-only (Module 71): accepts the production assignment -- a hard
+ * gate the client enforces before showing any other production UI. See
+ * gd_member_accept_assignment() in 0071_gd_member_accept_template_status.sql. */
+export const gdMemberAcceptAssignment = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('gd_member_accept_assignment', { p_manuscript_id: manuscriptId }));
+
+/** GD Member-only (Module 71): picks which journal template they're using
+ * for this manuscript -- only valid after accepting. */
+export const gdMemberSelectTemplate = (manuscriptId: string, templateId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('gd_member_select_template', { p_manuscript_id: manuscriptId, p_template_id: templateId }));
+
+/** GD Member-only (Module 71): self-reported NOT_STARTED/IN_PROGRESS/COMPLETED
+ * work status while they do the actual formatting work offline -- purely
+ * informational for the Coordinator, independent of production_status. */
+export const gdMemberSetWorkStatus = (manuscriptId: string, status: 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED') =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('gd_member_set_work_status', { p_manuscript_id: manuscriptId, p_status: status }));
 
 export const updateChecklistItem = (manuscriptId: string, itemKey: string, status: ChecklistItemStatus) =>
   rpcOrThrow<ProductionChecklistItemRow>(supabase.rpc('update_checklist_item', {
@@ -308,6 +398,84 @@ export const productionPublish = (manuscriptId: string, doi: string, volume: str
   rpcOrThrow(supabase.rpc('production_publish', { p_manuscript_id: manuscriptId, p_doi: doi, p_volume: volume, p_issue: issue }));
 
 // ------------------------------------------
+// Module 69 -- Proof -> GD -> Author -> Editor -> Final Author Approval loop
+// ------------------------------------------
+
+/** GD Member-only: single upload entry point for this loop, replacing both
+ * gdMemberUploadProof/gdMemberUploadCorrectedProof for it. The RPC itself
+ * decides routing -- the very first version always goes to the Author, any
+ * correction-round version always goes to the Editor, regardless of who
+ * requested the correction (Rule 1). Also atomically invalidates any
+ * standing Editor/Author-final approval (Rule 6). See
+ * gd_member_upload_proof_v2() in 0069_editor_final_approval_workflow.sql. */
+export const gdMemberUploadProofV2 = (manuscriptId: string, storagePath: string, publicUrl: string, fileName: string, notes: string = '') =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('gd_member_upload_proof_v2', {
+    p_manuscript_id: manuscriptId, p_storage_path: storagePath, p_public_url: publicUrl, p_file_name: fileName, p_notes: notes
+  }));
+
+/** Editor-only: the assigned Editor's decision on a proof at
+ * PROOF_SENT_TO_EDITOR -- always exactly these two actions (Rule 2).
+ * 'APPROVE' routes to Author Final Review, never publishes directly
+ * (Rule 3); 'CORRECTIONS_REQUIRED' routes back to the GD Member and loops
+ * to the Editor again, never to the Author. See editor_review_proof() in
+ * 0069_editor_final_approval_workflow.sql. */
+export const editorReviewProof = (manuscriptId: string, decision: 'APPROVE' | 'CORRECTIONS_REQUIRED', comments: string = '') =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('editor_review_proof', { p_manuscript_id: manuscriptId, p_decision: decision, p_comments: comments }));
+
+/** Author-only: Final Review decision on a proof the Editor has approved
+ * (PROOF_SENT_TO_AUTHOR_FINAL only). 'APPROVE' requires the Editor's
+ * approval to still be current for this exact version and sets the
+ * manuscript to READY_FOR_PUBLICATION (Rule 5). 'CORRECTIONS_REQUIRED'
+ * immediately invalidates the Editor's approval (Rule 6) and always routes
+ * the next GD upload back to the Editor, never straight back to the Author.
+ * See author_final_review_proof() in 0069_editor_final_approval_workflow.sql. */
+export const authorFinalReviewProof = (
+  manuscriptId: string, decision: 'APPROVE' | 'CORRECTIONS_REQUIRED', comments: string = '',
+  storagePath: string = '', publicUrl: string = '', fileName: string = ''
+) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('author_final_review_proof', {
+    p_manuscript_id: manuscriptId, p_decision: decision, p_comments: comments,
+    p_storage_path: storagePath, p_public_url: publicUrl, p_file_name: fileName
+  }));
+
+/** Coordinator-only: narrow escape hatch to force this loop's
+ * production_status/pending_review_role when a manuscript is stuck (e.g.
+ * wrong file uploaded). Every override is itself permanently logged in
+ * manuscript_proof_reviews with the given reason. See
+ * coordinator_override_route() in 0069_editor_final_approval_workflow.sql. */
+export const coordinatorOverrideRoute = (manuscriptId: string, newStatus: ProductionStatus, reason: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_override_route', { p_manuscript_id: manuscriptId, p_new_status: newStatus, p_reason: reason }));
+
+/** Coordinator-only: re-sends the "corrections waiting for you" notification
+ * to the assigned GD Member -- doesn't change any routing or
+ * production_status (that already happened automatically), just a manual
+ * nudge for "they say they never saw it". See coordinator_notify_gd_member()
+ * in 0074_coordinator_notify_gd_member.sql. */
+export const coordinatorNotifyGDMember = (manuscriptId: string, note: string = '') =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_notify_gd_member', { p_manuscript_id: manuscriptId, p_note: note }));
+
+/** Coordinator-only (Module 76): explicit "Send to Editor for Approval"
+ * click once the Author has approved (AUTHOR_APPROVED) -- Author approval no
+ * longer auto-routes to the Editor. See coordinator_send_to_editor() in
+ * 0076_coordinator_sends_to_editor.sql. */
+export const coordinatorSendToEditor = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_send_to_editor', { p_manuscript_id: manuscriptId }));
+
+/** Editor-only (Module 77): explicit "Send to GD Member" click after
+ * submitting editorial corrections (EDITOR_CORRECTIONS_PENDING_SEND) --
+ * corrections no longer auto-route to the GD Member. See
+ * editor_send_corrections_to_gd() in 0077_editor_sends_to_gd_member.sql. */
+export const editorSendCorrectionsToGD = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('editor_send_corrections_to_gd', { p_manuscript_id: manuscriptId }));
+
+/** Coordinator-only (Module 79): explicit "Send for Author Confirmation"
+ * click once the Editor has approved (EDITOR_APPROVED) -- Editor approval no
+ * longer auto-routes to the Author's Final Review. See
+ * coordinator_send_to_author_final() in 0079_coordinator_sends_to_author_final.sql. */
+export const coordinatorSendToAuthorFinal = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_send_to_author_final', { p_manuscript_id: manuscriptId }));
+
+// ------------------------------------------
 // File uploads -- same manuscript-files bucket, new path prefix
 // ------------------------------------------
 
@@ -402,6 +570,14 @@ export async function getCorrections(manuscriptId: string): Promise<CorrectionRo
   return data ?? [];
 }
 
+/** Module 69 -- full append-only decision history for the proof loop, newest
+ * first. See manuscript_proof_reviews in 0069_editor_final_approval_workflow.sql. */
+export async function getProofReviews(manuscriptId: string): Promise<ProofReviewRow[]> {
+  const { data, error } = await supabase.from('manuscript_proof_reviews').select('*').eq('manuscript_id', manuscriptId).order('decided_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
 let productionChannelSeq = 0;
 
 // Unique channel name per call -- same fix as subscribeToManuscripts() in
@@ -418,6 +594,7 @@ export function subscribeToProduction(onChange: () => void): () => void {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_production_checklist' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_proofs' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_production_corrections' }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_proof_reviews' }, onChange)
     .subscribe();
   return () => { supabase.removeChannel(channel); };
 }
