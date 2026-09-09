@@ -132,6 +132,11 @@ export function DecisionTab({
   const [editorReviewerActions, setEditorReviewerActions] = useState<EditorReviewerActionRow[]>([]);
   const [sendingInvitations, setSendingInvitations] = useState(false);
   const [sendInvitationsError, setSendInvitationsError] = useState('');
+  // Hide the card the instant the invitations actually send, instead of
+  // waiting on onWorkflowChange()'s full manuscript/reviewer refetch to
+  // come back -- that round trip made the card sit there for several extra
+  // seconds after the click had already succeeded.
+  const [invitationsJustSent, setInvitationsJustSent] = useState(false);
   // "Choose Publisher" gate -- shown once READY_FOR_PUBLICATION, mirrors the
   // GD Member assignment gate above (pick existing or create new), just
   // targeting the Publisher role and send_to_publisher() instead.
@@ -184,6 +189,7 @@ export function DecisionTab({
   useEffect(() => {
     getSuggestedReviewers(manuscript.id).then(setSuggestedReviewers).catch(() => setSuggestedReviewers([]));
     getEditorReviewerActions(manuscript.id).then(setEditorReviewerActions).catch(() => setEditorReviewerActions([]));
+    setInvitationsJustSent(false);
   }, [manuscript.id]);
 
   useEffect(() => {
@@ -294,6 +300,7 @@ export function DecisionTab({
     setSendInvitationsError('');
     try {
       await coordinatorSendReviewerInvitations(manuscript.id);
+      setInvitationsJustSent(true);
       onWorkflowChange();
     } catch (e: any) {
       setSendInvitationsError(e.message || 'Failed to send reviewer invitations');
@@ -1016,7 +1023,7 @@ export function DecisionTab({
       {/* Moved here from OverviewTab.tsx's "Current Status" card -- every
           Coordinator action now lives on this tab instead of being split
           across Overview and Decision. */}
-      {!isEditor && readyToInviteReviewers && (
+      {!isEditor && readyToInviteReviewers && !invitationsJustSent && (
         <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
           <p className="text-sm font-bold text-teal-900 mb-1">
             Editor selected {pendingReviewerInvites.length} reviewer{pendingReviewerInvites.length === 1 ? '' : 's'} — ready to invite

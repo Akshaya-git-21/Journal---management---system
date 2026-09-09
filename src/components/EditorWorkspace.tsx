@@ -2675,21 +2675,94 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                   <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
                     Decision Status
                   </h3>
-                  {assignment.status === 'DECLINED' ? (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                      <p className="text-xs font-semibold text-red-700 text-center">✕ Assignment Declined</p>
-                    </div>
-                  ) : evaluationSubmitted ? (
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-                      <p className="text-xs font-semibold text-emerald-700 text-center">✓ Evaluation Submitted</p>
-                      <p className="text-xs text-emerald-600 text-center mt-1">Awaiting coordinator action</p>
-                    </div>
-                  ) : (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <p className="text-xs font-semibold text-blue-700 text-center">In Progress</p>
-                      <p className="text-xs text-blue-600 text-center mt-1">Complete your evaluation below</p>
-                    </div>
-                  )}
+                  {(() => {
+                    // Was a single static "Evaluation Submitted / Awaiting
+                    // coordinator action" box that never changed again once
+                    // the screening evaluation was submitted -- it kept
+                    // showing that even after the Coordinator invited
+                    // reviewers, peer review started, a decision was made, or
+                    // the manuscript reached a terminal state. This mirrors
+                    // the same live status logic already used for the
+                    // "Current Status" tab and its Status line (editorHas
+                    // SuggestedReviewers / recommendationIsCurrent / round
+                    // scoping), so both places track the real decision flow.
+                    if (assignment.status === 'DECLINED') {
+                      return (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-red-700 text-center">✕ Assignment Declined</p>
+                        </div>
+                      );
+                    }
+                    if (['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status)) {
+                      const isRejected = manuscript.status === 'REJECTED';
+                      return (
+                        <div className={`rounded-lg p-4 border ${isRejected ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                          <p className={`text-xs font-semibold text-center ${isRejected ? 'text-red-700' : 'text-emerald-700'}`}>
+                            {manuscript.status === 'ACCEPTED' ? '✓ Accepted' : manuscript.status === 'PUBLISHED' ? '✓ Published' : '✕ Rejected'}
+                          </p>
+                        </div>
+                      );
+                    }
+                    if (manuscript.status === 'REVISION_REQUESTED') {
+                      return (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-amber-700 text-center">Revision Requested</p>
+                          <p className="text-xs text-amber-600 text-center mt-1">Waiting for the author's response</p>
+                        </div>
+                      );
+                    }
+                    const editorHasSuggestedReviewers = (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR');
+                    if (editorHasSuggestedReviewers && manuscript.status === 'EDITOR_REVIEW') {
+                      return (
+                        <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-teal-700 text-center">Reviewers Selected</p>
+                          <p className="text-xs text-teal-600 text-center mt-1">Waiting for the Coordinator to send invitations</p>
+                        </div>
+                      );
+                    }
+                    if (manuscript.status === 'UNDER_REVIEW') {
+                      return (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-blue-700 text-center">Peer Review Underway</p>
+                          <p className="text-xs text-blue-600 text-center mt-1">Waiting for reviewer reports</p>
+                        </div>
+                      );
+                    }
+                    const currentPeerReviewRoundNumber = latestRevisionForReview?.origin === 'PEER_REVIEW' ? (latestRevisionForReview.revision_number || 0) : 0;
+                    const activeReviewsForStatus = (reviewerAssignments || []).filter(
+                      r => r.status !== 'DECLINED' && (r.revision_number || 0) === currentPeerReviewRoundNumber
+                    );
+                    const latestReviewSubmittedAtForStatus = activeReviewsForStatus.reduce<string | null>(
+                      (latest, r) => (r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest), null
+                    );
+                    const recommendationIsCurrentForStatus = !!assignment.recommendation && !!assignment.recommendation_submitted_at && (
+                      activeReviewsForStatus.length > 0
+                        ? (!!latestReviewSubmittedAtForStatus && assignment.recommendation_submitted_at > latestReviewSubmittedAtForStatus)
+                        : (!!latestRevisionForReview && assignment.recommendation_submitted_at > latestRevisionForReview.requested_at)
+                    );
+                    if (recommendationIsCurrentForStatus && ['EDITOR_REVIEW', 'AWAITING_DECISION'].includes(manuscript.status)) {
+                      return (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-emerald-700 text-center">✓ Decision Submitted</p>
+                          <p className="text-xs text-emerald-600 text-center mt-1">Awaiting coordinator action</p>
+                        </div>
+                      );
+                    }
+                    if (!evaluationSubmitted) {
+                      return (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-blue-700 text-center">In Progress</p>
+                          <p className="text-xs text-blue-600 text-center mt-1">Complete your evaluation below</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                        <p className="text-xs font-semibold text-emerald-700 text-center">✓ Evaluation Submitted</p>
+                        <p className="text-xs text-emerald-600 text-center mt-1">Awaiting coordinator action</p>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* EDITOR DECISION */}
