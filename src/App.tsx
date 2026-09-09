@@ -346,12 +346,13 @@ export default function App() {
       )}
 
       {currentScreen === 'WORKSPACE' && (() => {
-        // Coordinator and GD Member use a fixed dashboard shell (sidebar +
-        // internally scrolling content, like a desktop app) -- everything
-        // else uses ordinary page scrolling. Forcing the shell on the others
-        // would clip their content, since they're built assuming the page
-        // itself grows and scrolls (min-h-screen), not a fixed-height shell.
-        const isShell = loggedInUser?.role === 'COORDINATOR' || loggedInUser?.role === 'GD_MEMBER';
+        // Coordinator, GD Member, and Publisher use a fixed dashboard shell
+        // (sidebar + internally scrolling content, like a desktop app) --
+        // everything else uses ordinary page scrolling. Forcing the shell on
+        // the others would clip their content, since they're built assuming
+        // the page itself grows and scrolls (min-h-screen), not a
+        // fixed-height shell.
+        const isShell = loggedInUser?.role === 'COORDINATOR' || loggedInUser?.role === 'GD_MEMBER' || loggedInUser?.role === 'PUBLISHER';
         const shellClass = isShell ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-grow flex flex-col';
         return (
         <div className={shellClass}>

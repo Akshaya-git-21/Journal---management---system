@@ -473,6 +473,14 @@ export default function OjsSubmissionDetail({
         // page reload, even though this table is already subscribed to.
         setManuscriptDetails((prev) => prev ? { ...prev, revisions: updates.revisions! } : null);
       }
+      if (updates.statusHistory) {
+        // Same gap as revisions above -- the subscription already fires on
+        // every manuscript_status_history insert, but nothing applied it to
+        // state, so getRealSubmissionTimeline() (the Submission Timeline
+        // card) kept computing each stage's timestamp from stale history
+        // until a full page reload.
+        setManuscriptDetails((prev) => prev ? { ...prev, statusHistory: updates.statusHistory! } : null);
+      }
       if (updates.discussions) {
         // manuscriptDetails.discussions itself was never updated here before
         // -- only the WhatsApp-style panel's separate allMessages/
@@ -1095,6 +1103,12 @@ export default function OjsSubmissionDetail({
                   const decisionLetterEntry = manuscriptDetails.statusHistory?.find(h => h.to_status === status && h.note);
                   const isAccepted = status === 'ACCEPTED';
                   const isRejected = status === 'REJECTED';
+                  // The acceptance decision letter (Editor Comments, e.g. "do
+                  // this corrections") is only relevant while production
+                  // hasn't started yet -- once the GD Member has begun acting
+                  // on it (productionStatus moves past NOT_STARTED), it's
+                  // been addressed and shouldn't keep showing indefinitely.
+                  const justAccepted = isAccepted && (!productionStatus || productionStatus === 'NOT_STARTED');
                   // manuscripts.status stays REVISION_REQUESTED even after the
                   // author submits -- only the revision row itself flips from
                   // AWAITING_AUTHOR_UPLOAD to REVISION_SUBMITTED, until the
@@ -1118,7 +1132,7 @@ export default function OjsSubmissionDetail({
                               `Revision Required — ${meta.label}`}
                           </p>
                           <p className="text-sm font-semibold text-slate-700 mt-1">Status: {meta.label}</p>
-                          {isAccepted && <p className="text-sm font-semibold text-slate-700 mt-1">Decision: Accepted</p>}
+                          {justAccepted && <p className="text-sm font-semibold text-slate-700 mt-1">Decision: Accepted</p>}
                           {revisionAlreadySubmitted && <p className="text-sm text-slate-600 mt-1">Waiting for the editorial team to review your submission.</p>}
                           {meta.nextStep && <p className="text-sm text-slate-600 mt-1">Next step: {meta.nextStep}</p>}
                         </div>
@@ -1150,7 +1164,7 @@ export default function OjsSubmissionDetail({
                           </button>
                         )}
                       </div>
-                      {decisionLetterEntry?.note && (
+                      {justAccepted && decisionLetterEntry?.note && (
                         <p className="text-sm text-slate-700 mt-3 whitespace-pre-wrap border-t border-black/10 pt-3">{decisionLetterEntry.note}</p>
                       )}
                     </div>
@@ -1320,7 +1334,7 @@ export default function OjsSubmissionDetail({
                 </div>
 
                 {/* Uploaded Files and Pre-Review Discussions Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full">
+                <div className="grid grid-cols-1 gap-4 w-full">
                   {/* Uploaded Files Panel */}
                   <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl p-4 shadow-xs text-left flex flex-col">
                     <div className="shrink-0">
@@ -1537,9 +1551,11 @@ export default function OjsSubmissionDetail({
                     </div>
                   </div>
 
-                  {/* Discussions Column */}
+                  {/* Discussions Column -- removed from view per request; code kept
+                      intact and disabled rather than deleted. */}
+                  {false && (
                   <div className="flex flex-col gap-3.5">
-                    
+
                     {activeThreadId === null ? (
                       /* ========== DISCUSSION FORUM THREAD LIST (SECOND IMAGE) ========== */
                       <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl overflow-hidden shadow-xs text-left p-4 flex flex-col justify-between h-[500px] relative">
@@ -2286,6 +2302,7 @@ export default function OjsSubmissionDetail({
                     )}
 
                   </div>
+                  )}
                 </div>
 
               </div>

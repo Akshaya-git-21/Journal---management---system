@@ -191,7 +191,20 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
               <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...
             </div>
           ) : selected ? (
-            <ManuscriptDetail row={selected} onBack={() => setSelectedManuscriptId(null)} onChanged={load} />
+            <ManuscriptDetail
+              row={selected}
+              onBack={() => setSelectedManuscriptId(null)}
+              onChanged={load}
+              onReviewSubmitted={() => {
+                // After submitting, "Back to assignments" should land
+                // somewhere that actually shows the just-completed review
+                // (with its "View Review" button) instead of the Action
+                // Required tab, which excludes SUBMITTED assignments.
+                load();
+                setActiveTab('COMPLETED');
+                setSelectedManuscriptId(null);
+              }}
+            />
           ) : activeTab === 'INVITES' ? (
             <ManuscriptList rows={rows.filter((r) => r.assignment.status === 'INVITED')} onOpen={setSelectedManuscriptId} />
           ) : activeTab === 'HISTORY' ? (
@@ -465,7 +478,7 @@ function PriorRoundsContext({ priorRounds }: { priorRounds: ReviewerAssignmentRo
   );
 }
 
-function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => void; onChanged: () => void }) {
+function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: Row; onBack: () => void; onChanged: () => void; onReviewSubmitted: () => void }) {
   const { manuscript, assignment, priorRounds } = row;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -567,15 +580,6 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
               </div>
             </div>
           </div>
-          {assignment.status === 'ACCEPTED' && (
-            <button
-              onClick={() => setShowEvaluation(true)}
-              className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white font-bold text-xs rounded-lg transition-all whitespace-nowrap flex items-center gap-1.5"
-            >
-              <ClipboardCheck className="w-3.5 h-3.5" />
-              Open Evaluation
-            </button>
-          )}
         </div>
         <p className="text-sm text-slate-600 leading-relaxed">{manuscript.abstract}</p>
 
@@ -615,6 +619,18 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {assignment.status === 'ACCEPTED' && (
+          <div className="mt-5 pt-5 border-t border-slate-100 flex justify-end">
+            <button
+              onClick={() => setShowEvaluation(true)}
+              className="px-4 py-2 bg-[#008751] hover:bg-[#007043] text-white font-bold text-xs rounded-lg transition-all whitespace-nowrap flex items-center gap-1.5"
+            >
+              <ClipboardCheck className="w-3.5 h-3.5" />
+              Open Evaluation
+            </button>
           </div>
         )}
       </div>
@@ -684,7 +700,7 @@ function ManuscriptDetail({ row, onBack, onChanged }: { row: Row; onBack: () => 
         <ReviewForm
           manuscript={manuscript}
           assignmentId={assignment.id}
-          onSubmitted={onChanged}
+          onSubmitted={onReviewSubmitted}
           isReReview={assignment.revision_number > 0}
           revisionNumber={assignment.revision_number}
           open={showEvaluation}

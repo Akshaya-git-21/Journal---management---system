@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import TuliticsLogo from './TuliticsLogo';
 import { NavGroup, NavItem } from './SidebarNavGroup';
 import {
   listManuscripts, subscribeToManuscripts, markPublished, uploadPublishedGalley, getContributors,
   getEditorAssignments, getReviewerAssignments, getRevisions, getProfilesByIds, listActiveProfilesByRole,
+  publisherAcceptAssignment,
   ManuscriptRow, ContributorRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, ProfileRow
 } from '../lib/workflow';
-import { listProduction, subscribeToProduction, setPublisherTaskStatus, ProductionRow } from '../lib/production';
+import { listProduction, subscribeToProduction, setPublisherTaskStatus, getProofs, ProductionRow } from '../lib/production';
+import { supabase } from '../lib/supabase';
 import {
   FileText, CheckCircle2, XCircle, AlertTriangle, Hash, BookOpen, Settings, Users, CheckSquare,
   LayoutGrid, ClipboardList, Clock, History, Eye, ExternalLink, BarChart3, Download, ShieldAlert,
@@ -76,6 +77,10 @@ async function analyzePdf(file: File): Promise<PdfAnalysis> {
 
 export default function PublisherWorkspace({ currentUser }: PublisherWorkspaceProps) {
   const [manuscripts, setManuscripts] = useState<ManuscriptRow[]>([]);
+  // Needed to scope Scheduled Publications / Publication Queue to manuscripts
+  // actually assigned to THIS Publisher -- without it, every active
+  // Publisher was seeing every manuscript any Publisher had been assigned.
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('QUEUE');
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -108,6 +113,8 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
   const [loadingPublishedDetails, setLoadingPublishedDetails] = useState(false);
   const [taskStatusBusy, setTaskStatusBusy] = useState(false);
   const [taskStatusError, setTaskStatusError] = useState('');
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [acceptError, setAcceptError] = useState('');
 
   const [editors, setEditors] = useState<ProfileRow[]>([]);
   const [reviewers, setReviewers] = useState<ProfileRow[]>([]);
@@ -139,21 +146,26 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
   };
 
   useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setCurrentUserId(data.user?.id ?? null)).catch(() => setCurrentUserId(null));
+  }, []);
+
+  useEffect(() => {
     load();
     const unsubA = subscribeToManuscripts(load);
     const unsubB = subscribeToProduction(load);
     return () => { unsubA(); unsubB(); };
   }, []);
 
-  // A manuscript with a GD Member assigned (see assign_gd_member() /
-  // 0051_assign_gd_member.sql) enters the Publisher's Production Queue
-  // immediately, in addition to the legacy "Send to Publisher" trigger --
-  // both paths land in the same queue/wizard below.
-  const gdAssignedManuscriptIds = new Set(production.filter((p) => !!p.assigned_to).map((p) => p.manuscript_id));
+  // Module 83: being assigned a Publisher (send_to_publisher) only lands a
+  // manuscript in Scheduled Publications -- it doesn't reach Publication
+  // Queue (and the actual 4-step publish wizard) until the Publisher
+  // explicitly clicks "Proceed" (publisher_accept_assignment), which sets
+  // publisher_accepted_at.
   const productionByManuscript = new Map<string, ProductionRow>(production.map((p) => [p.manuscript_id, p]));
-  const queue = manuscripts.filter((m) => m.production_stage === 'SENT_TO_PUBLISHER' || gdAssignedManuscriptIds.has(m.id));
+  const assignedToMe = (m: ManuscriptRow) => !!currentUserId && m.assigned_publisher_id === currentUserId;
+  const queue = manuscripts.filter((m) => m.status !== 'PUBLISHED' && assignedToMe(m) && !!m.publisher_accepted_at);
   const published = manuscripts.filter((m) => m.status === 'PUBLISHED');
-  const scheduled = manuscripts.filter((m) => productionByManuscript.get(m.id)?.production_status === 'READY_FOR_PUBLICATION');
+  const scheduled = manuscripts.filter((m) => m.status !== 'PUBLISHED' && assignedToMe(m) && !m.publisher_accepted_at);
   const doiPending = queue.filter((m) => !m.doi);
 
   const focusedManuscript = manuscripts.find((m) => m.id === focusedId) || null;
@@ -165,6 +177,7 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
   useEffect(() => {
     const m = displayManuscript;
     if (!m) { setContributors([]); return; }
+    let cancelled = false;
     if (m.status !== 'PUBLISHED') {
       setDoiValue(m.doi || suggestDoi(m.id));
       setVolume(m.volume ? `Volume ${m.volume} (2026)` : 'Volume 14 (2026)');
@@ -176,9 +189,35 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
       setEditingDetails(false);
       setFileError('');
       setWizardStep(0);
+
+      // The manuscript already has an editorially-approved final proof from
+      // the GD/Editor/Author loop -- once the Publisher has proceeded on it,
+      // there's no reason to ask them to upload it again from scratch here.
+      // Pull it in as the Final Article PDF automatically and skip straight
+      // to PDF Validation.
+      getProofs(m.id).then(async (proofs) => {
+        const approved = proofs[0];
+        if (cancelled || !approved?.public_url) return;
+        try {
+          const res = await fetch(approved.public_url);
+          if (!res.ok) throw new Error('failed to fetch');
+          const blob = await res.blob();
+          const file = new File([blob], approved.file_name, { type: 'application/pdf' });
+          if (cancelled) return;
+          const analysis = await analyzePdf(file);
+          if (cancelled) return;
+          setPdfAnalysis(analysis);
+          setUploadedUrl(approved.public_url);
+          setUploadedFileMeta({ name: approved.file_name, sizeLabel: formatBytes(blob.size) });
+          setWizardStep(1);
+        } catch {
+          // Fall back to the manual upload step -- the Publisher can still
+          // upload it themselves if the approved proof can't be fetched.
+        }
+      }).catch(() => {});
     }
-    getContributors(m.id).then(setContributors).catch(() => setContributors([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    getContributors(m.id).then((c) => { if (!cancelled) setContributors(c); }).catch(() => { if (!cancelled) setContributors([]); });
+    return () => { cancelled = true; };
   }, [displayManuscript?.id]);
 
   useEffect(() => {
@@ -214,6 +253,21 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
       setTaskStatusError(e.message || 'Failed to update the production task status.');
     } finally {
       setTaskStatusBusy(false);
+    }
+  };
+
+  const handleAcceptAssignment = async (manuscriptId: string) => {
+    setAcceptingId(manuscriptId);
+    setAcceptError('');
+    try {
+      await publisherAcceptAssignment(manuscriptId);
+      await load();
+      setFocusedId(manuscriptId);
+      setActiveTab('QUEUE');
+    } catch (e: any) {
+      setAcceptError(e.message || 'Failed to accept this assignment.');
+    } finally {
+      setAcceptingId(null);
     }
   };
 
@@ -305,32 +359,16 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
   };
 
   return (
-    <div className="w-full bg-[#f8fafc] min-h-screen text-slate-900 pb-12 flex flex-col font-sans">
-      {/* HEADER */}
-      <header className="bg-white border-b border-slate-200 px-6 py-3.5 flex items-center justify-between sticky top-0 z-40 shadow-sm w-full">
-        <TuliticsLogo iconSize={36} showText={true} textColorClass="text-[#155e42]" subTitle="PUBLISHER WORKSPACE • DISTRIBUTION HUB" usePng={true} />
-        <div className="flex items-center gap-3 text-xs text-slate-500">
-          <span>Logged in as: <strong className="text-slate-900">{currentUser?.name || 'Publisher'}</strong></span>
-          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-700">Publisher</span>
-        </div>
-      </header>
-
-      <div className="w-full max-w-[1600px] mx-auto px-6 sm:px-8 lg:px-10 py-8 flex-grow">
-
-        {banner && (
-          <div className={`mb-6 rounded-2xl p-3.5 text-xs font-medium flex items-center justify-between shadow-sm ${banner.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-50 border border-red-200 text-red-700'}`}>
-            <div className="flex items-center gap-2">
-              {banner.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
-              <span>{banner.text}</span>
-            </div>
-            <button onClick={() => setBanner(null)} className="font-bold hover:underline">Dismiss</button>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-          {/* SIDEBAR */}
-          <aside className="lg:col-span-3 bg-[#00170f] rounded-3xl p-4 space-y-3 shrink-0 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
+    <div id="publisher-workspace" className="flex-1 min-h-0 bg-[#00170f] text-[#111827] flex flex-col font-sans">
+      {/* Same application-shell structure as CoordinatorWorkspace.tsx /
+          GDMemberWorkspace.tsx -- a full-height flex row with a fixed-width
+          sidebar and a rounded white <main> panel, so the sidebar always
+          extends the full viewport height instead of being a content-sized
+          card. The shared RoleSelector bar (logo, notifications, log out)
+          renders above this from App.tsx, same as every other role. */}
+      <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
+        <aside className="w-full md:w-64 bg-[#00170f] border-r border-[#002116] p-4 shrink-0 text-white overflow-y-auto">
+          <div className="space-y-3">
             <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-4 space-y-4">
               <div className="flex items-center gap-3">
                 <span className="p-2 bg-[#008751]/15 border border-[#008751]/30 text-emerald-300 rounded-lg">
@@ -354,47 +392,63 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
                   (the tab content for those still exists below, just
                   unreachable, in case that restriction is ever lifted). */}
               <NavGroup title="Publication Management" icon={<ClipboardList className="w-4 h-4" />} expanded={expandedNavGroups.publication} onToggle={() => toggleNavGroup('publication')}>
-                <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Publication Queue" active={activeTab === 'QUEUE'} count={queue.length} onClick={() => setActiveTab('QUEUE')} />
                 <NavItem icon={<Clock className="w-4 h-4" />} label="Scheduled Publications" active={activeTab === 'SCHEDULED'} count={scheduled.length} onClick={() => setActiveTab('SCHEDULED')} />
+                <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Publication Queue" active={activeTab === 'QUEUE'} count={queue.length} onClick={() => setActiveTab('QUEUE')} />
                 <NavItem icon={<CheckCircle2 className="w-4 h-4" />} label="Published Articles" active={activeTab === 'PUBLISHED'} count={published.length} onClick={() => setActiveTab('PUBLISHED')} />
               </NavGroup>
             </nav>
-          </aside>
+          </div>
+        </aside>
 
-          {/* MAIN CONTENT */}
-          <main className="lg:col-span-9 space-y-6">
+        <div className="flex-1 bg-[#00170f] md:p-3 overflow-hidden flex flex-col min-h-0">
+          <main className="flex-1 bg-slate-50 md:rounded-3xl border border-[#002b1d]/20 p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
+            {banner && (
+              <div className={`rounded-2xl p-3.5 text-xs font-medium flex items-center justify-between shadow-sm ${banner.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+                <div className="flex items-center gap-2">
+                  {banner.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                  <span>{banner.text}</span>
+                </div>
+                <button onClick={() => setBanner(null)} className="font-bold hover:underline">Dismiss</button>
+              </div>
+            )}
 
             {loading ? (
               <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>
             ) : activeTab === 'SCHEDULED' ? (
               <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400 font-bold">Scheduled Publications</p>
-                {/* Coordinator-accepted-for-publication manuscripts --
-                    production_status = READY_FOR_PUBLICATION (both Editor and
-                    Author final approval are in, and the Coordinator has
-                    assigned a Publisher) but not yet actually published.
-                    Opening one jumps to the Publication Queue's wizard for it. */}
+                {/* Module 83: a manuscript the Coordinator has assigned to
+                    this Publisher, but not yet accepted -- it stays here
+                    (not in Publication Queue) until "Proceed" is clicked,
+                    which is the only thing that moves it into the actual
+                    4-step publish wizard. */}
+                {acceptError && <p className="text-xs font-semibold text-red-600">{acceptError}</p>}
                 {(() => {
                   return scheduled.length === 0 ? (
                     <div className="p-10 text-center text-sm text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-2xl">
-                      No manuscripts are scheduled yet. A manuscript appears here once the Coordinator confirms it's ready for publication.
+                      No manuscripts are scheduled yet. A manuscript appears here once the Coordinator assigns it to you for publication.
                     </div>
                   ) : (
                     <div className="space-y-2">
                       {scheduled.map((m) => (
-                        <button
+                        <div
                           key={m.id}
-                          onClick={() => { setFocusedId(m.id); setActiveTab('QUEUE'); }}
-                          className="w-full flex items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-left hover:bg-slate-50"
+                          className="w-full flex items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3"
                         >
                           <div>
                             <p className="text-sm font-bold text-slate-800">{m.title}</p>
                             <p className="text-xs text-slate-400 font-mono">{m.id}</p>
                           </div>
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-emerald-700">
-                            <Clock className="w-3.5 h-3.5" /> Ready to Publish
-                          </span>
-                        </button>
+                          <button
+                            type="button"
+                            disabled={acceptingId === m.id}
+                            onClick={() => handleAcceptAssignment(m.id)}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-emerald-700 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-wide text-white hover:bg-emerald-800 disabled:opacity-50 shrink-0"
+                          >
+                            {acceptingId === m.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Clock className="w-3.5 h-3.5" />}
+                            {acceptingId === m.id ? 'Proceeding...' : 'Proceed'}
+                          </button>
+                        </div>
                       ))}
                     </div>
                   );
@@ -837,6 +891,23 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
                               <div><p className="text-slate-400 uppercase tracking-wide text-[10px] mb-1">Section</p><p className="font-semibold text-slate-800">{displayManuscript.section || '--'}</p></div>
                               <div><p className="text-slate-400 uppercase tracking-wide text-[10px] mb-1">DOI</p><p className="font-semibold text-slate-800">{doiValue || '--'}</p></div>
                               <div><p className="text-slate-400 uppercase tracking-wide text-[10px] mb-1">Online Publication Date</p><p className="font-semibold text-slate-800">{formatDate(new Date().toISOString())} (on publish)</p></div>
+                            </div>
+                          )}
+                          {uploadedFileMeta && (
+                            <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <FileText className="w-5 h-5 text-[#008751] shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Final PDF</p>
+                                  <p className="text-sm font-semibold text-slate-800 truncate">{uploadedFileMeta.name}</p>
+                                  <p className="text-[11px] text-slate-400">{uploadedFileMeta.sizeLabel}</p>
+                                </div>
+                              </div>
+                              {uploadedUrl && (
+                                <a href={uploadedUrl} target="_blank" rel="noreferrer" className="shrink-0 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                                  <Eye className="w-3.5 h-3.5" /> View
+                                </a>
+                              )}
                             </div>
                           )}
                         </div>

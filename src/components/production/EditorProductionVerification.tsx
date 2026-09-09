@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Eye, Download, Loader2, Send, Check, History } from 'lucide-react';
 import {
   ProductionRow, ProofRow, CorrectionRow, ProofReviewRow,
-  getProduction, getProofs, getCorrections, getProofReviews, subscribeToProduction, editorReviewProof, editorSendCorrectionsToGD
+  getProduction, getProofs, getCorrections, getProofReviews, subscribeToProduction, editorReviewProof
 } from '../../lib/production';
 import { ProfileRow, getProfilesByIds } from '../../lib/workflow';
 
@@ -30,8 +30,6 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [gdMemberProfile, setGdMemberProfile] = useState<ProfileRow | null>(null);
-  const [sendingToGD, setSendingToGD] = useState(false);
-  const [sendToGDError, setSendToGDError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,18 +77,6 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
     }
   };
 
-  const handleSendToGD = async () => {
-    setSendingToGD(true);
-    setSendToGDError(null);
-    try {
-      await editorSendCorrectionsToGD(manuscriptId);
-    } catch (e: any) {
-      setSendToGDError(e?.message || 'Failed to send corrections to the GD Member');
-    } finally {
-      setSendingToGD(false);
-    }
-  };
-
   if (!production || (!awaitingReview && !awaitingSendToGD && reviews.length === 0)) {
     return <p className="text-slate-500 text-sm">No proof corrections have been sent for verification yet.</p>;
   }
@@ -127,8 +113,18 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
           <div className="space-y-2">
             {sortedProofs.map((p) => {
               const isCurrent = p.version === production?.current_proof_version;
+              // Subtle color grading: v1 (blue) is the original proof, v2+
+              // (purple) only exists because a correction round produced it
+              // -- matches the same convention used in the Coordinator's
+              // Proof & Review Status timeline. The current version's
+              // emerald highlight always takes priority.
+              const cardClasses = isCurrent
+                ? 'border-[#008751] bg-emerald-50'
+                : p.version <= 1
+                ? 'border-blue-200 bg-blue-50'
+                : 'border-purple-200 bg-purple-50';
               return (
-                <div key={p.id} className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 ${isCurrent ? 'border-[#008751] bg-emerald-50' : 'border-slate-200'}`}>
+                <div key={p.id} className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 ${cardClasses}`}>
                   <div>
                     <p className="text-sm font-semibold text-slate-800">Proof v{p.version} {isCurrent && <span className="ml-1 text-[10px] font-bold uppercase text-emerald-700">Current</span>}</p>
                     <p className="text-xs text-slate-400">{p.file_name} • Uploaded {formatDate(p.uploaded_at)}</p>
@@ -153,9 +149,14 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
         ) : (
           <div className="space-y-2">
             {sortedCorrections.map((c) => (
-              <div key={c.id} className="rounded-xl border border-slate-200 p-3 text-sm space-y-1.5">
+              <div key={c.id} className="rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-bold text-slate-800">v{c.proof_version} — {c.correction_source === 'EDITOR' ? 'Editor' : 'Author'}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-slate-800">v{c.proof_version}</span>
+                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.correction_source === 'EDITOR' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-600'}`}>
+                      {c.correction_source === 'EDITOR' ? 'Editor' : 'Author'}
+                    </span>
+                  </div>
                   <span className="text-[10px] text-slate-400">{formatDate(c.submitted_at)}</span>
                 </div>
                 <p className="text-slate-700 whitespace-pre-wrap">{c.comments || 'No comments provided.'}</p>
@@ -171,8 +172,8 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
       </div>
 
       {awaitingReview && (
-        <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Editorial Decision</p>
+        <div className="rounded-2xl border-2 border-slate-900 bg-slate-50 p-4 space-y-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Editorial Decision</p>
           {error && <p className="text-xs text-red-600">{error}</p>}
           {mode === 'correcting' ? (
             <div className="space-y-3">
@@ -225,17 +226,9 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
       )}
 
       {awaitingSendToGD && (
-        <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Send to GD Member</p>
-          {sendToGDError && <p className="text-xs text-red-600">{sendToGDError}</p>}
-          <button
-            disabled={sendingToGD}
-            onClick={handleSendToGD}
-            className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40"
-          >
-            {sendingToGD ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-            {sendingToGD ? 'Sending...' : `Send to ${gdMemberProfile?.name || 'GD Member'} for Editorial Correction`}
-          </button>
+        <div className="rounded-2xl border border-slate-200 p-4 space-y-1">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Corrections Recorded</p>
+          <p className="text-xs text-slate-500">Waiting for the Coordinator to send this to {gdMemberProfile?.name || 'the GD Member'}.</p>
         </div>
       )}
 

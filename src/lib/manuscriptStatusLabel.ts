@@ -40,6 +40,7 @@ interface ManuscriptStatusLike {
   status: ManuscriptStatus;
   display_status?: string | null;
   production_stage?: string | null;
+  assigned_publisher_id?: string | null;
 }
 
 /** Once a proof is with the author (Task 11), the standard "PROOFREADING"
@@ -84,7 +85,13 @@ export function getManuscriptStatusLabel(manuscript: ManuscriptStatusLike, lates
     // don't pass productionStatus (Editor/Reviewer/Author views) are
     // unaffected, so this is purely additive to the Coordinator's own view.
     if (manuscript.display_status === 'ACCEPTED' && productionStatus && productionStatus !== 'NOT_STARTED') {
-      return productionStatus === 'READY_FOR_PUBLICATION' ? 'IN PUBLISH' : PROOFREADING_PRODUCTION_STATUSES.has(productionStatus) ? 'PROOFREADING' : 'PRODUCTION PREPARATION';
+      // A Publisher assignment (Module 82's "Choose Publisher") is the
+      // Coordinator's own signal that this is in publish -- checked ahead
+      // of the raw production_status so the label flips the moment
+      // assignment happens, rather than depending on production_status
+      // having already reached READY_FOR_PUBLICATION on this render.
+      return manuscript.assigned_publisher_id ? 'IN PUBLISH'
+        : productionStatus === 'READY_FOR_PUBLICATION' ? 'IN PUBLISH' : PROOFREADING_PRODUCTION_STATUSES.has(productionStatus) ? 'PROOFREADING' : 'PRODUCTION PREPARATION';
     }
     return manuscript.display_status;
   }
@@ -92,7 +99,8 @@ export function getManuscriptStatusLabel(manuscript: ManuscriptStatusLike, lates
   const status = manuscript.status;
   if (status === 'ACCEPTED') {
     if (productionStatus && productionStatus !== 'NOT_STARTED') {
-      return productionStatus === 'READY_FOR_PUBLICATION' ? 'IN PUBLISH' : PROOFREADING_PRODUCTION_STATUSES.has(productionStatus) ? 'PROOFREADING' : 'PRODUCTION PREPARATION';
+      return manuscript.assigned_publisher_id ? 'IN PUBLISH'
+        : productionStatus === 'READY_FOR_PUBLICATION' ? 'IN PUBLISH' : PROOFREADING_PRODUCTION_STATUSES.has(productionStatus) ? 'PROOFREADING' : 'PRODUCTION PREPARATION';
     }
     return manuscript.production_stage === 'SENT_TO_PUBLISHER' ? 'PROOFREADING' : 'ACCEPTED';
   }

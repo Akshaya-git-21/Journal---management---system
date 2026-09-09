@@ -48,6 +48,7 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
   const [attachment, setAttachment] = useState<File | null>(null);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [downloadingProof, setDownloadingProof] = useState(false);
+  const [viewingProof, setViewingProof] = useState(false);
 
   const load = async () => {
     try {
@@ -143,6 +144,33 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
     }
   };
 
+  // A plain <a target="_blank"> leaves it up to the storage response's
+  // Content-Disposition header whether the browser views the PDF inline or
+  // downloads it -- fetching it as a blob and opening that object URL
+  // always renders inline in the browser's own PDF viewer, regardless of
+  // server headers.
+  const handleViewProof = async () => {
+    if (!latestProof?.public_url || viewingProof) return;
+    // Open the tab synchronously (inside the click handler) so browsers
+    // don't treat it as a blocked popup -- then point it at the blob once
+    // it's fetched.
+    const win = window.open('', '_blank');
+    setViewingProof(true);
+    setError('');
+    try {
+      const res = await fetch(latestProof.public_url);
+      if (!res.ok) throw new Error('Failed to load the proof file.');
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      if (win) win.location.href = objectUrl;
+    } catch (e: any) {
+      win?.close();
+      setError(e.message || 'Failed to view the proof file.');
+    } finally {
+      setViewingProof(false);
+    }
+  };
+
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-6 text-sm text-left space-y-5 animate-in fade-in duration-100">
       <h2 className="text-lg font-bold text-slate-900 tracking-tight border-b border-slate-100 pb-3">Production &amp; Proofreading</h2>
@@ -153,9 +181,39 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
         <p className="text-slate-500 leading-relaxed">Your manuscript will move into production shortly after acceptance.</p>
       ) : !latestProof || status === 'IN_PRODUCTION' || status === 'COPYEDITING' || status === 'FORMATTING' || status === 'TYPESETTING' ? (
         <p className="text-slate-500 leading-relaxed">Your manuscript is currently being prepared for production (copyediting, formatting, typesetting). You&rsquo;ll be notified once your proof is ready for review.</p>
-      ) : status === 'AUTHOR_APPROVED' || status === 'READY_FOR_PUBLICATION' ? (
-        <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-700 font-medium flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 shrink-0" /> You gave final approval on Proof v{latestProof.version}. Both editorial and your final approval are in -- it is ready for publication.
+      ) : status === 'AUTHOR_APPROVED' || status === 'AUTHOR_FINAL_APPROVED' || status === 'READY_FOR_PUBLICATION' ? (
+        <div className="space-y-4">
+          <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-700 font-medium flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" /> You gave final approval on Proof v{latestProof.version}. Both editorial and your final approval are in -- it is ready for publication.
+          </div>
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 p-4">
+            <div>
+              <p className="font-bold text-slate-900 text-base">Proof v{latestProof.version}</p>
+              <span className="inline-flex items-center gap-1 mt-1 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-emerald-700">
+                <CheckCircle2 className="w-3 h-3" /> Status: In Publish
+              </span>
+            </div>
+            {latestProof.public_url && (
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleViewProof}
+                  disabled={viewingProof}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {viewingProof ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />} View Proof
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadProof}
+                  disabled={downloadingProof}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {downloadingProof ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Download Proof
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       ) : status === 'PUBLISHED' ? (
         <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-700 font-medium flex items-center gap-2">
@@ -192,7 +250,14 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
             </div>
             {latestProof.public_url && (
               <div className="flex items-center gap-2 shrink-0">
-                <a href={latestProof.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-4 h-4" /> View Proof</a>
+                <button
+                  type="button"
+                  onClick={handleViewProof}
+                  disabled={viewingProof}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {viewingProof ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />} View Proof
+                </button>
                 <button
                   type="button"
                   onClick={handleDownloadProof}

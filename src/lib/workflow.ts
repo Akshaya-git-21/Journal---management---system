@@ -386,6 +386,13 @@ export const markPublished = (manuscriptId: string, doi: string, volume: string,
 export const sendToPublisher = (manuscriptId: string, publisherId: string) =>
   rpcOrThrow(supabase.rpc('send_to_publisher', { p_manuscript_id: manuscriptId, p_publisher_id: publisherId }));
 
+/** Publisher-only (Module 83): explicit "Proceed" click on an assignment
+ * sitting in Scheduled Publications -- only after this does the manuscript
+ * move into Publication Queue and the actual 4-step publish wizard. See
+ * publisher_accept_assignment() in 0083_publisher_accepts_assignment.sql. */
+export const publisherAcceptAssignment = (manuscriptId: string) =>
+  rpcOrThrow(supabase.rpc('publisher_accept_assignment', { p_manuscript_id: manuscriptId }));
+
 export async function uploadPublishedGalley(manuscriptId: string, file: File): Promise<string> {
   const path = `${manuscriptId}/published/${Date.now()}_${file.name}`;
   const { error: uploadError } = await supabase.storage.from('manuscript-files').upload(path, file, { upsert: false });
@@ -518,6 +525,10 @@ export interface ManuscriptRow {
   author_email: string;
   assigned_editor_id: string | null;
   assigned_publisher_id?: string | null;
+  /** Set by publisher_accept_assignment() (Module 83) once the Publisher
+   * clicks "Proceed" on a Scheduled Publications entry -- only then does the
+   * manuscript move into Publication Queue. */
+  publisher_accepted_at?: string | null;
   submission_step: number;
   editors_notes: string;
   doi: string | null;

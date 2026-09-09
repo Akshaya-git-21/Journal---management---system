@@ -130,7 +130,6 @@ export function DecisionTab({
   const [publisherGateError, setPublisherGateError] = useState('');
   const [createdPublisherCredentials, setCreatedPublisherCredentials] = useState<{ email: string; password: string } | null>(null);
   const [assignedPublisherProfile, setAssignedPublisherProfile] = useState<ProfileRow | null>(null);
-  const [readyForPublishClicked, setReadyForPublishClicked] = useState(false);
   // GD Member assignment gate -- clicking "Move to Production" must not
   // actually start production until a GD Member is assigned (see the
   // Coordinator's requirement: "if no GD Member is assigned, a popup should
@@ -1205,134 +1204,6 @@ export function DecisionTab({
                   <p className="text-sm font-bold text-slate-700">{statusMeta.nextStep}</p>
                 </>
               )}
-              {/* Module 75: driven purely by production_status, so this
-                  correctly repeats every correction round -- button shows
-                  while a proof is generated and waiting on the Coordinator
-                  (PROOF_GENERATED etc.), swaps to the confirmation line once
-                  it's actually with the Author, and the button reappears
-                  again the moment GD uploads the next round. */}
-              {proofToSend && (
-                <div className="pt-3">
-                  <button
-                    type="button"
-                    onClick={handleSendProofToAuthor}
-                    disabled={sendingProofToAuthor}
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {sendingProofToAuthor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                    {sendingProofToAuthor ? 'Sending...' : 'Send to Author'}
-                  </button>
-                  {sendProofToAuthorError && (
-                    <p className="mt-2 text-xs font-semibold text-red-600">{sendProofToAuthorError}</p>
-                  )}
-                </div>
-              )}
-              {proofAlreadySent && (
-                <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author for proofreading -- Proof v{production?.current_proof_version}.
-                </p>
-              )}
-              {/* Module 76/78: neither Author approval nor a GD-corrected
-                  proof (editor-stage loop) auto-routes to the Editor -- the
-                  Coordinator must explicitly send it on either way. */}
-              {!isEditor && (productionStatus === 'AUTHOR_APPROVED' || productionStatus === 'PROOF_READY_FOR_EDITOR') && (
-                <div className="pt-3">
-                  <button
-                    type="button"
-                    onClick={handleSendToEditor}
-                    disabled={sendingToEditor}
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {sendingToEditor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                    {sendingToEditor ? 'Sending...' : `Send to Editor -- Proof v${production?.current_proof_version}`}
-                  </button>
-                  {sendToEditorError && (
-                    <p className="mt-2 text-xs font-semibold text-red-600">{sendToEditorError}</p>
-                  )}
-                </div>
-              )}
-              {!isEditor && productionStatus === 'PROOF_SENT_TO_EDITOR' && (
-                <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Editor for approval -- Proof v{production?.current_proof_version}.
-                </p>
-              )}
-              {/* Module 77/81: the Editor's corrections are recorded but not
-                  yet routed to the GD Member -- the Coordinator must
-                  explicitly send them on, same pattern as every other step
-                  here (the Editor can also do this from their own page). */}
-              {!isEditor && productionStatus === 'EDITOR_CORRECTIONS_PENDING_SEND' && (
-                <div className="pt-3">
-                  <button
-                    type="button"
-                    onClick={handleSendCorrectionsToGD}
-                    disabled={sendingCorrectionsToGD}
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {sendingCorrectionsToGD ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                    {sendingCorrectionsToGD ? 'Sending...' : `Send to ${assignedGDMemberProfile?.name || 'GD Member'} for Editorial Correction`}
-                  </button>
-                  {sendCorrectionsToGDError && (
-                    <p className="mt-2 text-xs font-semibold text-red-600">{sendCorrectionsToGDError}</p>
-                  )}
-                </div>
-              )}
-              {!isEditor && productionStatus === 'EDITOR_CORRECTIONS_REQUESTED' && (
-                <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to {assignedGDMemberProfile?.name || 'the GD Member'} for editorial correction.
-                </p>
-              )}
-              {/* Module 79: Editor's approval no longer auto-routes to the
-                  Author's Final Review -- the Coordinator must explicitly
-                  send it on. */}
-              {!isEditor && productionStatus === 'EDITOR_APPROVED' && (
-                <div className="pt-3">
-                  <button
-                    type="button"
-                    onClick={handleSendToAuthorFinal}
-                    disabled={sendingToAuthorFinal}
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {sendingToAuthorFinal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                    {sendingToAuthorFinal ? 'Sending...' : `Editor Approved -- Send for Author Confirmation (Proof v${production?.current_proof_version})`}
-                  </button>
-                  {sendToAuthorFinalError && (
-                    <p className="mt-2 text-xs font-semibold text-red-600">{sendToAuthorFinalError}</p>
-                  )}
-                </div>
-              )}
-              {!isEditor && productionStatus === 'PROOF_SENT_TO_AUTHOR_FINAL' && (
-                <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author for final confirmation -- Proof v{production?.current_proof_version}.
-                </p>
-              )}
-              {/* Module 82: both approvals are in, but the Coordinator must
-                  explicitly send it to the GD Member before their "Move to
-                  Publish" button will accept -- same explicit-handoff
-                  pattern as every other step here. */}
-              {!isEditor && productionStatus === 'AUTHOR_FINAL_APPROVED' && (
-                <div className="pt-3">
-                  <p className="text-xs font-semibold text-emerald-700 mb-2">
-                    Final Proof Approved by Author and Editor -- Proof v{production?.current_proof_version} is ready for publication.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleSendToGdForFinalize}
-                    disabled={sendingToGdForFinalize}
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {sendingToGdForFinalize ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                    {sendingToGdForFinalize ? 'Sending...' : `Send to ${assignedGDMemberProfile?.name || 'GD Member'} for Finalize`}
-                  </button>
-                  {sendToGdForFinalizeError && (
-                    <p className="mt-2 text-xs font-semibold text-red-600">{sendToGdForFinalizeError}</p>
-                  )}
-                </div>
-              )}
-              {!isEditor && productionStatus === 'SENT_TO_GD_FOR_FINALIZE' && (
-                <p className="pt-3 text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Sent to {assignedGDMemberProfile?.name || 'the GD Member'} for finalize.
-                </p>
-              )}
             </div>
           )}
         </div>
@@ -1401,13 +1272,79 @@ export function DecisionTab({
               Waiting for final proof upload
             </p>
           )}
+        </div>
+      )}
+
+      {/* 9. Proof & Review Status -- Module 69: this loop (GD -> Author ->
+          Editor -> Author Final Review -> Publication) is now driven
+          entirely by backend RPCs the GD Member/Editor/Author call
+          directly; the Coordinator's role here is oversight (status +
+          full history). Widened to include PROOF_GENERATED/
+          PROOF_SUBMITTED_TO_COORDINATOR/PROOF_UPDATED/FINAL_PROOF_READY
+          (matching proofToSend below) so this card -- and every one of the
+          Coordinator's step-by-step handoff buttons, moved in here in
+          order -- opens as soon as a proof exists, right after acceptance,
+          instead of only once it's already with the Author. See
+          ProductionWorkspace.tsx for the same panel plus the Coordinator
+          Override escape hatch for a stuck manuscript. */}
+      {!isEditor && production && ['PROOF_GENERATED', 'PROOF_SUBMITTED_TO_COORDINATOR', 'PROOF_UPDATED', 'FINAL_PROOF_READY', 'PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW', 'AUTHOR_APPROVED', 'CORRECTIONS_IN_PROGRESS', 'PROOF_SENT_TO_EDITOR', 'EDITOR_CORRECTIONS_PENDING_SEND', 'EDITOR_CORRECTIONS_REQUESTED', 'PROOF_READY_FOR_EDITOR', 'EDITOR_APPROVED', 'PROOF_SENT_TO_AUTHOR_FINAL', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED', 'AUTHOR_FINAL_APPROVED', 'SENT_TO_GD_FOR_FINALIZE', 'READY_FOR_PUBLICATION'].includes(productionStatus || '') && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+          <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
+            <MessageCircle className="w-4 h-4" /> Proof &amp; Review Status
+          </h3>
+          <div className="grid gap-3 sm:grid-cols-2 text-sm">
+            <div className="rounded-xl border border-slate-200 p-3">
+              <p className="text-[10px] font-bold uppercase text-slate-400">Editor Approval</p>
+              <p className="text-slate-700">{production.editor_approved_version ? `Proof v${production.editor_approved_version}` : 'Not yet approved'}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3">
+              <p className="text-[10px] font-bold uppercase text-slate-400">Author Final Approval</p>
+              <p className="text-slate-700">{production.author_final_approved_version ? `Proof v${production.author_final_approved_version}` : 'Not yet approved'}</p>
+            </div>
+          </div>
+
+          {/* Proof/review history in chronological order (oldest first --
+              "Proof v1 uploaded", then what happened to it, ...), colored by
+              event type, with the one currently-relevant Coordinator
+              handoff button rendered as the timeline's footer -- directly
+              below the most recent card, instead of in a separate cluster. */}
+          <ProofReviewTimeline
+            manuscriptId={manuscript.id}
+            variant="compact"
+            order="asc"
+            colored
+            footer={<div className="space-y-3">{proofToSend && (
+            <div>
+              <button
+                type="button"
+                onClick={handleSendProofToAuthor}
+                disabled={sendingProofToAuthor}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sendingProofToAuthor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                {sendingProofToAuthor ? 'Sending...' : 'Send to Author'}
+              </button>
+              {sendProofToAuthorError && (
+                <p className="mt-2 text-xs font-semibold text-red-600">{sendProofToAuthorError}</p>
+              )}
+            </div>
+          )}
+          {proofAlreadySent && (
+            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author for proofreading -- Proof v{production?.current_proof_version}.
+            </p>
+          )}
           {/* Corrections (from the Author or Editor) already route to the
               assigned GD Member automatically -- see author_submit_corrections()/
               editor_review_proof() in 0069_editor_final_approval_workflow.sql.
               This button doesn't change that; it's a manual nudge (re-sends
-              the notification) for "they say they never saw it". */}
-          {['CORRECTIONS_IN_PROGRESS', 'EDITOR_CORRECTIONS_REQUESTED', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED'].includes(productionStatus || '') && (
-            <div className="mt-4">
+              the notification) for "they say they never saw it". Excludes
+              EDITOR_CORRECTIONS_REQUESTED -- that status already has its own
+              "Sent to GD for editorial correction" confirmation right below
+              from the actual send action, so showing this nudge button at
+              the same time was a confusing duplicate. */}
+          {['CORRECTIONS_IN_PROGRESS', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED'].includes(productionStatus || '') && (
+            <div>
               {!hasNotifiedGDMember ? (
                 <button
                   type="button"
@@ -1426,31 +1363,94 @@ export function DecisionTab({
               {notifyGDMemberError && <p className="mt-2 text-xs font-semibold text-red-600">{notifyGDMemberError}</p>}
             </div>
           )}
-        </div>
-      )}
+          {!isEditor && (productionStatus === 'AUTHOR_APPROVED' || productionStatus === 'PROOF_READY_FOR_EDITOR') && (
+            <div>
+              <button
+                type="button"
+                onClick={handleSendToEditor}
+                disabled={sendingToEditor}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sendingToEditor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                {sendingToEditor ? 'Sending...' : `Send to Editor -- Proof v${production?.current_proof_version}`}
+              </button>
+              {sendToEditorError && (
+                <p className="mt-2 text-xs font-semibold text-red-600">{sendToEditorError}</p>
+              )}
+            </div>
+          )}
+          {!isEditor && productionStatus === 'PROOF_SENT_TO_EDITOR' && (
+            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Editor for approval -- Proof v{production?.current_proof_version}.
+            </p>
+          )}
+          {!isEditor && productionStatus === 'EDITOR_CORRECTIONS_PENDING_SEND' && (
+            <div>
+              <button
+                type="button"
+                onClick={handleSendCorrectionsToGD}
+                disabled={sendingCorrectionsToGD}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sendingCorrectionsToGD ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                {sendingCorrectionsToGD ? 'Sending...' : `Send to ${assignedGDMemberProfile?.name || 'GD Member'} for Editorial Correction`}
+              </button>
+              {sendCorrectionsToGDError && (
+                <p className="mt-2 text-xs font-semibold text-red-600">{sendCorrectionsToGDError}</p>
+              )}
+            </div>
+          )}
+          {!isEditor && productionStatus === 'EDITOR_CORRECTIONS_REQUESTED' && (
+            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Sent to {assignedGDMemberProfile?.name || 'the GD Member'} for editorial correction.
+            </p>
+          )}
+          {!isEditor && productionStatus === 'EDITOR_APPROVED' && (
+            <div>
+              <button
+                type="button"
+                onClick={handleSendToAuthorFinal}
+                disabled={sendingToAuthorFinal}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sendingToAuthorFinal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                {sendingToAuthorFinal ? 'Sending...' : `Editor Approved -- Send for Author Confirmation (Proof v${production?.current_proof_version})`}
+              </button>
+              {sendToAuthorFinalError && (
+                <p className="mt-2 text-xs font-semibold text-red-600">{sendToAuthorFinalError}</p>
+              )}
+            </div>
+          )}
+          {!isEditor && productionStatus === 'PROOF_SENT_TO_AUTHOR_FINAL' && (
+            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author for final confirmation -- Proof v{production?.current_proof_version}.
+            </p>
+          )}
+          {!isEditor && productionStatus === 'AUTHOR_FINAL_APPROVED' && (
+            <div>
+              <p className="text-xs font-semibold text-emerald-700 mb-2">
+                Final Proof Approved by Author and Editor -- Proof v{production?.current_proof_version} is ready for publication.
+              </p>
+              <button
+                type="button"
+                onClick={handleSendToGdForFinalize}
+                disabled={sendingToGdForFinalize}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sendingToGdForFinalize ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                {sendingToGdForFinalize ? 'Sending...' : `Send to ${assignedGDMemberProfile?.name || 'GD Member'} for Finalize`}
+              </button>
+              {sendToGdForFinalizeError && (
+                <p className="mt-2 text-xs font-semibold text-red-600">{sendToGdForFinalizeError}</p>
+              )}
+            </div>
+          )}
+          {!isEditor && productionStatus === 'SENT_TO_GD_FOR_FINALIZE' && (
+            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Sent to {assignedGDMemberProfile?.name || 'the GD Member'} for finalize.
+            </p>
+          )}
 
-      {/* 9. Proof & Review Status -- Module 69: this loop (GD -> Author ->
-          Editor -> Author Final Review -> Publication) is now driven
-          entirely by backend RPCs the GD Member/Editor/Author call
-          directly; the Coordinator's role here is oversight (status +
-          full history), not manually routing each step. See
-          ProductionWorkspace.tsx for the same panel plus the Coordinator
-          Override escape hatch for a stuck manuscript. */}
-      {!isEditor && production && ['PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW', 'AUTHOR_APPROVED', 'CORRECTIONS_IN_PROGRESS', 'PROOF_SENT_TO_EDITOR', 'EDITOR_CORRECTIONS_PENDING_SEND', 'EDITOR_CORRECTIONS_REQUESTED', 'PROOF_READY_FOR_EDITOR', 'EDITOR_APPROVED', 'PROOF_SENT_TO_AUTHOR_FINAL', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED', 'AUTHOR_FINAL_APPROVED', 'SENT_TO_GD_FOR_FINALIZE', 'READY_FOR_PUBLICATION'].includes(productionStatus || '') && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-          <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
-            <MessageCircle className="w-4 h-4" /> Proof &amp; Review Status
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-2 text-sm">
-            <div className="rounded-xl border border-slate-200 p-3">
-              <p className="text-[10px] font-bold uppercase text-slate-400">Editor Approval</p>
-              <p className="text-slate-700">{production.editor_approved_version ? `Proof v${production.editor_approved_version}` : 'Not yet approved'}</p>
-            </div>
-            <div className="rounded-xl border border-slate-200 p-3">
-              <p className="text-[10px] font-bold uppercase text-slate-400">Author Final Approval</p>
-              <p className="text-slate-700">{production.author_final_approved_version ? `Proof v${production.author_final_approved_version}` : 'Not yet approved'}</p>
-            </div>
-          </div>
           {/* Module 82: once the GD Member has moved this to
               READY_FOR_PUBLICATION themselves (Module 80's "Move to
               Publish"), the Coordinator sees it as its own "Ready for
@@ -1459,31 +1459,23 @@ export function DecisionTab({
               Publisher roster (CoordinatorWorkspace.tsx's Publishers
               screen), same pattern as the GD Member assignment gate above. */}
           {!isEditor && productionStatus === 'READY_FOR_PUBLICATION' && (
-            <div className="mt-4">
+            <div>
               {assignedPublisherProfile ? (
                 <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Assigned to Publisher {assignedPublisherProfile.name}.
                 </p>
-              ) : !readyForPublishClicked ? (
-                <button
-                  type="button"
-                  onClick={() => setReadyForPublishClicked(true)}
-                  className="inline-flex items-center gap-2 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Ready for Publish
-                </button>
               ) : (
                 <button
                   type="button"
                   onClick={openPublisherGateModal}
                   className="inline-flex items-center gap-2 rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800"
                 >
-                  <UserPlus className="w-3.5 h-3.5" /> Choose Publisher
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Ready for Publish
                 </button>
               )}
             </div>
-          )}
-          <ProofReviewTimeline manuscriptId={manuscript.id} variant="compact" />
+          )}</div>}
+          />
         </div>
       )}
 

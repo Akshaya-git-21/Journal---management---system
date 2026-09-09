@@ -13,36 +13,50 @@ export function ManuscriptTab({ manuscript, contributors }: Props) {
         <p className="text-base text-slate-700">{manuscript.title}</p>
       </div>
 
-      <div>
-        <h3 className="text-sm font-black text-slate-900 mb-3">Abstract</h3>
-        <p className="text-sm text-slate-700 leading-relaxed">{manuscript.abstract || 'No abstract provided'}</p>
-      </div>
+      {manuscript.abstract && (
+        <div>
+          <h3 className="text-sm font-black text-slate-900 mb-3">Abstract</h3>
+          <p className="text-sm text-slate-700 leading-relaxed">{manuscript.abstract}</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div>
-          <h3 className="text-sm font-black text-slate-900 mb-2">Keywords</h3>
-          <p className="text-sm text-slate-700">{manuscript.keywords || 'Not provided'}</p>
-        </div>
-        <div>
-          <h3 className="text-sm font-black text-slate-900 mb-2">Manuscript Type</h3>
-          <p className="text-sm text-slate-700">{manuscript.manuscript_type || 'Original Research'}</p>
-        </div>
-        <div>
-          <h3 className="text-sm font-black text-slate-900 mb-2">Section</h3>
-          <p className="text-sm text-slate-700">{manuscript.section || 'General'}</p>
-        </div>
-        <div>
-          <h3 className="text-sm font-black text-slate-900 mb-2">Word Count</h3>
-          <p className="text-sm text-slate-700">{manuscript.word_count || 'Not provided'}</p>
-        </div>
-        <div>
-          <h3 className="text-sm font-black text-slate-900 mb-2">Figures</h3>
-          <p className="text-sm text-slate-700">{manuscript.num_figures || '0'}</p>
-        </div>
-        <div>
-          <h3 className="text-sm font-black text-slate-900 mb-2">Tables</h3>
-          <p className="text-sm text-slate-700">{manuscript.num_tables || '0'}</p>
-        </div>
+        {manuscript.keywords && (
+          <div>
+            <h3 className="text-sm font-black text-slate-900 mb-2">Keywords</h3>
+            <p className="text-sm text-slate-700">{manuscript.keywords}</p>
+          </div>
+        )}
+        {manuscript.manuscript_type && (
+          <div>
+            <h3 className="text-sm font-black text-slate-900 mb-2">Manuscript Type</h3>
+            <p className="text-sm text-slate-700">{manuscript.manuscript_type}</p>
+          </div>
+        )}
+        {manuscript.section && (
+          <div>
+            <h3 className="text-sm font-black text-slate-900 mb-2">Section</h3>
+            <p className="text-sm text-slate-700">{manuscript.section}</p>
+          </div>
+        )}
+        {manuscript.word_count != null && (
+          <div>
+            <h3 className="text-sm font-black text-slate-900 mb-2">Word Count</h3>
+            <p className="text-sm text-slate-700">{manuscript.word_count}</p>
+          </div>
+        )}
+        {manuscript.num_figures != null && (
+          <div>
+            <h3 className="text-sm font-black text-slate-900 mb-2">Figures</h3>
+            <p className="text-sm text-slate-700">{manuscript.num_figures}</p>
+          </div>
+        )}
+        {manuscript.num_tables != null && (
+          <div>
+            <h3 className="text-sm font-black text-slate-900 mb-2">Tables</h3>
+            <p className="text-sm text-slate-700">{manuscript.num_tables}</p>
+          </div>
+        )}
       </div>
 
       {contributors.length > 0 && (

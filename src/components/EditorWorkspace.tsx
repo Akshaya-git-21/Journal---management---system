@@ -2548,97 +2548,97 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                   </div>
                 )}
 
-                {/* REVIEW WORKFLOW */}
+                {/* REVIEW WORKFLOW -- standardized to the same 5-stage
+                    pipeline as the Author's Submission Timeline (Submitted /
+                    Editorial Review / Peer Review / Accepted / Published)
+                    instead of a separate, ever-growing Editor-specific step
+                    list, so both roles read the same manuscript progress the
+                    same way. */}
                 <div className="bg-white rounded-xl border border-slate-200 p-5">
-                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900 mb-5">
+                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900 mb-5 pb-3 border-b border-slate-100">
                     Review Workflow
                   </h3>
-                  {(() => {
-                    const reviewersAssignedDone = !!(reviewerAssignments && reviewerAssignments.length > 0);
-                    const reviewsCompletedCount = reviewerAssignments?.filter(r => r.status === 'SUBMITTED').length || 0;
-                    const peerReviewDone = reviewersAssignedDone && reviewsCompletedCount === reviewerAssignments!.length;
-                    // A revision cycle resets assessment_status back to
-                    // NOT_STARTED on this same assignment row without
-                    // clearing the actual submitted scores -- see
-                    // hasSubmittedEvaluation in EditorEvaluationFormTab.tsx.
-                    // Use the same signal here so this step doesn't flip back
-                    // to "in progress" once a revision cycle starts.
-                    const evaluationDone = evaluationSubmitted || (assignment as any).scientific_merit != null;
-                    const sortedRevisions = [...(details.revisions || [])].sort((a, b) => a.revision_number - b.revision_number);
-                    // The Coordinator has acted on the original round the
-                    // moment a revision cycle exists or the manuscript has
-                    // otherwise moved past awaiting a decision.
-                    const coordinatorActionDone = sortedRevisions.length > 0 ||
-                      (manuscript.status && !['DRAFT', 'SUBMITTED', 'EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION'].includes(manuscript.status));
-                    const finalDecisionDone = manuscript.status && ['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
+                  <div className="relative pl-5 ml-2.5 space-y-6 text-xs border-l-2 border-emerald-100">
+                    {(() => {
+                      const STANDARD_PIPELINE: { key: string; label: string }[] = [
+                        { key: 'SUBMITTED', label: 'Submitted' },
+                        { key: 'EDITORIAL REVIEW', label: 'Editorial Review' },
+                        { key: 'PEER REVIEW', label: 'Peer Review' },
+                        { key: 'ACCEPTED', label: 'Accepted' },
+                        { key: 'PUBLISHED', label: 'Published' },
+                      ];
+                      const rawStatusFor = ['SUBMITTED', 'EDITOR_REVIEW', 'UNDER_REVIEW', 'ACCEPTED', 'PUBLISHED'];
+                      const firstTimestampFor = (rawStatus: string): string | null => {
+                        const hit = (details.statusHistory || [])
+                          .filter((h) => h.to_status === rawStatus)
+                          .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0];
+                        return hit ? hit.created_at : null;
+                      };
+                      const fmt = (iso: string | null) => (iso ? formatDateTime(iso) : '');
+                      const latestRevisionForTimeline = getLatestRevision(details.revisions);
 
-                    // Base pipeline for the original review round, followed
-                    // by one Editor Decision / Coordinator Decision pair per
-                    // revision cycle that has actually happened so far (real
-                    // data from details.revisions, updated live via the
-                    // existing realtime subscription) -- so the timeline
-                    // keeps growing across Revision 1, 2, 3... instead of a
-                    // fixed 6-step pipeline that can't represent more than
-                    // one cycle.
-                    const steps = [
-                      { label: 'Assignment accepted', done: assignment.status === 'ACCEPTED' || evaluationDone },
-                      { label: 'Editor evaluation', done: evaluationDone },
-                      { label: 'Reviewer assignment', done: reviewersAssignedDone },
-                      { label: 'Peer review', done: peerReviewDone },
-                      { label: 'Coordinator action', done: !!coordinatorActionDone },
-                      ...sortedRevisions.flatMap((rev) => [
-                        { label: `Revision ${rev.revision_number} — Editor Decision`, done: !!rev.editor_decision },
-                        { label: `Revision ${rev.revision_number} — Coordinator Decision`, done: !!rev.coordinator_decision },
-                      ]),
-                      { label: 'Final decision', done: !!finalDecisionDone },
-                    ];
-                    const currentIdx = steps.findIndex(s => !s.done);
-                    return steps.map((step, idx) => {
-                      const isCurrent = idx === currentIdx;
-                      const isUpNext = idx === currentIdx + 1;
-                      const statusLabel = step.done ? 'COMPLETED' : isCurrent ? 'IN PROGRESS' : isUpNext ? 'UP NEXT' : null;
-                      return (
-                        <div key={step.label} className={`relative flex gap-3.5 ${idx === steps.length - 1 ? '' : 'pb-7'}`}>
-                          {idx !== steps.length - 1 && (
-                            <div
-                              className={`absolute left-[15px] top-8 bottom-0 w-0.5 ${step.done ? 'bg-emerald-400' : 'bg-slate-200'}`}
-                            />
-                          )}
-                          <div className="relative z-10 flex-shrink-0">
-                            {step.done ? (
-                              <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm">
-                                <Check className="w-4 h-4 text-white" strokeWidth={3} />
-                              </div>
-                            ) : isCurrent ? (
-                              <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center ring-4 ring-blue-100 shadow-sm">
-                                <span className="w-2 h-2 rounded-full bg-white" />
-                              </div>
-                            ) : (
-                              <div className="w-8 h-8 rounded-full border-2 border-slate-200 bg-white" />
-                            )}
+                      let items: { label: string; sub: string; status: 'completed' | 'active' | 'pending' }[];
+
+                      if (manuscript.status === 'REJECTED') {
+                        const rejectedFromPeerReview = (reviewerAssignments?.length ?? 0) > 0;
+                        const idx = rejectedFromPeerReview ? 2 : 1;
+                        items = STANDARD_PIPELINE.map((s, i) => ({
+                          label: s.label,
+                          sub: i < idx ? (fmt(firstTimestampFor(rawStatusFor[i])) || 'Completed') : i === idx ? 'Rejected' : 'Not Reached',
+                          status: i < idx ? 'completed' : i === idx ? 'active' : 'pending',
+                        }));
+                      } else {
+                        const label = getManuscriptStatusLabel(manuscript, latestRevisionForTimeline);
+                        let currentIndex = STANDARD_PIPELINE.findIndex((s) => s.key === label);
+                        let detourSub: string | null = null;
+                        if (label === 'IN REVISION') {
+                          currentIndex = latestRevisionForTimeline?.origin === 'PEER_REVIEW' ? 2 : 1;
+                          detourSub = `In Revision (Revision ${latestRevisionForTimeline?.revision_number ?? ''})`;
+                        }
+                        if (currentIndex < 0) currentIndex = 0;
+                        items = STANDARD_PIPELINE.map((s, i) => {
+                          const ts = fmt(firstTimestampFor(rawStatusFor[i]));
+                          return {
+                            label: s.label,
+                            sub: i < currentIndex ? (ts || 'Completed') : i === currentIndex ? (detourSub || ts || 'In Progress') : 'Pending',
+                            status: i < currentIndex ? 'completed' : i === currentIndex ? 'active' : 'pending',
+                          };
+                        });
+                      }
+
+                      return items.map((item, idx) => {
+                        let markerStyle = 'bg-white border-slate-300 text-slate-400';
+                        let textStyle = 'text-slate-950 font-bold text-[14px]';
+                        let subStyle = 'text-slate-700 font-bold text-[12px] font-mono';
+                        if (item.status === 'completed') {
+                          markerStyle = 'bg-[#008751] border-[#008751] text-white';
+                          textStyle = 'text-black font-semibold text-[14px]';
+                          subStyle = 'text-[#004d2b] font-bold text-[12px] font-mono';
+                        } else if (item.status === 'active') {
+                          markerStyle = 'border-2 border-[#008751] bg-[#eefcf5] text-[#008751]';
+                          textStyle = 'text-[#008751] font-semibold text-[14px]';
+                          subStyle = 'text-emerald-800 font-bold text-[12px] font-mono';
+                        }
+                        return (
+                          <div key={idx} className="relative">
+                            <div className={`absolute -left-[30.5px] top-0.5 w-5 h-5 rounded-full flex items-center justify-center border-2 transition duration-150 ${markerStyle}`}>
+                              {item.status === 'completed' ? (
+                                <Check className="w-2.5 h-2.5 stroke-[3.5]" />
+                              ) : item.status === 'active' ? (
+                                <span className="w-1.5 h-1.5 bg-[#008751] rounded-full" />
+                              ) : (
+                                <span className="w-1.5 h-1.5 bg-slate-300 rounded-full" />
+                              )}
+                            </div>
+                            <div className="space-y-0.5 text-left">
+                              <span className={`block ${textStyle}`}>{item.label}</span>
+                              <span className={`block ${subStyle}`}>{item.sub}</span>
+                            </div>
                           </div>
-                          <div className="pt-1.5 min-w-0">
-                            <p className={`text-[13px] leading-tight ${
-                              step.done ? 'font-medium text-slate-800' : isCurrent ? 'font-bold text-slate-900' : 'font-medium text-slate-400'
-                            }`}>
-                              {step.label}
-                            </p>
-                            {statusLabel && (
-                              <span className={`inline-block mt-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded ${
-                                step.done
-                                  ? 'text-emerald-700 bg-emerald-50'
-                                  : isCurrent
-                                  ? 'text-blue-700 bg-blue-50'
-                                  : 'text-slate-500 bg-slate-100'
-                              }`}>
-                                {statusLabel}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    });
-                  })()}
+                        );
+                      });
+                    })()}
+                  </div>
                 </div>
 
                 {/* REVIEWERS */}
