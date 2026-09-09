@@ -1,6 +1,10 @@
 import { Fragment, useState, useEffect } from 'react';
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, StatusHistoryRow, ProfileRow, ScreeningResponse } from '../../../lib/workflow';
-import { publishDecision, coordinatorSendRevisionToReviewers, coordinatorSendRevisionToEditor, coordinatorSendReviewsToEditor, listActiveProfilesByRole, getProfilesByIds, sendToPublisher } from '../../../lib/workflow';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, StatusHistoryRow, ProfileRow, ScreeningResponse, SuggestedReviewerRow, EditorReviewerActionRow } from '../../../lib/workflow';
+import {
+  publishDecision, coordinatorSendRevisionToReviewers, coordinatorSendRevisionToEditor, coordinatorSendReviewsToEditor,
+  coordinatorSendReviewerInvitations, getSuggestedReviewers, getEditorReviewerActions, getPendingEditorSuggestions,
+  listActiveProfilesByRole, getProfilesByIds, sendToPublisher
+} from '../../../lib/workflow';
 import {
   getProduction, startProduction, assignGDMember, subscribeToProduction, sendProofToAuthor,
   coordinatorNotifyGDMember, coordinatorSendToEditor, coordinatorSendToAuthorFinal, editorSendCorrectionsToGD, coordinatorSendToGdForFinalize, ProductionRow
@@ -122,6 +126,12 @@ export function DecisionTab({
   const [sendReviewsToEditorError, setSendReviewsToEditorError] = useState('');
   const [sendingRevisionToEditor, setSendingRevisionToEditor] = useState(false);
   const [sendRevisionToEditorError, setSendRevisionToEditorError] = useState('');
+  // "Invite Reviewers" -- also moved here from OverviewTab.tsx's "Current
+  // Status" card, same consolidation as the two actions above.
+  const [suggestedReviewers, setSuggestedReviewers] = useState<SuggestedReviewerRow[]>([]);
+  const [editorReviewerActions, setEditorReviewerActions] = useState<EditorReviewerActionRow[]>([]);
+  const [sendingInvitations, setSendingInvitations] = useState(false);
+  const [sendInvitationsError, setSendInvitationsError] = useState('');
   // "Choose Publisher" gate -- shown once READY_FOR_PUBLICATION, mirrors the
   // GD Member assignment gate above (pick existing or create new), just
   // targeting the Publisher role and send_to_publisher() instead.
@@ -170,6 +180,11 @@ export function DecisionTab({
     const unsubscribe = subscribeToProduction(refetch);
     return () => { cancelled = true; unsubscribe(); };
   }, [manuscript.id, manuscript.status]);
+
+  useEffect(() => {
+    getSuggestedReviewers(manuscript.id).then(setSuggestedReviewers).catch(() => setSuggestedReviewers([]));
+    getEditorReviewerActions(manuscript.id).then(setEditorReviewerActions).catch(() => setEditorReviewerActions([]));
+  }, [manuscript.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -271,6 +286,19 @@ export function DecisionTab({
       setNotifyGDMemberError(e.message || 'Failed to notify the GD Member.');
     } finally {
       setNotifyingGDMember(false);
+    }
+  };
+
+  const handleInviteReviewers = async () => {
+    setSendingInvitations(true);
+    setSendInvitationsError('');
+    try {
+      await coordinatorSendReviewerInvitations(manuscript.id);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendInvitationsError(e.message || 'Failed to send reviewer invitations');
+    } finally {
+      setSendingInvitations(false);
     }
   };
 
@@ -477,10 +505,38 @@ export function DecisionTab({
   const latestRevision = getLatestRevision(revisions);
   const sortedRevisions = [...revisions].sort((a, b) => a.revision_number - b.revision_number);
   const firstSubmissionRevision = sortedRevisions[0] || null;
+  // hasRequiredReviews (above) checks every non-declined reviewer_assignments
+  // row ever, regardless of round -- for a manuscript whose ORIGINAL
+  // reviewers already submitted (revision_number 0) but hasn't yet had its
+  // re-check reviewers re-invited for the CURRENT revision round, that stale
+  // "every() is true" reading wrongly looked like the re-check was already
+  // done. Reviewer re-invites are always stamped with the revision they're
+  // for (coordinator_send_revision_to_reviewers), so scoping to the current
+  // round's own rows is what actually answers "are THIS round's reviews in".
+  // latestRevision can be an EDITOR_SCREENING-origin revision (created
+  // before peer review ever started) whose revision_number is already > 0,
+  // while the reviewer_assignments for the FIRST peer-review round are
+  // always stamped revision_number 0 (coordinator_send_reviewer_invitations
+  // never sets one) -- only a genuine re-review round's invitations
+  // (coordinator_send_revision_to_reviewers) are stamped with a PEER_REVIEW-
+  // origin revision's number. Scoping against the wrong (screening) revision
+  // number wrongly zeroed out a fully-submitted original round.
+  const currentPeerReviewRoundNumber = latestRevision?.origin === 'PEER_REVIEW' ? (latestRevision.revision_number || 0) : 0;
+  const currentRoundReviewerAssignments = reviewerAssignments.filter(
+    r => r.status !== 'DECLINED' && (r.revision_number || 0) === currentPeerReviewRoundNumber
+  );
+  const hasCurrentRoundReviews = currentRoundReviewerAssignments.length > 0 && currentRoundReviewerAssignments.every(r => r.status === 'SUBMITTED');
   // Moved here from OverviewTab.tsx's "Current Status" card -- same gating
   // logic (coordinator_send_reviews_to_editor / coordinator_send_revision_to_editor).
-  const readyToSendReviewsToEditor = manuscript.status === 'AWAITING_DECISION' && hasRequiredReviews && !manuscript.reviews_released_at;
+  const readyToSendReviewsToEditor = manuscript.status === 'AWAITING_DECISION' && hasCurrentRoundReviews && !manuscript.reviews_released_at;
   const readyToSendToEditor = manuscript.status === 'REVISION_REQUESTED' && latestRevision?.status === 'REVISION_SUBMITTED';
+  // "Invite Reviewers" -- mirrors OverviewTab.tsx's own computation exactly
+  // (no revision-number filter, since editor_select_reviewers() never stamps
+  // one on the suggestions it creates).
+  const pendingReviewerInvites = manuscript.status === 'EDITOR_REVIEW'
+    ? getPendingEditorSuggestions(suggestedReviewers, editorReviewerActions)
+    : [];
+  const readyToInviteReviewers = pendingReviewerInvites.length > 0;
   // Display-only signal for the "Decision Unavailable" checklist below --
   // hasEditorEvaluation resets to false on every revision cycle (assessment_
   // status goes back to NOT_STARTED, see the comment above pendingRevisionConfirm),
@@ -528,7 +584,7 @@ export function DecisionTab({
   // for this state instead of showing a stale "Send to Reviewers for
   // Re-review" button that was already actioned.
   const additionalReviewAwaitingSend = !!(
-    pendingRevisionConfirm && decidedRevision?.editor_decision === 'ADDITIONAL_REVIEW' && hasRequiredReviews
+    pendingRevisionConfirm && decidedRevision?.editor_decision === 'ADDITIONAL_REVIEW' && hasCurrentRoundReviews
   );
   // Peer-review round: reviews already pushed the manuscript to
   // AWAITING_DECISION and at least one reviewer was ever assigned. Counts
@@ -960,6 +1016,26 @@ export function DecisionTab({
       {/* Moved here from OverviewTab.tsx's "Current Status" card -- every
           Coordinator action now lives on this tab instead of being split
           across Overview and Decision. */}
+      {!isEditor && readyToInviteReviewers && (
+        <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+          <p className="text-sm font-bold text-teal-900 mb-1">
+            Editor selected {pendingReviewerInvites.length} reviewer{pendingReviewerInvites.length === 1 ? '' : 's'} — ready to invite
+          </p>
+          <p className="text-xs text-teal-800 mb-3">Send invitations so peer review can begin.</p>
+          {sendInvitationsError && (
+            <p className="text-xs text-red-700 mb-2">{sendInvitationsError}</p>
+          )}
+          <button
+            onClick={handleInviteReviewers}
+            disabled={sendingInvitations}
+            className="w-full bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-sm font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+          >
+            {sendingInvitations && <Loader2 className="w-4 h-4 animate-spin" />}
+            Invite Reviewers
+          </button>
+        </div>
+      )}
+
       {!isEditor && readyToSendReviewsToEditor && (
         <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
           <p className="text-sm font-bold text-teal-900 mb-1">

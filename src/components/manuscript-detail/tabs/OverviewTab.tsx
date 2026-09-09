@@ -42,10 +42,30 @@ export function OverviewTab({
   // hasn't accepted yet -- see getCoordinatorStatusLabel() for why this
   // stays separate from the shared EDITORIAL REVIEW status everyone else sees.
   const pendingEditorAcceptance = manuscript.status === 'EDITOR_REVIEW' && !!activeEditor && activeEditor.status !== 'ACCEPTED';
-  const reviewsSubmitted = reviewerAssignments.filter(r => r.status === 'SUBMITTED').length;
-  const reviewsInvited = reviewerAssignments.filter(r => r.status === 'INVITED').length;
-  const reviewsAccepted = reviewerAssignments.filter(r => r.status === 'ACCEPTED').length;
-  const reviewsTotal = reviewerAssignments.length;
+  const latestRevision = getLatestRevision(revisions);
+  const revisionN = latestRevision?.revision_number;
+  // latestRevision can be an EDITOR_SCREENING-origin revision (predating
+  // peer review) whose number is already > 0, while the FIRST peer-review
+  // round's reviewer_assignments are always stamped revision_number 0 --
+  // only a genuine re-review round (coordinator_send_revision_to_reviewers)
+  // stamps a PEER_REVIEW-origin revision's number. Scoping against the
+  // wrong revision number wrongly excluded a fully-submitted round.
+  const currentPeerReviewRoundNumber = latestRevision?.origin === 'PEER_REVIEW' ? (revisionN || 0) : 0;
+  // Scoped to the CURRENT round only -- summing every round ever (the old
+  // behavior) mixed a finished original round's reviewers with a finished
+  // re-review round's reviewers into one misleading total (e.g. "4
+  // Completed" out of a round that only ever had 2), and kept showing that
+  // stale total long after the manuscript moved past peer review entirely.
+  const currentRoundReviewerAssignments = reviewerAssignments.filter(r => (r.revision_number || 0) === currentPeerReviewRoundNumber);
+  const reviewsSubmitted = currentRoundReviewerAssignments.filter(r => r.status === 'SUBMITTED').length;
+  const reviewsInvited = currentRoundReviewerAssignments.filter(r => r.status === 'INVITED').length;
+  const reviewsAccepted = currentRoundReviewerAssignments.filter(r => r.status === 'ACCEPTED').length;
+  const reviewsTotal = currentRoundReviewerAssignments.length;
+  // Once the manuscript has fully left the peer-review/decision flow, its
+  // last round's numbers are history, not "current status" -- the
+  // Coordinator asked this card to track the live decision flow, not keep
+  // showing a stale review tally once production has started.
+  const reviewCycleConcluded = ['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
 
   // Assign Editor (SUBMITTED -> EDITOR_REVIEW)
   const [availableEditors, setAvailableEditors] = useState<ProfileRow[]>([]);
@@ -79,9 +99,6 @@ export function OverviewTab({
       setAssigning(false);
     }
   };
-
-  const latestRevision = getLatestRevision(revisions);
-  const revisionN = latestRevision?.revision_number;
 
   // Editor has selected its 2 reviewers for the current round but the
   // Coordinator hasn't sent invitations yet (manuscript.status stays
@@ -213,25 +230,12 @@ export function OverviewTab({
             <p className="text-sm text-slate-600 mt-1">{getStatusDescription()}</p>
           </div>
 
-          {readyToInviteReviewers && (
-            <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
-              <p className="text-sm font-bold text-teal-900 mb-1">Editor selected {pendingReviewerInvites.length} reviewer{pendingReviewerInvites.length === 1 ? '' : 's'} — ready to invite</p>
-              <p className="text-xs text-teal-800 mb-3">Send invitations so peer review can begin.</p>
-              <button
-                onClick={() => onGoToTab?.('review-board')}
-                className="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2.5 rounded-lg transition"
-              >
-                Invite Reviewers
-              </button>
-            </div>
-          )}
+          {/* Module: the "Invite Reviewers", "Send Reviews to Editor", and
+              "Send to Editor for Revision Review" action cards all moved to
+              the Decision tab -- every Coordinator action now lives there
+              instead of being split across Overview and Decision. */}
 
-          {/* Module: these two action cards (Send Reviews to Editor / Send
-              to Editor for Revision Review) moved to the Decision tab --
-              every Coordinator action now lives there instead of being
-              split across Overview and Decision. */}
-
-          {reviewsTotal > 0 && (
+          {!reviewCycleConcluded && reviewsTotal > 0 && (
             <div>
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Review Progress</p>
               <div className="space-y-3">

@@ -1098,7 +1098,23 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                 // "not done" forever once a revision loop started.
                 const evaluationDone = evaluationSubmitted || (assignment as any).scientific_merit != null || (assignment.screening_responses?.length ?? 0) > 0;
                 const revisionN = latestRevisionForReview?.revision_number;
-                const activeReviews = (reviewerAssignments || []).filter(r => r.status !== 'DECLINED');
+                // Scoped to the CURRENT revision round's own reviewer_assignments
+                // rows (coordinator_send_revision_to_reviewers always stamps
+                // re-invites with that revision's number) -- otherwise the
+                // original round's already-submitted reviews (revision_number 0)
+                // make this read "done" before the re-check reviewers have even
+                // been re-invited, let alone reported back.
+                // latestRevisionForReview can be an EDITOR_SCREENING-origin
+                // revision (predating peer review) whose number is already
+                // > 0, while the FIRST peer-review round's reviewer_
+                // assignments are always stamped revision_number 0 -- only a
+                // genuine re-review round stamps a PEER_REVIEW-origin
+                // revision's number. Fall back to 0 unless the latest
+                // revision is actually PEER_REVIEW-origin.
+                const currentPeerReviewRoundNumber = latestRevisionForReview?.origin === 'PEER_REVIEW' ? (revisionN || 0) : 0;
+                const activeReviews = (reviewerAssignments || []).filter(
+                  r => r.status !== 'DECLINED' && (r.revision_number || 0) === currentPeerReviewRoundNumber
+                );
                 const hasRequiredReviews = activeReviews.length > 0 && activeReviews.every(r => r.status === 'SUBMITTED');
                 const isPeerReviewRound = !isRevisionReviewPage && manuscript.status === 'AWAITING_DECISION' && (reviewerAssignments?.length || 0) > 0;
                 const editorHasSuggestedReviewers = (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR');
@@ -1113,19 +1129,45 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                 const latestReviewSubmittedAt = activeReviews.reduce<string | null>((latest, r) => (
                   r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
                 ), null);
-                const recommendationIsCurrent = !!assignment.recommendation && !!assignment.recommendation_submitted_at
-                  && !!latestReviewSubmittedAt && assignment.recommendation_submitted_at > latestReviewSubmittedAt;
+                // No reviewers invited for this specific round (activeReviews
+                // is scoped to the current revision_number) means there's
+                // nothing to compare the recommendation's freshness against
+                // via reviews -- fall back to comparing it against when this
+                // revision round itself was requested (same idea as the
+                // Reviews tab's isRevisionDecision branch), so a genuinely
+                // new resubmission still correctly invalidates a stale
+                // recommendation from an earlier round instead of always
+                // reading as current. Without this, the Status line below
+                // stayed stuck on the generic stage label instead of
+                // reflecting a decision just made with no reviewer re-check.
+                const recommendationIsCurrent = !!assignment.recommendation && !!assignment.recommendation_submitted_at && (
+                  activeReviews.length > 0
+                    ? (!!latestReviewSubmittedAt && assignment.recommendation_submitted_at > latestReviewSubmittedAt)
+                    : (!!latestRevisionForReview && assignment.recommendation_submitted_at > latestRevisionForReview.requested_at)
+                );
                 const readyForPeerReviewDecision = isPeerReviewRound && hasRequiredReviews && !!manuscript.reviews_released_at && !recommendationIsCurrent;
                 const reviewsSubmittedCount = activeReviews.filter(r => r.status === 'SUBMITTED').length;
 
                 const getStatusDescription = (): string => {
                   if (pendingProductionVerification) return 'A proof is ready for your review -- Approve/Publish or request corrections.';
+                  // Terminal, Coordinator-confirmed outcomes take priority
+                  // over everything below -- without this, an already
+                  // Accepted/Rejected/Published manuscript kept saying "Your
+                  // recommendation is with the Coordinator" forever, even
+                  // though the Coordinator had already acted on it.
+                  if (manuscript.status === 'REJECTED') return 'This manuscript has been rejected.';
+                  if (manuscript.status === 'PUBLISHED') return 'This manuscript has been published.';
+                  if (manuscript.status === 'ACCEPTED' && (!production || production.production_status === 'NOT_STARTED')) {
+                    return 'Manuscript accepted -- awaiting production.';
+                  }
                   if (!evaluationDone) return 'Complete your editorial screening evaluation.';
                   if (readyToSelectReviewers) return 'Select 2 reviewers to begin peer review.';
+                  if (editorHasSuggestedReviewers && manuscript.status === 'EDITOR_REVIEW') return 'Reviewers selected -- waiting for the Coordinator to send invitations.';
                   if (isRevisionReviewPage) return `Revision ${revisionN} is ready for your review.`;
                   if (isPeerReviewRound && !hasRequiredReviews) return 'Waiting for reviewers to submit their reports.';
                   if (isPeerReviewRound && hasRequiredReviews && !manuscript.reviews_released_at) return 'Reviews are in -- waiting for the Coordinator to send them to you.';
                   if (readyForPeerReviewDecision) return 'All reviews are in -- make your decision.';
+                  if (manuscript.status === 'UNDER_REVIEW') return 'Reviewers have been invited and peer review is underway.';
                   if (revisionN && manuscript.status === 'REVISION_REQUESTED') {
                     return latestRevisionForReview?.status === 'AWAITING_AUTHOR_UPLOAD'
                       ? `Waiting for the author to submit Revision ${revisionN}.`
@@ -1153,8 +1195,35 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                                 here instead of the generic stage label -- the
                                 Coordinator hasn't acted on it yet, but the
                                 Editor's own status should already read as
-                                decided, not stuck at "Peer Review" forever. */}
-                            {recommendationIsCurrent
+                                decided, not stuck at "Peer Review" forever.
+                                But once the Coordinator HAS acted and the
+                                manuscript reached a real terminal state
+                                (Accepted/Rejected/Published), that outcome
+                                takes priority -- otherwise this kept showing
+                                "Decision Submitted: Accept" forever instead of
+                                updating to the manuscript's actual final
+                                status. Same for once reviewers are chosen and
+                                invited (status moves to UNDER_REVIEW) -- the
+                                Editor's ACCEPT recommendation already did its
+                                job kicking off peer review, so the Status
+                                should read "PEER REVIEW" from here on, not
+                                keep repeating the stale decision. "Decision
+                                Submitted" is only ever the right thing to
+                                show while the manuscript is still sitting at
+                                EDITOR_REVIEW/AWAITING_DECISION waiting on the
+                                Coordinator -- and not even then once the
+                                Editor has already picked their 2 reviewers
+                                (editorHasSuggestedReviewers). Choosing
+                                reviewers doesn't touch manuscript.status
+                                itself (that only moves to UNDER_REVIEW once
+                                the Coordinator sends the actual invitations),
+                                so without this extra check the Status stayed
+                                on "Decision Submitted: Accept" for that whole
+                                gap even though peer review has effectively
+                                already started from the Editor's side. */}
+                            {editorHasSuggestedReviewers && manuscript.status === 'EDITOR_REVIEW'
+                              ? 'PEER REVIEW'
+                              : recommendationIsCurrent && ['EDITOR_REVIEW', 'AWAITING_DECISION'].includes(manuscript.status)
                               ? `Decision Submitted: ${assignment.recommendation?.replace(/_/g, ' ')}`
                               : getManuscriptStatusLabel(manuscript, latestRevisionForReview, production?.production_status)}
                           </p>
@@ -1237,18 +1306,29 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                           </div>
                         )}
 
-                        {reviewerAssignments && reviewerAssignments.length > 0 && (
+                        {/* Scoped to activeReviews (the CURRENT revision
+                            round's own reviewer_assignments) -- the raw
+                            reviewerAssignments count mixes in every earlier
+                            round's rows too, which showed a misleading
+                            "0 / 4" for a round that never had its own
+                            reviewers invited in the first place. */}
+                        {/* Once the manuscript has fully left the peer-review/
+                            decision flow, the last round's tally is history,
+                            not "current status" -- this card must track the
+                            live decision flow, not keep showing a stale
+                            review count once production has started. */}
+                        {!['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status) && activeReviews.length > 0 && (
                           <div>
                             <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Review Progress</p>
                             <div className="space-y-3">
                               <div className="flex items-center justify-between text-sm">
                                 <span className="text-slate-600">Reviews Submitted</span>
-                                <span className="font-bold text-slate-900">{reviewsSubmittedCount} / {reviewerAssignments.length}</span>
+                                <span className="font-bold text-slate-900">{reviewsSubmittedCount} / {activeReviews.length}</span>
                               </div>
                               <div className="w-full bg-slate-200 rounded-full h-2">
                                 <div
                                   className="bg-emerald-600 h-2 rounded-full transition-all"
-                                  style={{ width: `${reviewerAssignments.length > 0 ? (reviewsSubmittedCount / reviewerAssignments.length) * 100 : 0}%` }}
+                                  style={{ width: `${activeReviews.length > 0 ? (reviewsSubmittedCount / activeReviews.length) * 100 : 0}%` }}
                                 ></div>
                               </div>
                             </div>
@@ -1597,16 +1677,37 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                   // Declined rows don't block completion -- only the
                   // non-declined ones need to have actually submitted (a
                   // pre-existing gap: a stale DECLINED row would otherwise
-                  // permanently block this from ever being "ready").
-                  const activeReviews = (reviewerAssignments || []).filter(r => r.status !== 'DECLINED');
+                  // permanently block this from ever being "ready"). Also
+                  // scoped to the current revision round's own rows -- an
+                  // earlier round's already-submitted reviews (revision_number
+                  // 0) must not make a fresh re-check round look done before
+                  // its own re-invited reviewers have reported back.
+                  // latestRevision can be an EDITOR_SCREENING-origin revision
+                  // (predating peer review) whose number is already > 0,
+                  // while the FIRST peer-review round's reviewer_assignments
+                  // are always stamped revision_number 0 -- only a genuine
+                  // re-review round (coordinator_send_revision_to_reviewers)
+                  // stamps a PEER_REVIEW-origin revision's number. Scoping
+                  // against a screening revision's number wrongly zeroed out
+                  // a fully-submitted original round.
+                  const currentPeerReviewRoundNumber = latestRevision?.origin === 'PEER_REVIEW' ? (latestRevision.revision_number || 0) : 0;
+                  const activeReviews = (reviewerAssignments || []).filter(
+                    r => r.status !== 'DECLINED' && (r.revision_number || 0) === currentPeerReviewRoundNumber
+                  );
                   const hasRequiredReviews = activeReviews.length > 0 && activeReviews.every(r => r.status === 'SUBMITTED');
                   const isPeerReviewRound = !isRevisionDecision && manuscript.status === 'AWAITING_DECISION' && (reviewerAssignments?.length || 0) > 0;
                   // A re-review round (isRevisionDecision on a PEER_REVIEW-
-                  // origin revision) goes through the same Coordinator
-                  // release gate as the original peer-review round -- see
-                  // coordinator_send_reviews_to_editor() in
-                  // 0041_coordinator_releases_reviews_to_editor.sql.
-                  const needsReviewerGate = isPeerReviewRound || (isRevisionDecision && latestRevision?.origin === 'PEER_REVIEW');
+                  // origin revision) only goes through the same Coordinator
+                  // release gate as the original peer-review round when the
+                  // reviewers were actually (re-)invited for THIS round --
+                  // see coordinator_send_reviews_to_editor() in
+                  // 0041_coordinator_releases_reviews_to_editor.sql. A normal
+                  // MAJOR_REVISION resubmission the Editor decides on
+                  // directly (no "Move to Reviewer" re-check requested) has
+                  // zero reviewer_assignments rows for this revision_number,
+                  // and must not be blocked waiting for reviews that were
+                  // never asked for.
+                  const needsReviewerGate = isPeerReviewRound || (isRevisionDecision && latestRevision?.origin === 'PEER_REVIEW' && activeReviews.length > 0);
                   const latestReviewSubmittedAt = activeReviews.reduce<string | null>((latest, r) => (
                     r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
                   ), null);
@@ -1615,12 +1716,18 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                   // submitted after the thing it's deciding on -- otherwise
                   // it's a stale leftover from an earlier round (recommendation
                   // isn't reset per-round, only assessment_status is) and the
-                  // editor still needs to decide on *this* round.
+                  // editor still needs to decide on *this* round. When no
+                  // reviewers were ever invited for this specific round
+                  // (activeReviews is already scoped to the current
+                  // revision_number) there's nothing to be stale against --
+                  // e.g. a plain MAJOR_REVISION resubmission the Editor
+                  // decides on directly, with no "Move to Reviewer" re-check
+                  // requested -- so the recommendation is trivially current.
                   const recommendationIsCurrent = !!assignment.recommendation && !!assignment.recommendation_submitted_at && (
                     isRevisionDecision
                       ? new Date(assignment.recommendation_submitted_at) > new Date(latestRevision!.requested_at)
                       : isPeerReviewRound
-                      ? (!!latestReviewSubmittedAt && new Date(assignment.recommendation_submitted_at) > new Date(latestReviewSubmittedAt))
+                      ? (activeReviews.length === 0 || (!!latestReviewSubmittedAt && new Date(assignment.recommendation_submitted_at) > new Date(latestReviewSubmittedAt)))
                       : true
                   );
 
@@ -2241,16 +2348,37 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                   // Declined rows don't block completion -- only the
                   // non-declined ones need to have actually submitted (a
                   // pre-existing gap: a stale DECLINED row would otherwise
-                  // permanently block this from ever being "ready").
-                  const activeReviews = (reviewerAssignments || []).filter(r => r.status !== 'DECLINED');
+                  // permanently block this from ever being "ready"). Also
+                  // scoped to the current revision round's own rows -- an
+                  // earlier round's already-submitted reviews (revision_number
+                  // 0) must not make a fresh re-check round look done before
+                  // its own re-invited reviewers have reported back.
+                  // latestRevision can be an EDITOR_SCREENING-origin revision
+                  // (predating peer review) whose number is already > 0,
+                  // while the FIRST peer-review round's reviewer_assignments
+                  // are always stamped revision_number 0 -- only a genuine
+                  // re-review round (coordinator_send_revision_to_reviewers)
+                  // stamps a PEER_REVIEW-origin revision's number. Scoping
+                  // against a screening revision's number wrongly zeroed out
+                  // a fully-submitted original round.
+                  const currentPeerReviewRoundNumber = latestRevision?.origin === 'PEER_REVIEW' ? (latestRevision.revision_number || 0) : 0;
+                  const activeReviews = (reviewerAssignments || []).filter(
+                    r => r.status !== 'DECLINED' && (r.revision_number || 0) === currentPeerReviewRoundNumber
+                  );
                   const hasRequiredReviews = activeReviews.length > 0 && activeReviews.every(r => r.status === 'SUBMITTED');
                   const isPeerReviewRound = !isRevisionDecision && manuscript.status === 'AWAITING_DECISION' && (reviewerAssignments?.length || 0) > 0;
                   // A re-review round (isRevisionDecision on a PEER_REVIEW-
-                  // origin revision) goes through the same Coordinator
-                  // release gate as the original peer-review round -- see
-                  // coordinator_send_reviews_to_editor() in
-                  // 0041_coordinator_releases_reviews_to_editor.sql.
-                  const needsReviewerGate = isPeerReviewRound || (isRevisionDecision && latestRevision?.origin === 'PEER_REVIEW');
+                  // origin revision) only goes through the same Coordinator
+                  // release gate as the original peer-review round when the
+                  // reviewers were actually (re-)invited for THIS round --
+                  // see coordinator_send_reviews_to_editor() in
+                  // 0041_coordinator_releases_reviews_to_editor.sql. A normal
+                  // MAJOR_REVISION resubmission the Editor decides on
+                  // directly (no "Move to Reviewer" re-check requested) has
+                  // zero reviewer_assignments rows for this revision_number,
+                  // and must not be blocked waiting for reviews that were
+                  // never asked for.
+                  const needsReviewerGate = isPeerReviewRound || (isRevisionDecision && latestRevision?.origin === 'PEER_REVIEW' && activeReviews.length > 0);
                   const latestReviewSubmittedAt = activeReviews.reduce<string | null>((latest, r) => (
                     r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
                   ), null);
@@ -2259,12 +2387,18 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                   // submitted after the thing it's deciding on -- otherwise
                   // it's a stale leftover from an earlier round (recommendation
                   // isn't reset per-round, only assessment_status is) and the
-                  // editor still needs to decide on *this* round.
+                  // editor still needs to decide on *this* round. When no
+                  // reviewers were ever invited for this specific round
+                  // (activeReviews is already scoped to the current
+                  // revision_number) there's nothing to be stale against --
+                  // e.g. a plain MAJOR_REVISION resubmission the Editor
+                  // decides on directly, with no "Move to Reviewer" re-check
+                  // requested -- so the recommendation is trivially current.
                   const recommendationIsCurrent = !!assignment.recommendation && !!assignment.recommendation_submitted_at && (
                     isRevisionDecision
                       ? new Date(assignment.recommendation_submitted_at) > new Date(latestRevision!.requested_at)
                       : isPeerReviewRound
-                      ? (!!latestReviewSubmittedAt && new Date(assignment.recommendation_submitted_at) > new Date(latestReviewSubmittedAt))
+                      ? (activeReviews.length === 0 || (!!latestReviewSubmittedAt && new Date(assignment.recommendation_submitted_at) > new Date(latestReviewSubmittedAt)))
                       : true
                   );
 

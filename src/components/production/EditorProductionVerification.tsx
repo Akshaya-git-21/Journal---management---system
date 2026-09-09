@@ -227,8 +227,7 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
 
       {awaitingSendToGD && (
         <div className="rounded-2xl border border-slate-200 p-4 space-y-1">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Corrections Recorded</p>
-          <p className="text-xs text-slate-500">Waiting for the Coordinator to send this to {gdMemberProfile?.name || 'the GD Member'}.</p>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Sent for Correction</p>
         </div>
       )}
 
