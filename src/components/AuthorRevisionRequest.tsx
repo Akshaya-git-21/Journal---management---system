@@ -277,10 +277,18 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
     ? 'Return to Author'
     : isMinor ? 'Minor Revision' : selectedRevision.decision_type === 'MAJOR_REVISION' ? 'Major Revision' : 'Revision';
   const isSubmitted = selectedRevision.status === 'REVISION_SUBMITTED';
-  // decision_letter is buildAuthorNote()'s "Editor Comments:\n<note>" (see
-  // DecisionTab.tsx) -- strip that prefix since the card below already has
-  // its own "Editor Comments" label.
-  const decisionLetterNote = selectedRevision.decision_letter?.replace(/^Editor Comments:\n/, '').trim() || null;
+  // decision_letter is buildAuthorNote()'s assembled
+  // "Editor Comments:\n<note>\n\nReviewer Comments:\nReviewer 1: <c1>\n\nReviewer 2: <c2>"
+  // (see DecisionTab.tsx) -- split it back apart so each reviewer's
+  // comment gets its own card instead of being lumped under one "Editor
+  // Comments" paragraph.
+  const rawDecisionLetter = selectedRevision.decision_letter || '';
+  const editorSectionMatch = rawDecisionLetter.match(/Editor Comments:\n([\s\S]*?)(?:\n\nReviewer Comments:|$)/);
+  const decisionLetterNote = editorSectionMatch ? editorSectionMatch[1].trim() || null : null;
+  const reviewerSectionMatch = rawDecisionLetter.match(/Reviewer Comments:\n([\s\S]*)$/);
+  const reviewerComments = reviewerSectionMatch
+    ? reviewerSectionMatch[1].trim().split(/\n\n(?=Reviewer \d+:)/).map((s) => s.replace(/^Reviewer \d+:\s*/, '').trim())
+    : [];
 
   return (
     <div className="space-y-6">
@@ -341,6 +349,13 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
           decision_letter set (the Coordinator's note, built from that same
           editor comment -- see buildAuthorNote() in DecisionTab.tsx), so
           decision_letter is what actually carries it forward to the Author. */}
+      {reviewerComments.map((comment, idx) => (
+        <div key={idx} className="bg-white border border-slate-200 rounded-lg p-6">
+          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Reviewer {idx + 1} Comments</h3>
+          <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{comment}</p>
+        </div>
+      ))}
+
       <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
         <div>
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Editor's Decision</h3>

@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, StatusHistoryRow, ProfileRow, ScreeningResponse } from '../../../lib/workflow';
-import { publishDecision, coordinatorSendRevisionToReviewers, listActiveProfilesByRole, getProfilesByIds, sendToPublisher } from '../../../lib/workflow';
+import { publishDecision, coordinatorSendRevisionToReviewers, coordinatorSendRevisionToEditor, coordinatorSendReviewsToEditor, listActiveProfilesByRole, getProfilesByIds, sendToPublisher } from '../../../lib/workflow';
 import {
   getProduction, startProduction, assignGDMember, subscribeToProduction, sendProofToAuthor,
   coordinatorNotifyGDMember, coordinatorSendToEditor, coordinatorSendToAuthorFinal, editorSendCorrectionsToGD, coordinatorSendToGdForFinalize, ProductionRow
@@ -114,6 +114,14 @@ export function DecisionTab({
   const [sendToGdForFinalizeError, setSendToGdForFinalizeError] = useState('');
   const [sendingCorrectionsToGD, setSendingCorrectionsToGD] = useState(false);
   const [sendCorrectionsToGDError, setSendCorrectionsToGDError] = useState('');
+  // Moved here from OverviewTab.tsx's "Current Status" card -- these are the
+  // pre-decision peer-review actions (sending submitted reviews on to the
+  // Editor, and forwarding a resubmitted revision back to the Editor), now
+  // consolidated alongside every other Coordinator action on this tab.
+  const [sendingReviewsToEditor, setSendingReviewsToEditor] = useState(false);
+  const [sendReviewsToEditorError, setSendReviewsToEditorError] = useState('');
+  const [sendingRevisionToEditor, setSendingRevisionToEditor] = useState(false);
+  const [sendRevisionToEditorError, setSendRevisionToEditorError] = useState('');
   // "Choose Publisher" gate -- shown once READY_FOR_PUBLICATION, mirrors the
   // GD Member assignment gate above (pick existing or create new), just
   // targeting the Publisher role and send_to_publisher() instead.
@@ -263,6 +271,32 @@ export function DecisionTab({
       setNotifyGDMemberError(e.message || 'Failed to notify the GD Member.');
     } finally {
       setNotifyingGDMember(false);
+    }
+  };
+
+  const handleSendReviewsToEditor = async () => {
+    setSendingReviewsToEditor(true);
+    setSendReviewsToEditorError('');
+    try {
+      await coordinatorSendReviewsToEditor(manuscript.id);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendReviewsToEditorError(e.message || 'Failed to send reviews to editor');
+    } finally {
+      setSendingReviewsToEditor(false);
+    }
+  };
+
+  const handleSendRevisionToEditor = async () => {
+    setSendingRevisionToEditor(true);
+    setSendRevisionToEditorError('');
+    try {
+      await coordinatorSendRevisionToEditor(manuscript.id);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendRevisionToEditorError(e.message || 'Failed to send revision to editor');
+    } finally {
+      setSendingRevisionToEditor(false);
     }
   };
 
@@ -443,6 +477,10 @@ export function DecisionTab({
   const latestRevision = getLatestRevision(revisions);
   const sortedRevisions = [...revisions].sort((a, b) => a.revision_number - b.revision_number);
   const firstSubmissionRevision = sortedRevisions[0] || null;
+  // Moved here from OverviewTab.tsx's "Current Status" card -- same gating
+  // logic (coordinator_send_reviews_to_editor / coordinator_send_revision_to_editor).
+  const readyToSendReviewsToEditor = manuscript.status === 'AWAITING_DECISION' && hasRequiredReviews && !manuscript.reviews_released_at;
+  const readyToSendToEditor = manuscript.status === 'REVISION_REQUESTED' && latestRevision?.status === 'REVISION_SUBMITTED';
   // Display-only signal for the "Decision Unavailable" checklist below --
   // hasEditorEvaluation resets to false on every revision cycle (assessment_
   // status goes back to NOT_STARTED, see the comment above pendingRevisionConfirm),
@@ -481,6 +519,16 @@ export function DecisionTab({
     // UI below behind a stale "Accept Submission N -- Send to Production"
     // button that was never the right action for this cycle.
     !(decidedRevision.origin === 'EDITOR_SCREENING' && decidedRevision.editor_decision === 'ACCEPT')
+  );
+  // The Editor asked for a reviewer re-check and the reviewers have now all
+  // resubmitted -- the ball is with the Coordinator to forward those
+  // reviews to the Editor (the "ready to send reviews to editor" card),
+  // not to make a fresh Accept/Revision call on the ADDITIONAL_REVIEW row
+  // itself, so the whole "Editor Decision" action card below stays hidden
+  // for this state instead of showing a stale "Send to Reviewers for
+  // Re-review" button that was already actioned.
+  const additionalReviewAwaitingSend = !!(
+    pendingRevisionConfirm && decidedRevision?.editor_decision === 'ADDITIONAL_REVIEW' && hasRequiredReviews
   );
   // Peer-review round: reviews already pushed the manuscript to
   // AWAITING_DECISION and at least one reviewer was ever assigned. Counts
@@ -567,7 +615,15 @@ export function DecisionTab({
     // the correct decidedRevision-based note the other effect just set.
     if (pendingPeerReviewConfirm && !pendingRevisionConfirm && !letter && activeEditor) {
       const editorNoteOnly = activeEditor.peer_review_comments?.split(/\n\nReviewer Comments:/)[0];
-      const combined = buildAuthorNote(editorNoteOnly, []);
+      // Pull in each submitted reviewer's own comments_to_author -- this is
+      // a genuine peer-review decision (not a revision-loop round, which
+      // has no reviewers of its own), so the letter sent to the Author
+      // should carry what the reviewers actually wrote, not just the
+      // Editor's note.
+      const reviewerComments = activeReviewerAssignments
+        .filter(r => r.status === 'SUBMITTED' && r.comments_to_author?.trim())
+        .map(r => r.comments_to_author!.trim());
+      const combined = buildAuthorNote(editorNoteOnly, reviewerComments);
       if (combined) setLetter(combined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -901,12 +957,53 @@ export function DecisionTab({
         );
       })}
 
+      {/* Moved here from OverviewTab.tsx's "Current Status" card -- every
+          Coordinator action now lives on this tab instead of being split
+          across Overview and Decision. */}
+      {!isEditor && readyToSendReviewsToEditor && (
+        <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+          <p className="text-sm font-bold text-teal-900 mb-1">
+            {decidedRevision?.editor_decision === 'ADDITIONAL_REVIEW' ? 'All Re-reviews are in' : 'All reviews are in'} — ready to send to the editor
+          </p>
+          <p className="text-xs text-teal-800 mb-3">Every reviewer has submitted. Forward the reviews to the Editor so they can make a decision.</p>
+          {sendReviewsToEditorError && (
+            <p className="text-xs text-red-700 mb-2">{sendReviewsToEditorError}</p>
+          )}
+          <button
+            onClick={handleSendReviewsToEditor}
+            disabled={sendingReviewsToEditor}
+            className="w-full bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-sm font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+          >
+            {sendingReviewsToEditor && <Loader2 className="w-4 h-4 animate-spin" />}
+            Send Reviews to Editor
+          </button>
+        </div>
+      )}
+
+      {!isEditor && readyToSendToEditor && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <p className="text-sm font-bold text-amber-900 mb-1">Revision {latestRevision?.revision_number} is ready for editor review</p>
+          <p className="text-xs text-amber-800 mb-3">The author has submitted their revised files. Send it to the assigned editor to continue the review.</p>
+          {sendRevisionToEditorError && (
+            <p className="text-xs text-red-700 mb-2">{sendRevisionToEditorError}</p>
+          )}
+          <button
+            onClick={handleSendRevisionToEditor}
+            disabled={sendingRevisionToEditor}
+            className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+          >
+            {sendingRevisionToEditor && <Loader2 className="w-4 h-4 animate-spin" />}
+            Send to Editor for Revision Review
+          </button>
+        </div>
+      )}
+
       {/* 6. Coordinator Final Decision -- the action card. Only relevant
           while something is actually pending; once decided, the Final
           Decision card (7, below) is the single place that shows the
           outcome -- no need to also keep this action card around
           redundantly saying the same thing. */}
-      {!decided && (
+      {!decided && !additionalReviewAwaitingSend && (
       <div className="bg-emerald-50/60 border-2 border-emerald-200 rounded-2xl p-6 space-y-6">
         <div>
           <h3 className="text-sm font-black text-emerald-900 flex items-center gap-2">
@@ -1013,6 +1110,13 @@ export function DecisionTab({
               {sendingToReviewers ? 'Sending...' : 'Send to Reviewers for Re-review'}
             </button>
           </>
+        ) : pendingRevisionConfirm && decidedRevision && decidedRevision.editor_decision === 'ADDITIONAL_REVIEW' && hasRequiredReviews ? (
+          // The re-check reviews are all back in -- the ball is with the
+          // Coordinator to forward them to the Editor (the "All reviews are
+          // in -- ready to send to the editor" card above), not to make a
+          // fresh Accept/Revision call here as if this were a brand new
+          // decision on the ADDITIONAL_REVIEW row itself.
+          null
         ) : pendingRevisionConfirm && decidedRevision ? (
           <>
             <div className="bg-white border-2 border-emerald-200 rounded-xl p-4">

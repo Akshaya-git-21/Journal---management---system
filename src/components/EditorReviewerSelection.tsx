@@ -58,8 +58,36 @@ export function EditorReviewerSelection({ manuscriptId, suggestedReviewers, onSu
     }
   };
 
+  // Once selected, this stays visible permanently (not just a one-time
+  // success message) -- reviewer_assignments only exist once the
+  // Coordinator has actually sent the invitations, so without this the
+  // Editor's own selection would otherwise vanish from view entirely in
+  // the gap between confirming it and the Coordinator inviting them.
   if (alreadySelected) {
-    return null;
+    return (
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Users className="w-5 h-5 text-slate-700" />
+          <h3 className="text-sm font-black text-slate-900">Reviewers Selected</h3>
+        </div>
+        <div className="space-y-2">
+          {editorSelections.map((r) => (
+            <div key={r.id} className="flex items-center justify-between p-3 border border-emerald-200 bg-emerald-50 rounded-lg">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">{r.name}</p>
+                <p className="text-xs text-slate-600">{r.email}</p>
+              </div>
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 shrink-0">
+                Awaiting Invitation
+              </span>
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-500 leading-relaxed border-t border-slate-200 pt-3">
+          The Coordinator will send these reviewers their invitations next.
+        </p>
+      </div>
+    );
   }
 
   return (

@@ -1103,11 +1103,19 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                 const isPeerReviewRound = !isRevisionReviewPage && manuscript.status === 'AWAITING_DECISION' && (reviewerAssignments?.length || 0) > 0;
                 const editorHasSuggestedReviewers = (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR');
                 const readyToSelectReviewers = manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT' && !editorHasSuggestedReviewers;
-                // Simplified "not yet decided" check for this summary card --
-                // the Reviews tab's own recommendationIsCurrent freshness
-                // comparison is the actual gate; this is just enough to know
-                // whether to point the Editor there.
-                const readyForPeerReviewDecision = isPeerReviewRound && hasRequiredReviews && !!manuscript.reviews_released_at && !assignment.recommendation;
+                // A stale recommendation (e.g. the earlier 'ADDITIONAL_REVIEW'
+                // call that sent this back for a reviewer re-check) must not
+                // permanently block this from ever showing "ready" again once
+                // the re-check reviews are actually in -- only a recommendation
+                // submitted AFTER the latest review counts as still current.
+                // Same freshness comparison as the Reviews tab's own
+                // recommendationIsCurrent.
+                const latestReviewSubmittedAt = activeReviews.reduce<string | null>((latest, r) => (
+                  r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
+                ), null);
+                const recommendationIsCurrent = !!assignment.recommendation && !!assignment.recommendation_submitted_at
+                  && !!latestReviewSubmittedAt && assignment.recommendation_submitted_at > latestReviewSubmittedAt;
+                const readyForPeerReviewDecision = isPeerReviewRound && hasRequiredReviews && !!manuscript.reviews_released_at && !recommendationIsCurrent;
                 const reviewsSubmittedCount = activeReviews.filter(r => r.status === 'SUBMITTED').length;
 
                 const getStatusDescription = (): string => {
@@ -1138,7 +1146,18 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                       <div className="space-y-4">
                         <div>
                           <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Status</p>
-                          <p className="text-lg font-bold text-slate-900">{getManuscriptStatusLabel(manuscript, latestRevisionForReview, production?.production_status)}</p>
+                          <p className="text-lg font-bold text-slate-900">
+                            {/* Once the Editor's own recommendation is submitted
+                                and still current (not a stale leftover from an
+                                earlier round), reflect that decision directly
+                                here instead of the generic stage label -- the
+                                Coordinator hasn't acted on it yet, but the
+                                Editor's own status should already read as
+                                decided, not stuck at "Peer Review" forever. */}
+                            {recommendationIsCurrent
+                              ? `Decision Submitted: ${assignment.recommendation?.replace(/_/g, ' ')}`
+                              : getManuscriptStatusLabel(manuscript, latestRevisionForReview, production?.production_status)}
+                          </p>
                           {revisionN != null && (
                             <p className="text-xs font-bold text-slate-500 mt-1">Revision: {revisionN}</p>
                           )}
@@ -1186,13 +1205,15 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
 
                         {readyForPeerReviewDecision && (
                           <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
-                            <p className="text-sm font-bold text-teal-900 mb-1">All reviews are in -- ready for your decision</p>
+                            <p className="text-sm font-bold text-teal-900 mb-1">
+                              {assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Re-check reviews are in -- ready for your decision' : 'All reviews are in -- ready for your decision'}
+                            </p>
                             <p className="text-xs text-teal-800 mb-3">Review the reports and decide whether to accept or send back for revision.</p>
                             <button
                               onClick={() => setActiveTab('reviews')}
                               className="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2.5 rounded-lg transition"
                             >
-                              Go to Reviews
+                              {assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Evaluate Re-review' : 'Go to Reviews'}
                             </button>
                           </div>
                         )}

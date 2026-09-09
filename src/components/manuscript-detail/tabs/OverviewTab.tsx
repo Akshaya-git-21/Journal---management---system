@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, assignEditor, coordinatorSendRevisionToEditor, coordinatorSendReviewsToEditor, getEditorReviewerActions, getPendingEditorSuggestions } from '../../../lib/workflow';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, assignEditor, getEditorReviewerActions, getPendingEditorSuggestions } from '../../../lib/workflow';
 import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 import { getProduction, subscribeToProduction } from '../../../lib/production';
 import { CheckCircle2, Circle, AlertCircle, FileText, Loader2 } from 'lucide-react';
@@ -102,52 +102,6 @@ export function OverviewTab({
     ? getPendingEditorSuggestions(suggestedReviewers, editorReviewerActions)
     : [];
   const readyToInviteReviewers = pendingReviewerInvites.length > 0;
-
-  const [sendingToEditor, setSendingToEditor] = useState(false);
-  const [sendToEditorError, setSendToEditorError] = useState('');
-  // Every resubmitted revision goes to the Editor first, regardless of
-  // origin -- coordinator_send_revision_to_editor() is origin-agnostic. It's
-  // the Editor's own call (via EditorRevisionReview.tsx's "Move to
-  // Reviewer" action) whether a peer-review-origin revision needs another
-  // look from the reviewers; the Coordinator then carries that out from the
-  // Decision tab once the Editor asks for it -- see
-  // coordinator_send_revision_to_reviewers() in
-  // 0043_editor_initiated_reviewer_recheck.sql.
-  const readyToSendToEditor = manuscript.status === 'REVISION_REQUESTED' && latestRevision?.status === 'REVISION_SUBMITTED';
-  // The Editor's decision screen (EditorWorkspace.tsx) stays locked until
-  // the Coordinator explicitly forwards a completed round of reviews -- see
-  // coordinator_send_reviews_to_editor() in
-  // 0041_coordinator_releases_reviews_to_editor.sql. Only relevant for the
-  // peer-review round(s), not the screening round (which has no reviewers).
-  const activeReviewerAssignments = reviewerAssignments.filter(r => r.status !== 'DECLINED');
-  const allReviewsIn = activeReviewerAssignments.length > 0 && activeReviewerAssignments.every(r => r.status === 'SUBMITTED');
-  const readyToSendReviewsToEditor = manuscript.status === 'AWAITING_DECISION' && allReviewsIn && !manuscript.reviews_released_at;
-
-  const handleSendReviewsToEditor = async () => {
-    setSendingToEditor(true);
-    setSendToEditorError('');
-    try {
-      await coordinatorSendReviewsToEditor(manuscript.id);
-      onWorkflowChange?.();
-    } catch (e: any) {
-      setSendToEditorError(e.message || 'Failed to send reviews to editor');
-    } finally {
-      setSendingToEditor(false);
-    }
-  };
-
-  const handleSendRevisionToEditor = async () => {
-    setSendingToEditor(true);
-    setSendToEditorError('');
-    try {
-      await coordinatorSendRevisionToEditor(manuscript.id);
-      onWorkflowChange?.();
-    } catch (e: any) {
-      setSendToEditorError(e.message || 'Failed to send revision to editor');
-    } finally {
-      setSendingToEditor(false);
-    }
-  };
 
   // Fixed status description - account for evaluation submission and any
   // active revision cycle (re-review reuses the same EDITOR_REVIEW/
@@ -272,41 +226,10 @@ export function OverviewTab({
             </div>
           )}
 
-          {readyToSendReviewsToEditor && (
-            <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
-              <p className="text-sm font-bold text-teal-900 mb-1">All reviews are in — ready to send to the editor</p>
-              <p className="text-xs text-teal-800 mb-3">Every reviewer has submitted. Forward the reviews to the Editor so they can make a decision.</p>
-              {sendToEditorError && (
-                <p className="text-xs text-red-700 mb-2">{sendToEditorError}</p>
-              )}
-              <button
-                onClick={handleSendReviewsToEditor}
-                disabled={sendingToEditor}
-                className="w-full bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-sm font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
-              >
-                {sendingToEditor && <Loader2 className="w-4 h-4 animate-spin" />}
-                Send Reviews to Editor
-              </button>
-            </div>
-          )}
-
-          {readyToSendToEditor && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <p className="text-sm font-bold text-amber-900 mb-1">Revision {revisionN} is ready for editor review</p>
-              <p className="text-xs text-amber-800 mb-3">The author has submitted their revised files. Send it to the assigned editor to continue the review.</p>
-              {sendToEditorError && (
-                <p className="text-xs text-red-700 mb-2">{sendToEditorError}</p>
-              )}
-              <button
-                onClick={handleSendRevisionToEditor}
-                disabled={sendingToEditor}
-                className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
-              >
-                {sendingToEditor && <Loader2 className="w-4 h-4 animate-spin" />}
-                Send to Editor for Revision Review
-              </button>
-            </div>
-          )}
+          {/* Module: these two action cards (Send Reviews to Editor / Send
+              to Editor for Revision Review) moved to the Decision tab --
+              every Coordinator action now lives there instead of being
+              split across Overview and Decision. */}
 
           {reviewsTotal > 0 && (
             <div>

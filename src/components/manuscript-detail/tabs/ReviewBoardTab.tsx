@@ -328,6 +328,14 @@ export function ReviewBoardTab({
       await coordinatorSendReviewerInvitations(manuscript.id);
       setSuccess('Invitations sent. The manuscript stays in Editorial Review until both reviewers accept.');
       setTimeout(() => setSuccess(''), 4000);
+      // onDataChange() only refreshes the parent's manuscript/suggestedReviewers/
+      // reviewerAssignments props -- this tab's own `actions` state (which
+      // getSuggestionStatus reads to decide whether the button should still
+      // show) is local, fetched once on mount, and was never being
+      // refreshed here, so the button kept reappearing even after the
+      // invitations actually went out.
+      const refreshedActions = await getEditorReviewerActions(manuscript.id);
+      setActions(refreshedActions);
       onDataChange();
     } catch (e: any) {
       setError(e.message || 'Failed to send invitations');

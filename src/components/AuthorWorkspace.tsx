@@ -356,11 +356,18 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       }
 
       // Now sync uploaded files to manuscript_files table via server-side RPC
-      if (paperDetails.uploadedFiles && paperDetails.uploadedFiles.length > 0) {
-        console.log('[SUBMIT] Syncing files to manuscript_files table:', paperDetails.uploadedFiles);
+      // -- includes both the main submission files (Title Page, Blind
+      // Manuscript, Author Form) AND the Step 5.2 supplementary/auxiliary
+      // files. The latter previously uploaded fine to storage but were
+      // never synced here, so they never appeared in manuscript_files and
+      // the Supplementary Files tab always showed "No supplementary files"
+      // regardless of what was actually uploaded.
+      const allFilesToSync = [...(paperDetails.uploadedFiles || []), ...(paperDetails.additionalFiles || [])];
+      if (allFilesToSync.length > 0) {
+        console.log('[SUBMIT] Syncing files to manuscript_files table:', allFilesToSync);
 
         // Transform files to match the RPC parameter format
-        const filesForSync = paperDetails.uploadedFiles.map((file: any) => {
+        const filesForSync = allFilesToSync.map((file: any) => {
           console.log('[SUBMIT] Transforming file:', {
             fileName: file.fileName,
             componentType: file.componentType,
@@ -398,7 +405,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           throw fileError;
         }
       } else {
-        console.warn('[SUBMIT] No files to sync. uploadedFiles:', paperDetails.uploadedFiles);
+        console.warn('[SUBMIT] No files to sync.');
       }
 
       // Transition DRAFT -> SUBMITTED through the real workflow RPC. This is
