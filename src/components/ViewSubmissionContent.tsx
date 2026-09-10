@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { AuthorManuscriptDetails } from '../lib/authorManuscriptDetails';
 import { FileText, Users, Layers, AlertCircle, Eye, Download } from 'lucide-react';
-import DiscussionsTab from './DiscussionsTab';
 import FilePreviewModal from './FilePreviewModal';
 import { getManuscriptStatusLabel, getLatestRevision } from '../lib/manuscriptStatusLabel';
 
@@ -439,9 +438,6 @@ export default function ViewSubmissionContent({
               </div>
               <div className="pb-4 flex-1">
                 <p className="font-semibold text-slate-900">{event.to_status?.replace(/_/g, ' ')}</p>
-                <p className="text-xs text-slate-500 mt-1">
-                  {new Date(event.created_at).toLocaleString()}
-                </p>
                 {event.note && <p className="text-xs text-slate-600 mt-2">{event.note}</p>}
               </div>
             </div>
@@ -463,15 +459,6 @@ export default function ViewSubmissionContent({
       {activeTab === 'references' && renderReferences()}
       {activeTab === 'supplementary' && renderSupplementary()}
       {activeTab === 'cover_letter' && renderCoverLetter()}
-      {activeTab === 'discussions' && manuscriptDetails && (
-        <DiscussionsTab
-          manuscriptId={manuscriptDetails.manuscript.id}
-          discussions={manuscriptDetails.discussions}
-          currentUserId={currentUserId}
-          profiles={Object.fromEntries(manuscriptDetails.profiles)}
-          onMessageSent={onRefreshData}
-        />
-      )}
       {activeTab === 'metadata' && renderMetadata()}
       {activeTab === 'copyediting' && renderCopyediting()}
       {activeTab === 'production' && renderProduction()}

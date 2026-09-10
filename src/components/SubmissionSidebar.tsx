@@ -1,7 +1,7 @@
 import React from 'react';
 import {
-  ChevronUp, ChevronDown, Check, FileText, MessageSquare, SquarePen, Printer,
-  Globe, Layers, Sliders, Briefcase, AlertCircle, HelpCircle, ExternalLink,
+  ChevronUp, ChevronDown, Check, FileText, Printer,
+  Globe, AlertCircle, HelpCircle, ExternalLink,
   Users, Clock, CheckCircle2, Circle, AlertTriangle, Plus, BookOpen, LayoutDashboard
 } from 'lucide-react';
 import { AuthorManuscriptDetails } from '../lib/authorManuscriptDetails';
@@ -59,7 +59,6 @@ export default function SubmissionSidebar({
   // File counts - filter by file_type
   const manuscriptFiles = manuscript.files?.filter(f => f.file_type?.toLowerCase().includes('manuscript')) || [];
   const supplementaryFiles = manuscript.files?.filter(f => f.file_type?.toLowerCase().includes('supplementary') || f.file_type?.toLowerCase().includes('additional')) || [];
-  const galleryFiles = manuscript.files?.filter(f => f.file_type?.toLowerCase().includes('galley')) || [];
 
   const SidebarSection = ({ title, icon: Icon, items }: any) => (
     <div className="space-y-1.5">
@@ -142,12 +141,6 @@ export default function SubmissionSidebar({
             icon: FileText
           },
           {
-            id: 'references',
-            label: 'References',
-            badge: m?.references ? '✓' : '○',
-            icon: Sliders
-          },
-          {
             id: 'supplementary',
             label: 'Supplementary Files',
             badge: supplementaryFiles.length,
@@ -158,12 +151,6 @@ export default function SubmissionSidebar({
             label: 'Cover Letter',
             badge: manuscript.files?.some(f => f.file_name?.toLowerCase().includes('cover') || f.file_name?.toLowerCase().includes('letter')) ? '✓' : '○',
             icon: FileText
-          },
-          {
-            id: 'discussions',
-            label: 'Discussions',
-            badge: manuscript.discussions?.length || 0,
-            icon: MessageSquare
           }
         ]}
       />
@@ -173,28 +160,10 @@ export default function SubmissionSidebar({
         title="PUBLICATION"
         items={[
           {
-            id: 'metadata',
-            label: 'Metadata',
-            badge: '✓',
-            icon: Layers
-          },
-          {
-            id: 'copyediting',
-            label: 'Copyediting',
-            badge: m?.status === 'ACCEPTED' ? '→' : '○',
-            icon: SquarePen
-          },
-          {
             id: 'production',
             label: 'Production',
             badge: m?.production_stage ? '✓' : '○',
             icon: Printer
-          },
-          {
-            id: 'galleys',
-            label: 'Galley Files',
-            badge: galleryFiles.length,
-            icon: Briefcase
           },
           {
             id: 'publication_details',

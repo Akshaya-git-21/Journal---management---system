@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   CheckCircle,
   Circle,
@@ -15,7 +15,6 @@ import {
   Info,
   Check,
   Calendar,
-  Layers,
   ArrowDown,
   ArrowUp,
   User,
@@ -25,7 +24,9 @@ import {
   Globe,
   HelpCircle,
   FileCheck,
-  Download
+  Download,
+  GripVertical,
+  Loader2
 } from 'lucide-react';
 import { Contributor, Manuscript } from '../types';
 import { supabase } from '../lib/supabase';
@@ -34,12 +35,13 @@ interface NewSubmissionFlowProps {
   currentUser: { name: string; email: string; role: any } | null;
   onCancel: () => void;
   onSubmit: (paperDetails: any) => void;
+  onSaveDraft?: (paperDetails: any) => void | Promise<void>;
 }
 
 // Full list of steps representing OJS 3 editorial setup
 const STEPS = [
   { number: 1, label: 'Preparation', desc: 'Requirements & checklist' },
-  { number: 2, label: 'Manuscript Upload', desc: 'PDF galley file' },
+  { number: 2, label: 'Manuscript Upload', desc: 'Word document file' },
   { number: 3, label: 'Metadata Entry', desc: 'Title & Abstract' },
   { number: 4, label: 'List of Authors', desc: 'Co-authors directory' },
   { number: 5, label: 'Additional Files', desc: 'Supps & Cover Letter' },
@@ -49,7 +51,38 @@ const STEPS = [
   { number: 9, label: 'Completion', desc: 'MSS ID issued' }
 ];
 
-export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: NewSubmissionFlowProps) {
+// Full list of countries/jurisdictions for contributor affiliation
+const COUNTRIES = [
+  'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Argentina', 'Armenia',
+  'Australia', 'Austria', 'Azerbaijan', 'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados',
+  'Belarus', 'Belgium', 'Belize', 'Benin', 'Bhutan', 'Bolivia', 'Bosnia and Herzegovina',
+  'Botswana', 'Brazil', 'Brunei', 'Bulgaria', 'Burkina Faso', 'Burundi', 'Cambodia',
+  'Cameroon', 'Canada', 'Cape Verde', 'Central African Republic', 'Chad', 'Chile', 'China',
+  'Colombia', 'Comoros', 'Congo', 'Costa Rica', 'Croatia', 'Cuba', 'Cyprus', 'Czech Republic',
+  'Denmark', 'Djibouti', 'Dominica', 'Dominican Republic', 'Ecuador', 'Egypt', 'El Salvador',
+  'Equatorial Guinea', 'Eritrea', 'Estonia', 'Eswatini', 'Ethiopia', 'Fiji', 'Finland',
+  'France', 'Gabon', 'Gambia', 'Georgia', 'Germany', 'Ghana', 'Greece', 'Grenada',
+  'Guatemala', 'Guinea', 'Guinea-Bissau', 'Guyana', 'Haiti', 'Honduras', 'Hungary', 'Iceland',
+  'India', 'Indonesia', 'Iran', 'Iraq', 'Ireland', 'Israel', 'Italy', 'Jamaica', 'Japan',
+  'Jordan', 'Kazakhstan', 'Kenya', 'Kiribati', 'Kosovo', 'Kuwait', 'Kyrgyzstan', 'Laos',
+  'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya', 'Liechtenstein', 'Lithuania',
+  'Luxembourg', 'Madagascar', 'Malawi', 'Malaysia', 'Maldives', 'Mali', 'Malta',
+  'Marshall Islands', 'Mauritania', 'Mauritius', 'Mexico', 'Micronesia', 'Moldova', 'Monaco',
+  'Mongolia', 'Montenegro', 'Morocco', 'Mozambique', 'Myanmar', 'Namibia', 'Nauru', 'Nepal',
+  'Netherlands', 'New Zealand', 'Nicaragua', 'Niger', 'Nigeria', 'North Korea',
+  'North Macedonia', 'Norway', 'Oman', 'Pakistan', 'Palau', 'Palestine', 'Panama',
+  'Papua New Guinea', 'Paraguay', 'Peru', 'Philippines', 'Poland', 'Portugal', 'Qatar',
+  'Romania', 'Russia', 'Rwanda', 'Saint Lucia', 'Samoa', 'San Marino', 'Saudi Arabia',
+  'Senegal', 'Serbia', 'Seychelles', 'Sierra Leone', 'Singapore', 'Slovakia', 'Slovenia',
+  'Solomon Islands', 'Somalia', 'South Africa', 'South Korea', 'South Sudan', 'Spain',
+  'Sri Lanka', 'Sudan', 'Suriname', 'Sweden', 'Switzerland', 'Syria', 'Taiwan', 'Tajikistan',
+  'Tanzania', 'Thailand', 'Timor-Leste', 'Togo', 'Tonga', 'Trinidad and Tobago', 'Tunisia',
+  'Turkey', 'Turkmenistan', 'Tuvalu', 'Uganda', 'Ukraine', 'United Arab Emirates',
+  'United Kingdom', 'United States', 'Uruguay', 'Uzbekistan', 'Vanuatu', 'Vatican City',
+  'Venezuela', 'Vietnam', 'Yemen', 'Zambia', 'Zimbabwe'
+];
+
+export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onSaveDraft }: NewSubmissionFlowProps) {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
 
@@ -58,9 +91,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
   const [checklist2, setChecklist2] = useState(false);
   const [checklist3, setChecklist3] = useState(false);
   const [checklist4, setChecklist4] = useState(false);
-  const [checklist5, setChecklist5] = useState(false);
   const [subLanguage, setSubLanguage] = useState('English');
   const [subSection, setSubSection] = useState('Articles');
+  const [agreeConfidentiality, setAgreeConfidentiality] = useState(false);
   const [agreePrivacy, setAgreePrivacy] = useState(false);
   const [agreeContact, setAgreeContact] = useState(false);
   const [agreeInstructions, setAgreeInstructions] = useState(false);
@@ -82,6 +115,11 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
   const [dragActiveTitle, setDragActiveTitle] = useState(false);
   const [dragActiveBlind, setDragActiveBlind] = useState(false);
   const [dragActiveAuthor, setDragActiveAuthor] = useState(false);
+
+  // Step 2: Ethical Certificate upload (optional attachment, kept alongside the other manuscript uploads)
+  const [isUploadingEthicalCertificate, setIsUploadingEthicalCertificate] = useState(false);
+  const [uploadProgressEthicalCertificate, setUploadProgressEthicalCertificate] = useState(0);
+  const [dragActiveEthicalCertificate, setDragActiveEthicalCertificate] = useState(false);
 
   // Step 3: Metadata Entry State
   const [title, setTitle] = useState('');
@@ -160,15 +198,6 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
   const [copyrightDocs, setCopyrightDocs] = useState<{ id: string; name: string; size: string }[]>([]);
   const [isUploadingCopyrightDoc, setIsUploadingCopyrightDoc] = useState(false);
 
-  // Social Media Promotion
-  const [socialMediaPromotion, setSocialMediaPromotion] = useState<'Yes' | 'No'>('No');
-  const [promoPlatforms, setPromoPlatforms] = useState<string[]>([]);
-
-  // Color Figures
-  const [colorFigures, setColorFigures] = useState<'Yes' | 'No'>('No');
-  const [colorFiguresCount, setColorFiguresCount] = useState('');
-  const [colorFiguresDetails, setColorFiguresDetails] = useState('');
-
   // Creative Commons License Selection (configured in Step 5 & syncs to Step 7)
   const [pubLicense, setPubLicense] = useState('CC BY');
 
@@ -199,6 +228,42 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [submittedManuscriptId, setSubmittedManuscriptId] = useState<string | null>(null);
   const [showFinalConfirm, setShowFinalConfirm] = useState(false);
+
+  // Manuscript id for this wizard session -- generated once (on first Save
+  // Draft, or at final submit if never saved as a draft) and reused for every
+  // subsequent Save Draft / the eventual final submit, so they all write to
+  // the same manuscripts row instead of creating duplicates.
+  const [draftManuscriptId, setDraftManuscriptId] = useState<string | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<Date | null>(null);
+
+  const getOrCreateManuscriptId = () => {
+    if (draftManuscriptId) return draftManuscriptId;
+    const id = `JMS-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+    setDraftManuscriptId(id);
+    return id;
+  };
+
+  const handleSaveDraft = async () => {
+    if (!onSaveDraft || isSavingDraft) return;
+    setIsSavingDraft(true);
+    try {
+      const id = getOrCreateManuscriptId();
+      await onSaveDraft({
+        id,
+        title: title.trim(),
+        abstract: abstract.trim(),
+        coverLetter,
+        language: subLanguage,
+        submissionStep: currentStep
+      });
+      setDraftSavedAt(new Date());
+    } catch (err: any) {
+      setValidationError(err?.message || 'Failed to save draft.');
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
 
   // Initialize author details when mounted
   useEffect(() => {
@@ -248,8 +313,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
   const saveStateDraft = (targetStepNumber: number) => {
     const draftData = {
       currentStep: targetStepNumber,
-      checklist1, checklist2, checklist3, checklist4, checklist5,
-      subLanguage, subSection, agreePrivacy, agreeContact, agreeInstructions,
+      draftManuscriptId,
+      checklist1, checklist2, checklist3, checklist4,
+      subLanguage, subSection, agreeConfidentiality, agreePrivacy, agreeContact, agreeInstructions,
       title, subtitle, abstract, keywords, supportingAgencies,
       contributors, coverLetter, reviewerSuggestions,
       acceptLicense, licenseType, isOpenAccess, feeWaiverRequest,
@@ -262,7 +328,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
   const isStepValid = (step: number): boolean => {
     switch (step) {
       case 1:
-        return checklist1 && checklist2 && checklist3 && checklist4 && checklist5 && agreePrivacy && agreeInstructions;
+        return checklist1 && checklist2 && checklist3 && checklist4 && agreeConfidentiality && agreePrivacy && agreeInstructions;
       case 2:
         return uploadedFiles.some(f => f.componentType === 'Title Page')
             && uploadedFiles.some(f => f.componentType === 'Blind Manuscript')
@@ -274,7 +340,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
       case 5:
         return true; // Optional sections
       case 6:
-        return true; // Optional
+        return reviewerSuggestions.length >= 3;
       case 7:
         return acceptLicense;
       case 8:
@@ -308,8 +374,12 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
     setValidationError(null);
 
     if (currentStep === 1) {
-      if (!checklist1 || !checklist2 || !checklist3 || !checklist4 || !checklist5) {
-        setValidationError('You must acknowledge and accept all 5 Submission Checklist items before proceeding.');
+      if (!checklist1 || !checklist2 || !checklist3 || !checklist4) {
+        setValidationError('You must acknowledge and accept all Submission Checklist items before proceeding.');
+        return;
+      }
+      if (!agreeConfidentiality) {
+        setValidationError('You must acknowledge the confidentiality agreement for submitted documents and files.');
         return;
       }
       if (!agreePrivacy) {
@@ -361,6 +431,13 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
       }
     }
 
+    if (currentStep === 6) {
+      if (reviewerSuggestions.length < 3) {
+        setValidationError(`At least 3 suggested reviewers are required (currently ${reviewerSuggestions.length}).`);
+        return;
+      }
+    }
+
     // Step 8 ("Submit") never calls the real submission RPC directly -- it
     // opens the Final Preview confirmation dialog, and only that dialog's
     // explicit Confirm button calls triggerSubmitFinal().
@@ -382,15 +459,29 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
     }
   };
 
+  // Only Microsoft Word documents (.doc/.docx) are accepted for author attachments
+  const WORD_FILE_ACCEPT = '.doc,.docx';
+  const WORD_FILE_HELPER_TEXT = 'Supports Microsoft Word documents only (.doc, .docx)';
+  const isWordFile = (file: File) => /\.(docx?)$/i.test(file.name);
+  const validateWordFile = (file: File): boolean => {
+    if (!isWordFile(file)) {
+      setValidationError('Only Microsoft Word documents (.doc, .docx) are accepted for this attachment.');
+      return false;
+    }
+    return true;
+  };
+
   // Mock Upload simulation
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, isSuppFile: boolean = false) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    simulateUploadProcess(files[0], isSuppFile);
+    const file = files[0];
+    if (!validateWordFile(file)) return;
+    simulateUploadProcess(file, isSuppFile);
   };
 
   const handleDownloadTemplate = () => {
-    const dummyContent = `JOURNAL OF AI IN MEDICINE\nAUTHOR DECLARATION FORM TEMPLATE\n\nPlease complete the following and sign:\n1. Manuscript Title:\n2. All Author Names & Signatures:\n3. Ethical Compliance Statement:\n4. Conflict of Interest Disclosure:\n\nAccepted Formats for submission: PDF, DOC, DOCX`;
+    const dummyContent = `JOURNAL OF AI IN MEDICINE\nAUTHOR DECLARATION FORM TEMPLATE\n\nPlease complete the following and sign:\n1. Manuscript Title:\n2. All Author Names & Signatures:\n3. Ethical Compliance Statement:\n4. Conflict of Interest Disclosure:\n\nAccepted Formats for submission: DOC, DOCX`;
     const blob = new Blob([dummyContent], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -506,6 +597,10 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
     performRealUpload(file, 'Author Form', setUploadProgressAuthorForm, setIsUploadingAuthorForm);
   };
 
+  const simulateEthicalCertificateUpload = (file: File) => {
+    performRealUpload(file, 'Ethical Certificate', setUploadProgressEthicalCertificate, setIsUploadingEthicalCertificate);
+  };
+
   const simulateCoverLetterUpload = (file: File) => {
     performRealUpload(file, 'Cover Letter', (p) => {}, setIsUploadingCoverLetter, (newFile) => {
       setCoverLetterFile({ name: file.name, size: (file.size / 1024).toFixed(1) + ' KB' });
@@ -559,7 +654,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
     e.preventDefault();
     setDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      simulateUploadProcess(e.dataTransfer.files[0], isSuppFile);
+      const file = e.dataTransfer.files[0];
+      if (!validateWordFile(file)) return;
+      simulateUploadProcess(file, isSuppFile);
     }
   };
 
@@ -641,10 +738,120 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
     setContributors(updated);
   };
 
+  // Drag & drop reordering for the authors table -- only changes list order,
+  // leaves every contributor's own fields (incl. corresponding author flag) untouched.
+  // Pointer-driven (not native HTML5 DnD) so the row tracks the cursor 1:1 while
+  // being dragged, and the other rows slide out of the way live to show where it
+  // will land -- native DnD's browser-drawn ghost can't give that "physical" feel.
+  const contributorRowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
+  const dragIndexRef = useRef<number | null>(null);
+  const hoverIndexRef = useRef<number | null>(null);
+  const dragStartYRef = useRef(0);
+  const dragRowHeightRef = useRef(0);
+  const dragRowRectsRef = useRef<DOMRect[]>([]);
+  const [dragContributorIndex, setDragContributorIndexState] = useState<number | null>(null);
+  const [hoverContributorIndex, setHoverContributorIndexState] = useState<number | null>(null);
+  const [dragContributorDeltaY, setDragContributorDeltaY] = useState(0);
+
+  const setDragContributorIndex = (v: number | null) => { dragIndexRef.current = v; setDragContributorIndexState(v); };
+  const setHoverContributorIndex = (v: number | null) => { hoverIndexRef.current = v; setHoverContributorIndexState(v); };
+
+  const reorderContributor = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    setContributors(prev => {
+      const updated = [...prev];
+      const [moved] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, moved);
+      return updated;
+    });
+  };
+
+  const handleContributorGripPointerDown = (e: React.PointerEvent, idx: number) => {
+    e.preventDefault();
+    const row = contributorRowRefs.current[idx];
+    if (!row) return;
+    dragStartYRef.current = e.clientY;
+    dragRowHeightRef.current = row.getBoundingClientRect().height;
+    dragRowRectsRef.current = contributorRowRefs.current.map(r => (r ? r.getBoundingClientRect() : new DOMRect()));
+    setDragContributorIndex(idx);
+    setHoverContributorIndex(idx);
+    setDragContributorDeltaY(0);
+  };
+
+  useEffect(() => {
+    if (dragContributorIndex === null) return;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      setDragContributorDeltaY(e.clientY - dragStartYRef.current);
+
+      let newHoverIndex = dragIndexRef.current ?? 0;
+      for (let i = 0; i < dragRowRectsRef.current.length; i++) {
+        const rect = dragRowRectsRef.current[i];
+        if (!rect) continue;
+        const midpoint = rect.top + rect.height / 2;
+        if (e.clientY > midpoint) newHoverIndex = i;
+      }
+      newHoverIndex = Math.max(0, Math.min(dragRowRectsRef.current.length - 1, newHoverIndex));
+      if (newHoverIndex !== hoverIndexRef.current) setHoverContributorIndex(newHoverIndex);
+    };
+
+    const handlePointerUp = () => {
+      const from = dragIndexRef.current;
+      const to = hoverIndexRef.current;
+      if (from !== null && to !== null && from !== to) {
+        reorderContributor(from, to);
+      }
+      setDragContributorIndex(null);
+      setHoverContributorIndex(null);
+      setDragContributorDeltaY(0);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [dragContributorIndex]);
+
+  // Visual transform for a given row: the dragged row tracks the pointer directly
+  // (no transition -- instant response), while every row between its origin and
+  // the current hover slot slides one row-height out of the way (transitioned).
+  const getContributorRowStyle = (idx: number): React.CSSProperties => {
+    if (dragContributorIndex === null) return {};
+    if (idx === dragContributorIndex) {
+      return {
+        transform: `translateY(${dragContributorDeltaY}px)`,
+        zIndex: 30,
+        position: 'relative',
+        boxShadow: '0 12px 24px -8px rgba(0,0,0,0.28)',
+        opacity: 0.97,
+        cursor: 'grabbing'
+      };
+    }
+    if (hoverContributorIndex === null) return {};
+    const height = dragRowHeightRef.current;
+    let shift = 0;
+    if (dragContributorIndex < hoverContributorIndex && idx > dragContributorIndex && idx <= hoverContributorIndex) {
+      shift = -height;
+    } else if (dragContributorIndex > hoverContributorIndex && idx < dragContributorIndex && idx >= hoverContributorIndex) {
+      shift = height;
+    }
+    return {
+      transform: shift ? `translateY(${shift}px)` : undefined,
+      transition: 'transform 180ms cubic-bezier(0.2, 0, 0.2, 1)',
+      position: 'relative'
+    };
+  };
+
   // Reviewer Suggestion handlers
   const handleAddReviewer = () => {
     if (!revName.trim() || !revEmail.trim() || !revAffiliation.trim() || !revReason.trim()) {
       alert('Please fill out all reviewer fields: Name, Email, Affiliation, and Reason.');
+      return;
+    }
+    if (reviewerSuggestions.length >= 5) {
+      alert('You may suggest up to 5 reviewers only.');
       return;
     }
     const newRev = {
@@ -694,8 +901,10 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
     setSubmitSuccess(false);
 
     try {
-      // Generate unique manuscript ID (JMS-YYYY-XXXXX format)
-      const nextIdVal = `JMS-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+      // Reuse the id from an earlier Save Draft if there is one, so this
+      // finalizes the same manuscripts row instead of creating a duplicate;
+      // generate a fresh JMS-YYYY-XXXXX id only if the author never saved a draft.
+      const nextIdVal = getOrCreateManuscriptId();
       setGeneratedId(nextIdVal);
       setSubmittedManuscriptId(nextIdVal);
 
@@ -933,10 +1142,10 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                   <div className="p-1.5 rounded-lg bg-emerald-100 text-[#008751]">
                     <FileCheck className="w-4.5 h-4.5" />
                   </div>
-                  Welcome to the Article Submission Wizard
+                  Welcome to <span className="text-[#008751]">Tulitics</span>
                 </h3>
                 <p className="text-slate-600 font-normal leading-relaxed text-sm">
-                  Thank you for submitting your work to <strong className="text-[#008751]">Tulatics</strong>. In the next few pages, you will provide the manuscript files, define co-authors metadata, insert abstracts, and record suggestion contacts.
+                  Thank you for choosing Tulitics to submit your work. In the following steps, you will provide your manuscript files, add co-author information, enter the abstract, and provide suggested reviewer contacts.
                 </p>
                 <p className="text-slate-600 font-normal leading-relaxed text-sm">
                   Please review files thoroughly prior to completing confirmation. You may save the draft or resume updates dynamically.
@@ -950,7 +1159,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                   STEP 1.1: STANDARD LANGUAGE & SCOPE SECTION
                 </h4>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 gap-5">
                   <div className="space-y-2">
                     <label className="block text-sm font-bold text-slate-800 uppercase tracking-wide">
                       Submission Language *
@@ -966,23 +1175,6 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                       <option value="Malay">Malay (Bahasa Melayu)</option>
                     </select>
                   </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-bold text-slate-800 uppercase tracking-wide">
-                      Primary Section Category *
-                    </label>
-                    <select
-                      id="subSection"
-                      value={subSection}
-                      onChange={(e) => setSubSection(e.target.value)}
-                      className="w-full bg-[#f8fbfe] border border-gray-300 rounded-xl p-3.5 text-sm focus:ring-2 focus:ring-[#008751] focus:border-[#008751] focus:bg-white focus:outline-none transition-all placeholder:text-gray-400 font-semibold"
-                    >
-                      <option value="Articles">Articles (Standard double-blind manuscript)</option>
-                      <option value="Editorial">Editorial (Invited editor comment columns)</option>
-                      <option value="Reviews">Reviews (Evaluations of literature)</option>
-                      <option value="Interview">Interview (Professional dialogue sheets)</option>
-                    </select>
-                  </div>
                 </div>
               </div>
 
@@ -993,7 +1185,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                   STEP 1.2: MANDATORY SUBMISSION CHECKLISTS *
                 </h4>
                 <p className="text-sm text-slate-500 font-medium">
-                  Please acknowledge that this current manuscript conforms to all 5 foundational parameters below before proceeding to manuscript upload:
+                  Please acknowledge that this current manuscript conforms to all 4 foundational parameters below before proceeding to manuscript upload:
                 </p>
 
                 <div className="space-y-3 pt-1">
@@ -1028,7 +1220,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         className="w-5 h-5 rounded border-gray-300 text-[#008751] focus:ring-[#008751] mt-0.5 shrink-0 accent-[#008751] cursor-pointer"
                       />
                       <span className="text-slate-700 leading-relaxed font-semibold text-sm pr-4">
-                        The submission file is in Microsoft Word, RTF, or PDF galley file format.
+                        The submission file is in Microsoft Word format.
                       </span>
                     </label>
                     <div className="p-2.5 rounded-xl bg-emerald-50 text-[#008751] group-hover:bg-emerald-100 transition shrink-0 self-center">
@@ -1071,25 +1263,6 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                     </label>
                     <div className="p-2.5 rounded-xl bg-emerald-50 text-[#008751] group-hover:bg-emerald-100 transition shrink-0 self-center">
                       <Award className="w-5 h-5" />
-                    </div>
-                  </div>
-
-                  {/* Checklist 5 */}
-                  <div className={`border rounded-2xl p-4.5 flex items-start justify-between hover:border-emerald-300 hover:bg-emerald-50/5 transition duration-150 group min-h-[72px] ${checklist5 ? 'border-emerald-300 bg-emerald-50/5' : 'border-slate-200 bg-white'}`}>
-                    <label className="flex items-start gap-4 cursor-pointer select-none grow">
-                      <input
-                        id="checklist5"
-                        type="checkbox"
-                        checked={checklist5}
-                        onChange={(e) => setChecklist5(e.target.checked)}
-                        className="w-5 h-5 rounded border-gray-300 text-[#008751] focus:ring-[#008751] mt-0.5 shrink-0 accent-[#008751] cursor-pointer"
-                      />
-                      <span className="text-slate-700 leading-relaxed font-semibold text-sm pr-4">
-                        The text meets stylistic and bibliographic guidelines. Reviewers can examine non-indexed manuscript components.
-                      </span>
-                    </label>
-                    <div className="p-2.5 rounded-xl bg-emerald-50 text-[#008751] group-hover:bg-emerald-100 transition shrink-0 self-center">
-                      <HelpCircle className="w-5 h-5" />
                     </div>
                   </div>
 
@@ -1146,6 +1319,17 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                   <div className="space-y-3.5 border-t pt-4 border-emerald-100 flex flex-col">
                     <label className="flex items-center gap-3 cursor-pointer font-bold text-slate-850 text-sm">
                       <input
+                        id="agreeConfidentiality"
+                        type="checkbox"
+                        checked={agreeConfidentiality}
+                        onChange={(e) => setAgreeConfidentiality(e.target.checked)}
+                        className="w-5 h-5 rounded border-gray-300 text-[#008751] focus:ring-[#008751] accent-[#008751]"
+                      />
+                      <span>All documents and files submitted through this platform will remain confidential and will not be published, shared, distributed, or submitted to any third party without the user&rsquo;s authorization.</span>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer font-bold text-slate-850 text-sm">
+                      <input
                         id="agreePrivacy"
                         type="checkbox"
                         checked={agreePrivacy}
@@ -1198,7 +1382,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                       Must contain: Article Title, Running Title, Author Names, Affiliations, Corresponding Author Details, Acknowledgements, Funding Information, Conflict of Interest Declaration.
                     </p>
                   </div>
-                  <span className="text-slate-400 font-mono text-[10px] uppercase font-bold bg-slate-100 px-2 py-0.5 rounded-md self-start sm:self-center">DOC, DOCX, PDF</span>
+                  <span className="text-slate-400 font-mono text-[10px] uppercase font-bold bg-slate-100 px-2 py-0.5 rounded-md self-start sm:self-center">DOC, DOCX</span>
                 </div>
 
                 {/* File Upload Slot A */}
@@ -1231,7 +1415,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                       e.preventDefault();
                       setDragActiveTitle(false);
                       if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                        simulateTitlePageUpload(e.dataTransfer.files[0]);
+                        const file = e.dataTransfer.files[0];
+                        if (!validateWordFile(file)) return;
+                        simulateTitlePageUpload(file);
                       }
                     }}
                     className={`border-2 border-dashed rounded-xl p-6 text-center transition duration-150 relative ${
@@ -1242,10 +1428,12 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                   >
                     <input
                       type="file"
-                      accept=".pdf,.doc,.docx"
+                      accept={WORD_FILE_ACCEPT}
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
-                          simulateTitlePageUpload(e.target.files[0]);
+                          const file = e.target.files[0];
+                          if (!validateWordFile(file)) return;
+                          simulateTitlePageUpload(file);
                         }
                       }}
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -1258,6 +1446,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                     </div>
                   </div>
                 )}
+                <p className="text-[10px] text-slate-400 font-medium">{WORD_FILE_HELPER_TEXT}</p>
 
                 {isUploadingTitlePage && (
                   <div className="bg-sky-50/50 border border-[#008751]/20 p-4 rounded-xl space-y-2 text-left">
@@ -1287,7 +1476,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                       Must contain: Abstract, Keywords, Main Manuscript, References, Tables. <strong className="text-red-650">Important: No author names, affiliations, acknowledgements, or identifying info.</strong>
                     </p>
                   </div>
-                  <span className="text-slate-400 font-mono text-[10px] uppercase font-bold bg-slate-100 px-2 py-0.5 rounded-md self-start sm:self-center">DOC, DOCX, PDF</span>
+                  <span className="text-slate-400 font-mono text-[10px] uppercase font-bold bg-slate-100 px-2 py-0.5 rounded-md self-start sm:self-center">DOC, DOCX</span>
                 </div>
 
                 {/* File Upload Slot B */}
@@ -1320,7 +1509,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                       e.preventDefault();
                       setDragActiveBlind(false);
                       if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                        simulateBlindManuscriptUpload(e.dataTransfer.files[0]);
+                        const file = e.dataTransfer.files[0];
+                        if (!validateWordFile(file)) return;
+                        simulateBlindManuscriptUpload(file);
                       }
                     }}
                     className={`border-2 border-dashed rounded-xl p-6 text-center transition duration-150 relative ${
@@ -1331,10 +1522,12 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                   >
                     <input
                       type="file"
-                      accept=".pdf,.doc,.docx"
+                      accept={WORD_FILE_ACCEPT}
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
-                          simulateBlindManuscriptUpload(e.target.files[0]);
+                          const file = e.target.files[0];
+                          if (!validateWordFile(file)) return;
+                          simulateBlindManuscriptUpload(file);
                         }
                       }}
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -1347,6 +1540,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                     </div>
                   </div>
                 )}
+                <p className="text-[10px] text-slate-400 font-medium">{WORD_FILE_HELPER_TEXT}</p>
 
                 {isUploadingBlindManuscript && (
                   <div className="bg-sky-50/50 border border-[#008751]/20 p-4 rounded-xl space-y-2 text-left">
@@ -1376,7 +1570,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                       Please download our template, complete the required information, obtain signatures, and upload the signed form here.
                     </p>
                   </div>
-                  <span className="text-slate-400 font-mono text-[10px] uppercase font-bold bg-slate-100 px-2 py-0.5 rounded-md self-start sm:self-center">PDF, DOC, DOCX</span>
+                  <span className="text-slate-400 font-mono text-[10px] uppercase font-bold bg-slate-100 px-2 py-0.5 rounded-md self-start sm:self-center">DOC, DOCX</span>
                 </div>
 
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl p-4 text-left">
@@ -1424,7 +1618,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                       e.preventDefault();
                       setDragActiveAuthor(false);
                       if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                        simulateAuthorFormUpload(e.dataTransfer.files[0]);
+                        const file = e.dataTransfer.files[0];
+                        if (!validateWordFile(file)) return;
+                        simulateAuthorFormUpload(file);
                       }
                     }}
                     className={`border-2 border-dashed rounded-xl p-6 text-center transition duration-150 relative ${
@@ -1435,10 +1631,12 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                   >
                     <input
                       type="file"
-                      accept=".pdf,.doc,.docx"
+                      accept={WORD_FILE_ACCEPT}
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
-                          simulateAuthorFormUpload(e.target.files[0]);
+                          const file = e.target.files[0];
+                          if (!validateWordFile(file)) return;
+                          simulateAuthorFormUpload(file);
                         }
                       }}
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -1451,6 +1649,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                     </div>
                   </div>
                 )}
+                <p className="text-[10px] text-slate-400 font-medium">{WORD_FILE_HELPER_TEXT}</p>
 
                 {isUploadingAuthorForm && (
                   <div className="bg-sky-50/50 border border-[#008751]/20 p-4 rounded-xl space-y-2 text-left">
@@ -1466,6 +1665,189 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* D. Ethical Certificate Upload */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-5.5 space-y-4 shadow-xs text-left">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                  <div className="space-y-0.5 text-left">
+                    <h4 className="font-extrabold text-sm text-[#002b3d] flex items-center gap-1.5 uppercase">
+                      <span className="flex items-center justify-center w-5 h-5 rounded-full bg-[#008751]/10 text-[#008751] text-xs font-bold">D</span>
+                      Ethical Certificate Upload
+                    </h4>
+                    <p className="text-xs text-slate-550 font-medium">
+                      If this research required ethics committee/IRB approval, upload the ethical clearance certificate here.
+                    </p>
+                  </div>
+                  <span className="text-slate-400 font-mono text-[10px] uppercase font-bold bg-slate-100 px-2 py-0.5 rounded-md self-start sm:self-center">DOC, DOCX</span>
+                </div>
+
+                {uploadedFiles.some(f => f.componentType === 'Ethical Certificate') ? (
+                  <div className="bg-emerald-50/40 border border-emerald-200 rounded-xl p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Check className="w-5 h-5 text-[#008751]" />
+                      <div className="text-left">
+                        <p className="font-bold text-[#002b3d] text-sm">{uploadedFiles.find(f => f.componentType === 'Ethical Certificate')?.fileName}</p>
+                        <p className="text-xs text-slate-500 font-mono">{uploadedFiles.find(f => f.componentType === 'Ethical Certificate')?.fileSize} • Uploaded on {uploadedFiles.find(f => f.componentType === 'Ethical Certificate')?.uploadedAt}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const fileId = uploadedFiles.find(f => f.componentType === 'Ethical Certificate')?.id;
+                        if (fileId) deleteUploadedFile(fileId, false);
+                      }}
+                      className="text-red-500 hover:text-red-700 p-2 rounded-xl hover:bg-red-50 transition cursor-pointer"
+                      title="Remove file"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setDragActiveEthicalCertificate(true); }}
+                    onDragLeave={(e) => { e.preventDefault(); setDragActiveEthicalCertificate(false); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragActiveEthicalCertificate(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                        const file = e.dataTransfer.files[0];
+                        if (!validateWordFile(file)) return;
+                        simulateEthicalCertificateUpload(file);
+                      }
+                    }}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition duration-150 relative ${
+                      dragActiveEthicalCertificate
+                        ? 'border-[#008751] bg-[#008751]/5'
+                        : 'border-[#cbd8df] bg-[#fafbfd] hover:border-[#008751] hover:bg-[#fafbfd]/20'
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      accept={WORD_FILE_ACCEPT}
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          const file = e.target.files[0];
+                          if (!validateWordFile(file)) return;
+                          simulateEthicalCertificateUpload(file);
+                        }
+                      }}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                    <div className="flex flex-col items-center justify-center space-y-2">
+                      <Upload className="w-8 h-8 text-slate-400 stroke-[1.5]" />
+                      <p className="text-slate-700 font-bold text-xs">
+                        Drag & drop Ethical Certificate here, or <span className="text-[#008751] underline hover:text-[#005c7a]">browse files</span>
+                      </p>
+                    </div>
+                  </div>
+                )}
+                <p className="text-[10px] text-slate-400 font-medium">{WORD_FILE_HELPER_TEXT}</p>
+
+                {isUploadingEthicalCertificate && (
+                  <div className="bg-sky-50/50 border border-[#008751]/20 p-4 rounded-xl space-y-2 text-left">
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#008751] animate-ping"></span>
+                        Uploading Ethical Certificate document to server...
+                      </span>
+                      <span>{uploadProgressEthicalCertificate}%</span>
+                    </div>
+                    <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                      <div className="bg-[#008751] h-2 transition-all duration-300" style={{ width: `${uploadProgressEthicalCertificate}%` }}></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* E. Supplementary Files */}
+              <div id="supp-files-sub-card" className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs space-y-4 text-left">
+                <h4 className="font-extrabold text-base uppercase tracking-wide text-slate-850 flex items-center gap-2">
+                  <span className="flex items-center justify-center w-5 h-5 rounded-full bg-[#008751]/10 text-[#008751] text-xs font-bold">E</span>
+                  Supplementary Files
+                </h4>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Authors are strongly encouraged to upload raw data tables, high-resolution figures, supplementary appendices, and scientific assets to increase Citation potential.
+                </p>
+
+                {/* Additional file upload component */}
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, true)}
+                  className={`border-2 border-dashed rounded-xl p-6 text-center transition duration-150 relative ${
+                    dragActive
+                      ? 'border-[#008751] bg-[#008751]/5'
+                      : 'border-slate-200 bg-slate-50/50 hover:bg-white'
+                  }`}
+                >
+                  <input
+                    type="file"
+                    id="supp-file-input"
+                    accept={WORD_FILE_ACCEPT}
+                    onChange={(e) => handleFileUpload(e, true)}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <div className="flex flex-col items-center justify-center space-y-2">
+                    <Upload className="w-9 h-9 text-[#008751]/75" />
+                    <p className="text-slate-700 font-bold text-xs">
+                      Drag supplementary files here, or <span className="text-[#008751] underline">choose file</span>
+                    </p>
+                    <p className="text-slate-400 text-[10px]">{WORD_FILE_HELPER_TEXT}, up to 50MB</p>
+                  </div>
+                </div>
+
+                {isUploadingAddFile && (
+                  <div className="bg-emerald-50/40 p-3 rounded-lg border space-y-1">
+                    <div className="flex justify-between text-xs text-slate-700 font-mono">
+                      <span>Loading supplementary material...</span>
+                      <span>{addFileProgress}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
+                      <div className="bg-[#008751] h-1" style={{ width: `${addFileProgress}%` }}></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Uploaded supplementary files directory board */}
+                <div className="bg-white border border-slate-150 rounded-xl overflow-hidden mt-2">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b text-[10px] uppercase">
+                      <tr>
+                        <th className="px-4 py-3 w-10">#</th>
+                        <th className="px-4 py-3">File Name</th>
+                        <th className="px-4 py-3">File Type</th>
+                        <th className="px-4 py-3 w-24 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y text-slate-700">
+                      {additionalFiles.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-5 text-center text-gray-400 italic font-mono">
+                            No auxiliary attachments added.
+                          </td>
+                        </tr>
+                      ) : (
+                        additionalFiles.map((addF, idx) => (
+                          <tr key={addF.id} className="hover:bg-[#f8fafc]/50">
+                            <td className="px-4 py-3 font-mono text-slate-400">{idx + 1}</td>
+                            <td className="px-4 py-3 font-semibold text-slate-800">{addF.fileName}</td>
+                            <td className="px-4 py-3 text-slate-500 font-mono">{addF.fileSize}</td>
+                            <td className="px-4 py-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => deleteUploadedFile(addF.id, true)}
+                                className="text-red-500 hover:text-red-700 p-1"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
             </div>
@@ -1598,35 +1980,49 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                       <th className="px-5 py-3.5">Name</th>
                       <th className="px-5 py-3.5">Email</th>
                       <th className="px-5 py-3.5">Affiliation</th>
-                      <th className="px-5 py-3.5 w-28">Role</th>
-                      <th className="px-5 py-3.5 w-28 text-center">Principal?</th>
                       <th className="px-5 py-3.5 w-36 text-center">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y font-medium text-slate-705 text-sm">
+                  <tbody className={`divide-y font-medium text-slate-705 text-sm ${dragContributorIndex !== null ? 'select-none' : ''}`}>
                     {contributors.map((contrib, idx) => (
-                      <tr key={contrib.id} className="hover:bg-slate-50 transition">
+                      <tr
+                        key={contrib.id}
+                        ref={(el) => { contributorRowRefs.current[idx] = el; }}
+                        style={getContributorRowStyle(idx)}
+                        className={`bg-white ${dragContributorIndex === idx ? '' : 'hover:bg-slate-50 transition-colors'} ${dragContributorIndex !== null && dragContributorIndex !== idx ? 'select-none' : ''}`}
+                      >
                         <td className="px-5 py-3.5 text-center">
                           <div className="flex flex-col items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => moveContributor(idx, 'up')}
-                              disabled={idx === 0}
-                              className="text-slate-400 hover:text-[#008751] disabled:opacity-30 cursor-pointer"
-                              title="Move Up"
+                              onPointerDown={(e) => handleContributorGripPointerDown(e, idx)}
+                              className="text-slate-400 hover:text-[#008751] cursor-grab active:cursor-grabbing touch-none"
+                              style={{ touchAction: 'none' }}
+                              title="Drag to reorder"
                             >
-                              <ArrowUp className="w-4 h-4" />
+                              <GripVertical className="w-4 h-4" />
                             </button>
                             <span className="font-mono text-sm font-bold text-slate-700">{idx + 1}</span>
-                            <button
-                              type="button"
-                              onClick={() => moveContributor(idx, 'down')}
-                              disabled={idx === contributors.length - 1}
-                              className="text-slate-400 hover:text-[#008751] disabled:opacity-30 cursor-pointer"
-                              title="Move Down"
-                            >
-                              <ArrowDown className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() => moveContributor(idx, 'up')}
+                                disabled={idx === 0}
+                                className="text-slate-400 hover:text-[#008751] disabled:opacity-30 cursor-pointer"
+                                title="Move Up"
+                              >
+                                <ArrowUp className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => moveContributor(idx, 'down')}
+                                disabled={idx === contributors.length - 1}
+                                className="text-slate-400 hover:text-[#008751] disabled:opacity-30 cursor-pointer"
+                                title="Move Down"
+                              >
+                                <ArrowDown className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
                         </td>
                         <td className="px-5 py-3.5 text-sm">
@@ -1636,19 +2032,14 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                           <span className="text-xs text-gray-400 font-mono block mt-0.5">
                             Country: {contrib.country || 'USA'}
                           </span>
+                          {contrib.isPrincipalContact && (
+                            <span className="inline-flex bg-emerald-50 border border-emerald-300 text-[#008751] text-xs font-mono px-2 py-0.5 rounded-lg font-extrabold shadow-xs mt-1.5">
+                              ★ Corresponding Author
+                            </span>
+                          )}
                         </td>
                         <td className="px-5 py-3.5 font-mono text-gray-500 text-sm whitespace-nowrap">{contrib.email}</td>
                         <td className="px-5 py-3.5 italic text-sm">{contrib.affiliation}</td>
-                        <td className="px-5 py-3.5 font-bold text-slate-700 text-sm">{contrib.role}</td>
-                        <td className="px-5 py-3.5 text-center">
-                          {contrib.isPrincipalContact ? (
-                            <span className="inline-flex bg-emerald-50 border border-emerald-300 text-[#008751] text-xs font-mono px-2 py-0.5 rounded-lg font-extrabold shadow-xs">
-                              ★ Principal
-                            </span>
-                          ) : (
-                            <span className="text-slate-300 text-sm">—</span>
-                          )}
-                        </td>
                         <td className="px-5 py-3.5 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-2">
                             <button
@@ -1745,30 +2136,18 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                       <label className="block text-sm font-bold text-slate-800 uppercase">
                         Country / Jurisdiction *
                       </label>
-                      <input
-                        type="text"
+                      <select
                         value={contribCountry}
                         onChange={(e) => setContribCountry(e.target.value)}
                         className="w-full bg-white border border-gray-300 rounded-xl p-3 text-sm focus:ring-2 focus:ring-[#008751] outline-none font-semibold text-slate-800"
-                        placeholder="e.g. United Kingdom"
                         required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-sm font-bold text-slate-800 uppercase">
-                        Role Type *
-                      </label>
-                      <select
-                        value={contribRole}
-                        onChange={(e) => setContribRole(e.target.value)}
-                        className="w-full bg-white border border-gray-300 rounded-xl p-3 text-sm focus:ring-2 focus:ring-[#008751] outline-none font-semibold text-slate-800"
                       >
-                        <option value="Author">Author (Principal researcher)</option>
-                        <option value="Translator">Translator (Multi-language copywriter)</option>
-                        <option value="Co-investigator">Co-investigator (Data validator)</option>
+                        {COUNTRIES.map(country => (
+                          <option key={country} value={country}>{country}</option>
+                        ))}
                       </select>
                     </div>
+
                   </div>
 
                   <div className="pt-3">
@@ -1779,7 +2158,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         onChange={(e) => setContribPrincipal(e.target.checked)}
                         className="w-5 h-5 rounded border-gray-300 text-[#008751] focus:ring-[#008751] accent-[#008751]"
                       />
-                      <span>Principal contact for editorial correspondence regarding this paper.</span>
+                      <span>Corresponding Author for editorial correspondence regarding this paper.</span>
                     </label>
                   </div>
 
@@ -1874,9 +2253,12 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         <input
                           type="file"
                           id="cover-letter-uploader"
+                          accept={WORD_FILE_ACCEPT}
                           onChange={(e) => {
                             const file = e.target.files?.[0];
-                            if (file) simulateCoverLetterUpload(file);
+                            if (!file) return;
+                            if (!validateWordFile(file)) return;
+                            simulateCoverLetterUpload(file);
                           }}
                           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                         />
@@ -1904,103 +2286,15 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         </div>
                       )}
                     </div>
+                    <p className="text-[10px] text-slate-400 font-medium mt-1.5">{WORD_FILE_HELPER_TEXT}</p>
                   </div>
-                </div>
-              </div>
-
-              {/* Step 5.2 Auxiliary Files */}
-              <div id="supp-files-sub-card" className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs space-y-4 text-left">
-                <h4 className="font-extrabold text-base uppercase tracking-wide text-slate-850 flex items-center gap-2">
-                  <Layers className="w-5 h-5 text-[#008751]" />
-                  Step 5.2: Auxiliary Files, Figures & Dataset Materials
-                </h4>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Authors are strongly encouraged to upload raw data tables, high-resolution figures, supplementary appendices, and scientific assets to increase Citation potential.
-                </p>
-
-                {/* Additional file upload component */}
-                <div
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={(e) => handleDrop(e, true)}
-                  className={`border-2 border-dashed rounded-xl p-6 text-center transition duration-150 relative ${
-                    dragActive
-                      ? 'border-[#008751] bg-[#008751]/5'
-                      : 'border-slate-200 bg-slate-50/50 hover:bg-white'
-                  }`}
-                >
-                  <input
-                    type="file"
-                    id="supp-file-input"
-                    onChange={(e) => handleFileUpload(e, true)}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  />
-                  <div className="flex flex-col items-center justify-center space-y-2">
-                    <Upload className="w-9 h-9 text-[#008751]/75" />
-                    <p className="text-slate-700 font-bold text-xs">
-                      Drag supplementary files here, or <span className="text-[#008751] underline">choose file</span>
-                    </p>
-                    <p className="text-slate-400 text-[10px]">CSV, ZIP, XLSX, PNG, TIFF up to 50MB</p>
-                  </div>
-                </div>
-
-                {isUploadingAddFile && (
-                  <div className="bg-emerald-50/40 p-3 rounded-lg border space-y-1">
-                    <div className="flex justify-between text-xs text-slate-700 font-mono">
-                      <span>Loading supplementary material...</span>
-                      <span>{addFileProgress}%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
-                      <div className="bg-[#008751] h-1" style={{ width: `${addFileProgress}%` }}></div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Uploaded supplementary files directory board */}
-                <div className="bg-white border border-slate-150 rounded-xl overflow-hidden mt-2">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b text-[10px] uppercase">
-                      <tr>
-                        <th className="px-4 py-3 w-10">#</th>
-                        <th className="px-4 py-3">File Name</th>
-                        <th className="px-4 py-3">File Type</th>
-                        <th className="px-4 py-3 w-24 text-center">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y text-slate-700">
-                      {additionalFiles.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="px-4 py-5 text-center text-gray-400 italic font-mono">
-                            No auxiliary attachments added.
-                          </td>
-                        </tr>
-                      ) : (
-                        additionalFiles.map((addF, idx) => (
-                          <tr key={addF.id} className="hover:bg-[#f8fafc]/50">
-                            <td className="px-4 py-3 font-mono text-slate-400">{idx + 1}</td>
-                            <td className="px-4 py-3 font-semibold text-slate-800">{addF.fileName}</td>
-                            <td className="px-4 py-3 text-slate-500 font-mono">{addF.fileSize}</td>
-                            <td className="px-4 py-3 text-center">
-                              <button
-                                type="button"
-                                onClick={() => deleteUploadedFile(addF.id, true)}
-                                className="text-red-500 hover:text-red-700 p-1"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
                 </div>
               </div>
 
               {/* Dynamic Additional Form Steps (Comprehensive SaaS checklist) */}
               <div className="p-6 bg-white border border-slate-200/80 rounded-2xl shadow-xs text-left space-y-6">
                 <span className="text-sm font-extrabold text-[#008751] uppercase tracking-wide block border-b pb-2">
-                  Step 5.3: Mandatory Scholarly Disclosures & Compliance Declarations
+                  Step 5.2: Mandatory Scholarly Disclosures & Compliance Declarations
                 </span>
 
                 {/* Funding Panel */}
@@ -2018,18 +2312,18 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         onChange={() => setIsFunded('Yes')} 
                         className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
                       />
-                      <span>Yes, this project received financial sponsorship</span>
+                      <span>Yes</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
-                      <input 
-                        type="radio" 
-                        name="isFunded" 
-                        value="No" 
+                      <input
+                        type="radio"
+                        name="isFunded"
+                        value="No"
                         checked={isFunded === 'No'} 
                         onChange={() => setIsFunded('No')} 
                         className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
                       />
-                      <span>No, self-financed / unfunded</span>
+                      <span>No</span>
                     </label>
                   </div>
 
@@ -2122,7 +2416,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         onChange={() => setPreviouslySubmitted('Yes')} 
                         className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
                       />
-                      <span>Yes, originally presented to another journal</span>
+                      <span>Yes</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
                       <input 
@@ -2133,7 +2427,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         onChange={() => setPreviouslySubmitted('No')} 
                         className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
                       />
-                      <span>No, original submission</span>
+                      <span>No</span>
                     </label>
                   </div>
 
@@ -2213,7 +2507,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         onChange={() => setIsClinicalTrial('Yes')} 
                         className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
                       />
-                      <span>Yes, registered clinical trial</span>
+                      <span>Yes</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
                       <input 
@@ -2224,7 +2518,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         onChange={() => setIsClinicalTrial('No')} 
                         className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
                       />
-                      <span>No, observational / in-vitro / animal / theoretical</span>
+                      <span>No</span>
                     </label>
                   </div>
 
@@ -2400,7 +2694,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         onChange={() => setImagesPermissionRequired('Yes')} 
                         className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
                       />
-                      <span>Yes, copyrighted figures or patient imagery included</span>
+                      <span>Yes</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
                       <input 
@@ -2411,7 +2705,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         onChange={() => setImagesPermissionRequired('No')} 
                         className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
                       />
-                      <span>No images require external permission</span>
+                      <span>No</span>
                     </label>
                   </div>
 
@@ -2431,11 +2725,14 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         <span className="block text-xs font-bold text-slate-700">Permission Documentation Upload:</span>
                         <div className="flex items-center gap-3">
                           <div className="relative">
-                            <input 
-                              type="file" 
+                            <input
+                              type="file"
+                              accept={WORD_FILE_ACCEPT}
                               onChange={(e) => {
                                 const f = e.target.files?.[0];
-                                if (f) simulatePermissionUpload(f);
+                                if (!f) return;
+                                if (!validateWordFile(f)) return;
+                                simulatePermissionUpload(f);
                               }}
                               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                             />
@@ -2445,6 +2742,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                           </div>
                           {isUploadingPermissionDoc && <span className="text-[11px] text-[#008751] animate-pulse">Running checksum scan...</span>}
                         </div>
+                        <p className="text-[10px] text-slate-400 font-medium">{WORD_FILE_HELPER_TEXT}</p>
 
                         {permissionDocs.map(doc => (
                           <div key={doc.id} className="flex items-center justify-between text-xs bg-white px-2 py-1.5 rounded border border-emerald-100 text-emerald-800">
@@ -2472,7 +2770,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         onChange={() => setCopyrightedContent('Yes')} 
                         className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
                       />
-                      <span>Yes, text blocks, datasets, or code charts require licensure</span>
+                      <span>Yes</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
                       <input 
@@ -2483,7 +2781,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         onChange={() => setCopyrightedContent('No')} 
                         className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
                       />
-                      <span>No, purely original authorship</span>
+                      <span>No</span>
                     </label>
                   </div>
 
@@ -2503,11 +2801,14 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                         <span className="block text-xs font-bold text-slate-700">Permission Documentation Upload:</span>
                         <div className="flex items-center gap-3">
                           <div className="relative">
-                            <input 
-                              type="file" 
+                            <input
+                              type="file"
+                              accept={WORD_FILE_ACCEPT}
                               onChange={(e) => {
                                 const f = e.target.files?.[0];
-                                if (f) simulateCopyrightUpload(f);
+                                if (!f) return;
+                                if (!validateWordFile(f)) return;
+                                simulateCopyrightUpload(f);
                               }}
                               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                             />
@@ -2517,6 +2818,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                           </div>
                           {isUploadingCopyrightDoc && <span className="text-[11px] text-[#008751] animate-pulse">Scanning server limits...</span>}
                         </div>
+                        <p className="text-[10px] text-slate-400 font-medium">{WORD_FILE_HELPER_TEXT}</p>
 
                         {copyrightDocs.map(doc => (
                           <div key={doc.id} className="flex items-center justify-between text-xs bg-white px-2 py-1.5 rounded border border-emerald-100 text-emerald-800">
@@ -2524,128 +2826,6 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                             <button type="button" onClick={() => setCopyrightDocs(prev => prev.filter(p => p.id !== doc.id))} className="text-red-500 font-bold ml-2">×</button>
                           </div>
                         ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Social Media Promotion */}
-                <div className="space-y-3 pt-2 border-t font-sans">
-                  <label className="block text-sm font-bold text-slate-800">
-                    Would you like the publisher to promote this article on social media after publication? *
-                  </label>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
-                      <input 
-                        type="radio" 
-                        name="socialMediaPromotion" 
-                        value="Yes" 
-                        checked={socialMediaPromotion === 'Yes'} 
-                        onChange={() => {
-                          setSocialMediaPromotion('Yes');
-                          setPromoPlatforms(['LinkedIn', 'X (Twitter)', 'ResearchGate']); // defaults helper
-                        }} 
-                        className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
-                      />
-                      <span>Yes, maximize scientific dissemination via media channels</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
-                      <input 
-                        type="radio" 
-                        name="socialMediaPromotion" 
-                        value="No" 
-                        checked={socialMediaPromotion === 'No'} 
-                        onChange={() => {
-                          setSocialMediaPromotion('No');
-                          setPromoPlatforms([]);
-                        }} 
-                        className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
-                      />
-                      <span>No, publish silently</span>
-                    </label>
-                  </div>
-
-                  {socialMediaPromotion === 'Yes' && (
-                    <div className="p-4 bg--50 bg-slate-50 border border-slate-200 rounded-xl space-y-3 mt-2 animate-in fade-in-80 duration-150">
-                      <span className="block text-xs font-bold text-slate-750">Preferred Indexing & Dissemination Platforms:</span>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {['LinkedIn', 'Facebook', 'X (Twitter)', 'Instagram', 'ResearchGate'].map(platform => {
-                          const exists = promoPlatforms.includes(platform);
-                          return (
-                            <label key={platform} className="flex items-center gap-2 cursor-pointer font-semibold text-slate-700">
-                              <input 
-                                type="checkbox" 
-                                checked={exists}
-                                onChange={() => {
-                                  if (exists) {
-                                    setPromoPlatforms(prev => prev.filter(p => p !== platform));
-                                  } else {
-                                    setPromoPlatforms(prev => [...prev, platform]);
-                                  }
-                                }}
-                                className="w-4 h-4 text-[#008751] focus:ring-[#008751] rounded border-gray-300"
-                              />
-                              <span>{platform}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Color Figures */}
-                <div className="space-y-3 pt-2 border-t">
-                  <label className="block text-sm font-bold text-slate-800">
-                    Does the manuscript contain color figures? *
-                  </label>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
-                      <input 
-                        type="radio" 
-                        name="colorFigures" 
-                        value="Yes" 
-                        checked={colorFigures === 'Yes'} 
-                        onChange={() => setColorFigures('Yes')} 
-                        className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
-                      />
-                      <span>Yes, color diagrams/plates included</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700">
-                      <input 
-                        type="radio" 
-                        name="colorFigures" 
-                        value="No" 
-                        checked={colorFigures === 'No'} 
-                        onChange={() => setColorFigures('No')} 
-                        className="w-4 h-4 text-[#008751] focus:ring-[#008751]"
-                      />
-                      <span>No, simple black & white figures only</span>
-                    </label>
-                  </div>
-
-                  {colorFigures === 'Yes' && (
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 mt-2 animate-in fade-in-80 duration-150">
-                      <div className="space-y-1">
-                        <label className="block text-xs font-bold text-slate-700">Number of Color Figures *</label>
-                        <input 
-                          type="number" 
-                          min={1}
-                          value={colorFiguresCount} 
-                          onChange={(e) => setColorFiguresCount(e.target.value)} 
-                          className="w-full sm:w-48 bg-white border border-gray-300 rounded-lg p-2.5 text-sm" 
-                          placeholder="e.g. 3"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="block text-xs font-bold text-slate-700">Figure Details (Specific print options/captions)</label>
-                        <textarea 
-                          value={colorFiguresDetails} 
-                          onChange={(e) => setColorFiguresDetails(e.target.value)} 
-                          rows={2}
-                          className="w-full bg-white border border-gray-300 rounded-lg p-2.5 text-sm" 
-                          placeholder="Briefly state format e.g. RGB 300DPI, print vs online versions requirement..."
-                        />
                       </div>
                     </div>
                   )}
@@ -2663,8 +2843,11 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
               <div className="bg-sky-50 border border-sky-100 p-5 rounded-2xl space-y-2">
                 <h4 className="font-bold text-[#002b3d] flex items-center gap-1.5 text-sm">
                   <ShieldAlert className="w-5 h-5 text-sky-600" />
-                  Reviewer Recommendation Protocols (Optional)
+                  Reviewer Recommendation Protocols
                 </h4>
+                <p className="font-bold text-[#002b3d] text-sm">
+                  You may suggest up to 5 reviewers. A minimum of 3 reviewers is required.
+                </p>
                 <p className="text-slate-600 leading-relaxed text-sm font-normal">
                   To expedite the double-blind dispatch sequence, suggestions of competent experts are appreciated. Suggested individuals must not represent co-authors, recent research collaborators, or academic teachers within the last 5 years to maintain pure objectivity.
                 </p>
@@ -2679,7 +2862,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="space-y-2">
-                    <label className="block text-sm font-bold text-slate-800">Reviewer Full Name</label>
+                    <label className="block text-sm font-bold text-slate-800">Name</label>
                     <input
                       type="text"
                       value={revName}
@@ -2690,7 +2873,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                   </div>
 
                   <div className="space-y-2">
-                    <label className="block text-sm font-bold text-slate-800">Official Email Endpoint</label>
+                    <label className="block text-sm font-bold text-slate-800">Email</label>
                     <input
                       type="email"
                       value={revEmail}
@@ -2701,7 +2884,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                   </div>
 
                   <div className="space-y-2">
-                    <label className="block text-sm font-bold text-slate-800">Affiliated Association</label>
+                    <label className="block text-sm font-bold text-slate-800">Affiliation</label>
                     <input
                       type="text"
                       value={revAffiliation}
@@ -2712,7 +2895,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
                   </div>
 
                   <div className="space-y-2">
-                    <label className="block text-sm font-bold text-slate-800">Reason / Subject Expertise Focus</label>
+                    <label className="block text-sm font-bold text-slate-800">Subject Expertise Focus</label>
                     <input
                       type="text"
                       value={revReason}
@@ -3063,18 +3246,25 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit }: N
           <div className="bg-[#f8fafc] border-t border-[#e2e8f0] px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-4">
               <button
-                onClick={() => alert("Draft saved successfully. Progressive state saved to system memory.")}
+                onClick={handleSaveDraft}
+                disabled={isSavingDraft}
                 type="button"
-                className="px-4 py-2 bg-white border border-slate-350 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-lg transition cursor-pointer flex items-center gap-2 shadow-xs"
+                className="px-4 py-2 bg-white border border-slate-350 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-lg transition cursor-pointer flex items-center gap-2 shadow-xs disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                Save Draft
+                {isSavingDraft ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                )}
+                {isSavingDraft ? 'Saving...' : 'Save Draft'}
               </button>
 
-              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-emerald-600 font-semibold">
-                <Check className="w-3.5 h-3.5 stroke-[3.5px]" />
-                Autosaved just now
-              </span>
+              {draftSavedAt && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-emerald-600 font-semibold">
+                  <Check className="w-3.5 h-3.5 stroke-[3.5px]" />
+                  Saved to Incomplete Submissions
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-3">

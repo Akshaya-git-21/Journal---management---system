@@ -10,7 +10,7 @@ import {
   submitManuscript,
   getLatestRevisionsByManuscriptIds
 } from '../lib/workflow';
-import { supabase, upsertManuscriptToDb, ensureAuthorProfile } from '../lib/supabase';
+import { supabase, ensureAuthorProfile } from '../lib/supabase';
 import { getManuscriptStatusLabel, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
 import { listProduction, subscribeToProduction } from '../lib/production';
 import NewSubmissionFlow from './NewSubmissionFlow';
@@ -51,7 +51,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState({ submissions: true });
-  const [statusFilter, setStatusFilter] = useState<'active' | 'review' | 'revisions' | 'accepted' | 'rejected' | 'published'>('active');
+  const [statusFilter, setStatusFilter] = useState<'incomplete' | 'active' | 'review' | 'revisions' | 'accepted' | 'rejected' | 'published'>('active');
   const [submissionsGroupExpanded, setSubmissionsGroupExpanded] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
@@ -133,7 +133,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   // that's technically UNDER_REVIEW but hasn't actually reached Peer Review
   // yet (only one reviewer has accepted so far).
   const STATUS_FILTER_PREDICATES: Record<typeof statusFilter, (m: ManuscriptRow) => boolean> = {
-    active: (m) => !['REJECTED', 'PUBLISHED'].includes(m.status),
+    incomplete: (m) => m.status === 'DRAFT',
+    active: (m) => !['DRAFT', 'REJECTED', 'PUBLISHED'].includes(m.status),
     review: (m) => ['EDITORIAL REVIEW', 'PEER REVIEW'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id])),
     revisions: (m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'IN REVISION',
     accepted: (m) => ['ACCEPTED', 'PROOFREADING'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id])),
@@ -164,6 +165,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   // Calculate status counts -- bucketed by the standardized display status,
   // not the raw manuscripts.status column (see STATUS_FILTER_PREDICATES).
   const statusCounts = {
+    incomplete: items.filter((m) => m.status === 'DRAFT').length,
     submitted: items.filter((m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'SUBMITTED').length,
     editorialReview: items.filter((m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'EDITORIAL REVIEW').length,
     peerReview: items.filter((m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'PEER REVIEW').length,
@@ -293,25 +295,52 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       // through (writes manuscript_status_history, notifies Coordinators),
       // instead of a direct insert with status='SUBMITTED' that silently
       // skipped both. A manuscript ID is generated exactly once by
-      // NewSubmissionFlow's triggerSubmitFinal(), which is itself guarded
-      // against double-invocation (hasSubmitted/isSubmitting), so this insert
-      // + RPC pair runs at most once per real submission.
-      console.log('[SUBMIT] Inserting manuscript record as DRAFT...');
-      const { error: insertError } = await supabase
+      // NewSubmissionFlow (reused across "Save Draft" clicks and the final
+      // submit), so the author may already have a DRAFT row under this same
+      // id from an earlier Save Draft. RLS only grants authors UPDATE on a
+      // specific column list (not status/author_id/etc, see
+      // 0002_manuscripts_workflow.sql) -- a plain .upsert() would name every
+      // column in its ON CONFLICT DO UPDATE SET clause and get rejected for
+      // the restricted ones even though they're not actually changing here,
+      // so this checks for an existing row and does a real INSERT or a
+      // column-scoped UPDATE instead.
+      console.log('[SUBMIT] Saving manuscript record as DRAFT (pre-transition)...');
+      const { data: existingDraft, error: lookupError } = await supabase
         .from('manuscripts')
-        .insert([{
-          id: newManuscript.id,
-          title: newManuscript.title,
-          abstract: newManuscript.abstract,
-          references: newManuscript.references,
-          is_double_blind: newManuscript.isDoubleBlind,
-          cover_letter: newManuscript.coverLetter,
-          status: 'DRAFT',
-          author_id: user.id,
-          author_name: newManuscript.authorName,
-          author_email: newManuscript.authorEmail,
-          language: newManuscript.language
-        }]);
+        .select('id')
+        .eq('id', manuscriptId)
+        .maybeSingle();
+      if (lookupError) {
+        throw new Error(`Failed to check for existing draft: ${lookupError.message}`);
+      }
+
+      const insertError = existingDraft
+        ? (await supabase
+            .from('manuscripts')
+            .update({
+              title: newManuscript.title,
+              abstract: newManuscript.abstract,
+              references: newManuscript.references,
+              is_double_blind: newManuscript.isDoubleBlind,
+              cover_letter: newManuscript.coverLetter,
+              language: newManuscript.language
+            })
+            .eq('id', manuscriptId)).error
+        : (await supabase
+            .from('manuscripts')
+            .insert([{
+              id: newManuscript.id,
+              title: newManuscript.title,
+              abstract: newManuscript.abstract,
+              references: newManuscript.references,
+              is_double_blind: newManuscript.isDoubleBlind,
+              cover_letter: newManuscript.coverLetter,
+              status: 'DRAFT',
+              author_id: user.id,
+              author_name: newManuscript.authorName,
+              author_email: newManuscript.authorEmail,
+              language: newManuscript.language
+            }])).error;
 
       if (insertError) {
         throw new Error(`Failed to insert manuscript: ${insertError.message}`);
@@ -430,12 +459,81 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
     }
   };
 
+  // Persist the in-progress wizard as an incomplete (DRAFT) manuscript.
+  // The manuscripts table's RLS grant only allows authors to UPDATE a
+  // specific column list (title, abstract, references, is_double_blind,
+  // cover_letter, language, submission_step, editors_notes) -- status,
+  // author_id etc. can only be set at INSERT time / through the workflow
+  // RPCs. A plain .upsert() issues an INSERT ... ON CONFLICT DO UPDATE that
+  // names every column (including the restricted ones) in its SET clause,
+  // which Postgres rejects for lack of privilege even when no conflict
+  // actually occurs -- so this checks for an existing row first and does a
+  // real INSERT or a column-scoped UPDATE accordingly, rather than upserting.
+  const handleSaveDraft = async (paperDetails: any) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError('Not authenticated');
+        return;
+      }
+      await ensureAuthorProfile();
+
+      const manuscriptId = paperDetails.id;
+      if (!manuscriptId) return;
+
+      const { data: existing, error: lookupError } = await supabase
+        .from('manuscripts')
+        .select('id')
+        .eq('id', manuscriptId)
+        .maybeSingle();
+      if (lookupError) throw new Error(lookupError.message);
+
+      if (existing) {
+        const { error: updateError } = await supabase
+          .from('manuscripts')
+          .update({
+            title: paperDetails.title || '',
+            abstract: paperDetails.abstract || '',
+            cover_letter: paperDetails.coverLetter || '',
+            language: paperDetails.language || 'English',
+            submission_step: paperDetails.submissionStep || 1
+          })
+          .eq('id', manuscriptId);
+        if (updateError) throw new Error(updateError.message);
+      } else {
+        const { error: insertError } = await supabase
+          .from('manuscripts')
+          .insert([{
+            id: manuscriptId,
+            title: paperDetails.title || '',
+            abstract: paperDetails.abstract || '',
+            cover_letter: paperDetails.coverLetter || '',
+            status: 'DRAFT',
+            author_id: user.id,
+            author_name: currentUser?.name || 'Unknown Author',
+            author_email: currentUser?.email || user.email || '',
+            language: paperDetails.language || 'English',
+            submission_step: paperDetails.submissionStep || 1
+          }]);
+        if (insertError) throw new Error(insertError.message);
+      }
+
+      await load();
+      setStatusFilter('incomplete');
+      setView('list');
+    } catch (err: any) {
+      setError(err.message || 'Failed to save draft');
+      console.error('[SAVE DRAFT] Error:', err);
+    }
+  };
+
   if (view === 'new') {
     return (
       <NewSubmissionFlow
         currentUser={currentUser ?? null}
         onCancel={() => { setView('list'); load(); }}
         onSubmit={handleNewSubmission}
+        onSaveDraft={handleSaveDraft}
       />
     );
   }
@@ -497,12 +595,13 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           <div className="space-y-3">
             <NavGroup title="My Submissions" icon={<Send className="w-4 h-4" />} expanded={submissionsGroupExpanded} onToggle={() => setSubmissionsGroupExpanded((v) => !v)}>
               {([
-                { id: 'active', label: 'Active', count: items.filter(m => !['REJECTED', 'PUBLISHED'].includes(m.status)).length, icon: <Send className="w-4 h-4" /> },
+                { id: 'active', label: 'Active', count: items.filter(m => !['DRAFT', 'REJECTED', 'PUBLISHED'].includes(m.status)).length, icon: <Send className="w-4 h-4" /> },
                 { id: 'review', label: 'Under Review', count: statusCounts.underReview, icon: <Eye className="w-4 h-4" /> },
                 { id: 'revisions', label: 'Revisions', count: statusCounts.revisionRequested, icon: <Pencil className="w-4 h-4" /> },
                 { id: 'accepted', label: 'Accepted', count: statusCounts.accepted, icon: <CheckCircle2 className="w-4 h-4" /> },
                 { id: 'rejected', label: 'Rejected', count: statusCounts.rejected, icon: <XCircle className="w-4 h-4" /> },
                 { id: 'published', label: 'Published', count: statusCounts.published, icon: <Newspaper className="w-4 h-4" /> },
+                { id: 'incomplete', label: 'Incomplete Submissions', count: statusCounts.incomplete, icon: <FileText className="w-4 h-4" /> },
               ] as const).map((item) => (
                 <NavItem
                   key={item.id}
@@ -593,7 +692,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                       <span>/submissions/queue</span>
                     </div>
                     <h2 className="text-lg font-semibold text-slate-900">
-                      {{ active: 'Active submissions', review: 'Under review', revisions: 'Revisions requested', accepted: 'Accepted submissions', rejected: 'Rejected submissions', published: 'Published submissions' }[statusFilter]}
+                      {{ incomplete: 'Incomplete submissions', active: 'Active submissions', review: 'Under review', revisions: 'Revisions requested', accepted: 'Accepted submissions', rejected: 'Rejected submissions', published: 'Published submissions' }[statusFilter]}
                     </h2>
                     <p className="text-sm text-slate-600">Manage your submissions and track their progress through the editorial workflow.</p>
                   </div>
@@ -684,12 +783,21 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                               </div>
                             </td>
                             <td className="px-6 py-4 space-x-2 whitespace-nowrap">
-                              <button
-                                onClick={() => { setSelectedId(m.id); setView('detail'); }}
-                                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
-                              >
-                                View
-                              </button>
+                              {m.status === 'DRAFT' ? (
+                                <button
+                                  onClick={() => setView('new')}
+                                  className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 transition"
+                                >
+                                  Resume Draft
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => { setSelectedId(m.id); setView('detail'); }}
+                                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
+                                >
+                                  View
+                                </button>
+                              )}
                               {m.status === 'REVISION_REQUESTED' && (
                                 latestRevisionByManuscript[m.id]?.status === 'AWAITING_AUTHOR_UPLOAD' ? (
                                   <button
@@ -704,12 +812,14 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                                   </span>
                                 )
                               )}
-                              <button
-                                onClick={() => { setSelectedId(m.id); setView('discussion'); }}
-                                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
-                              >
-                                Contact
-                              </button>
+                              {m.status !== 'DRAFT' && (
+                                <button
+                                  onClick={() => { setSelectedId(m.id); setView('discussion'); }}
+                                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
+                                >
+                                  Contact
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleDelete(m.id, m)}
                                 disabled={deleteLoading === m.id || ['EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED', 'REJECTED'].includes(m.status)}

@@ -312,8 +312,22 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
               />
               <label className="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
                 <Upload className="w-4 h-4" /> {attachment ? attachment.name : 'Upload Proof Corrections (optional)'}
-                <input type="file" className="hidden" onChange={(e) => setAttachment(e.target.files?.[0] || null)} />
+                <input
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    if (file && !/\.pdf$/i.test(file.name)) {
+                      setError('Only PDF files are accepted for proof corrections.');
+                      return;
+                    }
+                    setError('');
+                    setAttachment(file);
+                  }}
+                />
               </label>
+              <p className="text-[10px] text-slate-400 font-medium">Supports PDF files only (.pdf)</p>
               <div className="flex items-center gap-3">
                 <button disabled={busy || !comments.trim()} onClick={submitCorrections} className="rounded-full bg-[#008751] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#007043] disabled:opacity-40">Submit Corrections</button>
                 <button onClick={() => { setMode('view'); setComments(''); setAttachment(null); }} className="rounded-full border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
