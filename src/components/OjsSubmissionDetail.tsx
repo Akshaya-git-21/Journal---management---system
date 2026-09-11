@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getManuscriptStatusLabel, getManuscriptStatusMeta, getRevisionMeta, getLatestRevision } from '../lib/manuscriptStatusLabel';
+import { getManuscriptStatusLabel, getManuscriptStatusMeta, getLatestRevision, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
 import FilePreviewModal from './FilePreviewModal';
 import SubmissionSidebar from './SubmissionSidebar';
 import AuthorProductionPanel from './production/AuthorProductionPanel';
@@ -71,9 +71,7 @@ import {
   Inbox,
   Mail,
   Bell,
-  Calendar,
   Clock,
-  User,
   Info,
   Pin,
   Lock,
@@ -948,43 +946,6 @@ export default function OjsSubmissionDetail({
     { key: 'ACCEPTED', label: 'Accepted' },
     { key: 'PUBLISHED', label: 'Published' },
   ];
-  const getWorkflowStepperSlots = (details: AuthorManuscriptDetails | null): { label: string; sub: string; status: 'completed' | 'active' | 'pending' }[] => {
-    if (!details) return [];
-    const { manuscript, revisions, reviewerAssignments } = details;
-    const latestRevision = getLatestRevision(revisions);
-    const label = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
-
-    if (manuscript.status === 'REJECTED') {
-      // Rejection can happen from either the screening or peer-review
-      // track -- any reviewer ever having been assigned means it got at
-      // least as far as Peer Review before being rejected (a straight
-      // reject creates no manuscript_revisions row to check origin on).
-      const rejectedFromPeerReview = (reviewerAssignments?.length ?? 0) > 0;
-      const idx = rejectedFromPeerReview ? 2 : 1;
-      return STANDARD_PIPELINE.map((s, i) => ({
-        label: s.label,
-        sub: i < idx ? 'Completed' : i === idx ? 'Rejected' : 'Not Reached',
-        status: i < idx ? 'completed' : i === idx ? 'active' : 'pending',
-      }));
-    }
-
-    let currentIndex = STANDARD_PIPELINE.findIndex((s) => s.key === label);
-    let detourSub: string | null = null;
-    if (label === 'IN REVISION') {
-      currentIndex = latestRevision?.origin === 'PEER_REVIEW' ? 2 : 1;
-      detourSub = 'In Revision';
-    }
-    if (currentIndex < 0) currentIndex = 0;
-    // Accepted/Published are terminal for this node, not "in progress".
-    const isTerminalNode = STANDARD_PIPELINE[currentIndex]?.key === 'ACCEPTED' || STANDARD_PIPELINE[currentIndex]?.key === 'PUBLISHED';
-
-    return STANDARD_PIPELINE.map((s, i) => ({
-      label: s.label,
-      sub: i < currentIndex ? 'Completed' : i === currentIndex ? (detourSub || (isTerminalNode ? s.label : 'In Progress')) : 'Pending',
-      status: i < currentIndex ? 'completed' : i === currentIndex ? 'active' : 'pending',
-    }));
-  };
-
   const isSubmissionDashboard = (activeTab === 'SUBMISSION' || activeTab === 'overview') && viewState === 'DASHBOARD';
 
   return (
@@ -1037,61 +998,9 @@ export default function OjsSubmissionDetail({
                   <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none -mr-16 -mt-16" />
 
                   <div className="space-y-1.5 text-left relative z-10 flex-grow">
-                    <span className="text-emerald-200 text-[11px] font-medium uppercase tracking-widest block font-mono">
-                      Manuscript ID: #{paper.id || "N/A"}
-                    </span>
                     <h2 className="text-white text-[18px] font-semibold font-sans tracking-tight leading-snug drop-shadow-xs">
                       {manuscriptDetails?.manuscript.title || paper.title || 'Untitled manuscript'}
                     </h2>
-
-                    {/* Metadata line - compact horizontal layout */}
-                    <div className="flex flex-wrap items-center gap-3 pt-2 text-[11px] text-emerald-100 font-medium">
-                      <div className="flex items-center gap-1.5 bg-black/15 px-2.5 py-1 rounded-lg border border-white/5">
-                        <Calendar className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-                        <span>{manuscriptDetails?.manuscript.submitted_at ? formatDateTime(manuscriptDetails.manuscript.submitted_at) : 'Not submitted'}</span>
-                      </div>
-                      {manuscriptDetails?.manuscript.language && (
-                        <div className="flex items-center gap-1.5 bg-black/15 px-2.5 py-1 rounded-lg border border-white/5">
-                          <BookOpen className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-                          <span>{manuscriptDetails.manuscript.language}</span>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-1.5 bg-black/15 px-2.5 py-1 rounded-lg border border-white/5">
-                        <User className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-                        <span>{manuscriptDetails?.manuscript.author_name || paper.author || 'Unknown author'}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Current Status sub-card on the right */}
-                  <div className="shrink-0 flex items-center gap-3 relative z-10 bg-white border border-emerald-500/20 p-3.5 rounded-xl shadow-md self-stretch md:self-auto flex-row justify-between md:justify-start">
-                    <div className="space-y-0.5 text-left">
-                      <span className="text-slate-800 text-[10px] font-semibold uppercase tracking-wider block">Status</span>
-                      <span className="bg-[#e6f7ef] text-[#008751] border border-emerald-500/30 px-3 py-1 rounded-full text-[12px] font-bold inline-flex items-center gap-1 shadow-3xs">
-                        <span className="w-2 h-2 rounded-full bg-[#008751]" />
-                        {manuscriptDetails?.manuscript
-                          ? getManuscriptStatusLabel(manuscriptDetails.manuscript, getLatestRevision(manuscriptDetails.revisions), productionStatus)
-                          : (paper.raw?.status || 'SUBMITTED').replace(/_/g, ' ')}
-                      </span>
-                      {(() => {
-                        const revisionMeta = manuscriptDetails ? getRevisionMeta(getLatestRevision(manuscriptDetails.revisions)) : null;
-                        return revisionMeta ? (
-                          <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wide block mt-0.5">
-                            Revision {revisionMeta.revisionNumber}{revisionMeta.revisionType ? ` — ${revisionMeta.revisionType}` : ''}
-                          </span>
-                        ) : null;
-                      })()}
-                    </div>
-
-                    {/* Document icon with check */}
-                    <div className="relative">
-                      <div className="w-10 h-12 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-center shadow-xs relative">
-                        <FileText className="w-5 h-5 text-[#008751]" />
-                        <div className="absolute -bottom-0.5 -right-0.5 bg-[#008751] text-white rounded-full p-0.5 border-2 border-white shadow-2xs">
-                          <Check className="w-2.5 h-2.5 stroke-[3]" />
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 </div>
 
@@ -1171,165 +1080,55 @@ export default function OjsSubmissionDetail({
                   );
                 })()}
 
-                {/* 4-Metric Grid - Compact, Equal Height */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {/* Card 1: Files */}
-                  <div className="bg-white border border-emerald-200 rounded-lg p-4 shadow-xs flex flex-col justify-between h-full hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-[#004d2e] shrink-0 border border-emerald-200">
-                        <FolderOpen className="w-4.5 h-4.5 stroke-[2]" />
-                      </div>
-                      <div className="text-left flex-1 min-w-0">
-                        <span className="text-slate-600 text-[11px] font-semibold uppercase tracking-wider block">Files</span>
-                        <div className="text-xl font-bold text-black mt-0.5">{uploadedFiles.length + revisionUploadedFiles.length}</div>
-                        <span className="text-slate-700 text-[10px] block font-medium">
-                          {latestRevisionForFiles && revisionUploadedFiles.length > 0
-                            ? `Includes Revised File ${latestRevisionForFiles.revision_number}`
-                            : 'Uploaded'}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => document.getElementById("uploaded-files-card")?.scrollIntoView({ behavior: 'smooth' })}
-                      className="text-[#008751] hover:text-[#007043] text-[10px] font-semibold mt-2 inline-flex items-center gap-0.5"
-                    >
-                      <span>View Files</span>
-                      <span>→</span>
-                    </button>
-                  </div>
-
-                  {/* Card 2: Discussions */}
-                  <div className="bg-white border border-emerald-200 rounded-lg p-4 shadow-xs flex flex-col justify-between h-full hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-[#004d2e] shrink-0 border border-emerald-200">
-                        <MessageSquare className="w-4.5 h-4.5 stroke-[2]" />
-                      </div>
-                      <div className="text-left flex-1 min-w-0">
-                        <span className="text-slate-600 text-[11px] font-semibold uppercase tracking-wider block">Discussions</span>
-                        <div className="text-xl font-bold text-black mt-0.5">{manuscriptDetails?.discussions?.length || 0}</div>
-                        <span className="text-slate-700 text-[10px] block font-medium">Messages</span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => document.getElementById("discussions-card")?.scrollIntoView({ behavior: 'smooth' })}
-                      className="text-[#008751] hover:text-[#007043] text-[10px] font-semibold mt-2 inline-flex items-center gap-0.5"
-                    >
-                      <span>{manuscriptDetails?.discussions?.length ? 'Open' : 'Start'}</span>
-                      <span>→</span>
-                    </button>
-                  </div>
-
-                  {/* Card 3: Editorial Team */}
-                  <div className="bg-white border border-emerald-200 rounded-lg p-4 shadow-xs flex flex-col justify-between h-full hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-[#004d2e] shrink-0 border border-emerald-200">
-                        <User className="w-4.5 h-4.5 stroke-[2]" />
-                      </div>
-                      <div className="text-left flex-1 min-w-0">
-                        <span className="text-slate-600 text-[11px] font-semibold uppercase tracking-wider block">Editorial Team</span>
-                        {manuscriptDetails?.editorAssignments && manuscriptDetails.editorAssignments.length > 0 ? (
-                          <>
-                            <div className="text-sm font-bold text-black mt-0.5 truncate" title={userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id)?.name || 'Assigned'}>
-                              {userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id)?.name || 'Editor'}
-                            </div>
-                            <span className="text-slate-700 text-[10px] block font-medium">Confirmed</span>
-                          </>
-                        ) : (
-                          <>
-                            <div className="text-sm font-bold text-slate-400 mt-0.5">No editor</div>
-                            <span className="text-slate-600 text-[10px] block font-medium">Pending</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        const editor = manuscriptDetails?.editorAssignments?.[0];
-                        if (editor) {
-                          alert(`Editor: ${userProfiles.get(editor.editor_id)?.name}\nStatus: ${editor.status}`);
-                        }
-                      }}
-                      className="text-[#008751] hover:text-[#007043] text-[10px] font-semibold mt-2 inline-flex items-center gap-0.5"
-                    >
-                      <span>Details</span>
-                      <span>→</span>
-                    </button>
-                  </div>
-
-                  {/* Card 4: Important Dates */}
-                  <div className="bg-white border border-emerald-200 rounded-lg p-4 shadow-xs flex flex-col justify-between h-full hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-[#004d2e] shrink-0 border border-emerald-200">
-                        <Calendar className="w-4.5 h-4.5 stroke-[2]" />
-                      </div>
-                      <div className="text-left flex-1 min-w-0">
-                        <span className="text-slate-600 text-[11px] font-semibold uppercase tracking-wider block">Dates</span>
-                        <div className="text-[10px] font-medium text-slate-900 mt-0.5 leading-tight">
-                          <div>Submitted: <strong>{manuscriptDetails?.manuscript?.submitted_at ? formatDate(manuscriptDetails.manuscript.submitted_at) : '--'}</strong></div>
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => alert("View full timeline")}
-                      className="text-[#008751] hover:text-[#007043] text-[10px] font-semibold mt-2 inline-flex items-center gap-0.5"
-                    >
-                      <span>Calendar</span>
-                      <span>→</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Submission Workflow horizontal stepper */}
-                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl p-4 shadow-xs text-left">
-                  <h3 className="text-black text-[16px] font-semibold tracking-tight mb-4">Submission Workflow</h3>
-
-                  <div className="relative flex items-center justify-between">
-                    {/* Background connecting line */}
-                    <div className="absolute top-3 left-3 right-3 h-0.5 bg-emerald-200 z-0">
-                      {/* Completed progress fill */}
-                      {(() => {
-                        const slots = getWorkflowStepperSlots(manuscriptDetails);
-                        const completedCount = slots.filter((s) => s.status === 'completed').length;
-                        const pct = slots.length > 0 ? Math.round((completedCount / (slots.length - 1)) * 100) : 0;
-                        return <div className="absolute top-0 left-0 h-full bg-[#008751] transition-all duration-300" style={{ width: `${Math.min(100, pct)}%` }} />;
-                      })()}
-                    </div>
-
-                    {getWorkflowStepperSlots(manuscriptDetails).map((step, idx) => {
-                      let circleStyle = "bg-white border-emerald-200 text-[#004d2e]";
-                      let labelStyle = "text-slate-800 font-medium";
-                      let subStyle = "text-slate-700 font-normal";
-
-                      if (step.status === "completed") {
-                        circleStyle = "bg-[#008751] border-[#008751] text-white shadow-2xs";
-                        labelStyle = "text-black font-bold text-[11px]";
-                        subStyle = "text-slate-800 font-medium text-[10px]";
-                      } else if (step.status === "active") {
-                        circleStyle = "border-2 border-[#008751] bg-[#eefcf5] text-[#008751] ring-2 ring-[#008751]/10";
-                        labelStyle = "text-[#005a36] font-bold text-[11px] bg-emerald-100/70 px-1.5 py-0.5 rounded border border-emerald-200 shadow-2xs";
-                        subStyle = "text-emerald-800 font-bold text-[10px]";
-                      } else {
-                        circleStyle = "bg-slate-50 border-emerald-100 text-slate-500";
-                        labelStyle = "text-slate-900 font-medium text-[11px]";
-                        subStyle = "text-slate-600 font-normal text-[10px]";
-                      }
-                      
-                      return (
-                        <div key={idx} className="relative z-10 flex flex-col items-center flex-1 text-center">
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center border-2 text-xs transition duration-150 ${circleStyle}`}>
-                            {step.status === "completed" ? (
-                              <Check className="w-3.5 h-3.5 stroke-[4]" />
-                            ) : step.status === "active" ? (
-                              <span className="w-2 h-2 rounded-full bg-[#008751]" />
-                            ) : (
-                              <span className="w-1.5 h-1.5 bg-slate-300 rounded-full" />
-                            )}
-                          </div>
-                          <span className={`text-[9px] sm:text-[10px] mt-1.5 block tracking-tight ${labelStyle}`}>{step.label}</span>
-                          <span className={`text-[8px] sm:text-[9px] mt-0.5 block ${subStyle}`}>{step.sub}</span>
-                        </div>
-                      );
-                    })}
+                {/* Submission Overview -- one horizontal row for this manuscript.
+                    Status is not hard-coded: it comes from the same
+                    getManuscriptStatusLabel()/STANDARD_STATUS_COLORS pair every
+                    other workspace uses, driven by manuscripts.status +
+                    production_stage, so a Coordinator's status change is
+                    reflected here automatically without any local state. */}
+                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl shadow-xs text-left overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm min-w-[640px]">
+                      <thead>
+                        <tr className="bg-emerald-50/50 border-b border-emerald-100">
+                          <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-600">Manuscript ID</th>
+                          <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-600">Title</th>
+                          <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-600">Author Name</th>
+                          <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-600">Submitted Date</th>
+                          <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-600">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="hover:bg-emerald-50/30 transition">
+                          <td className="px-4 py-4 font-mono text-xs font-bold text-slate-700 whitespace-nowrap align-middle">
+                            #{manuscriptDetails?.manuscript.id || paper.id || 'N/A'}
+                          </td>
+                          <td className="px-4 py-4 font-semibold text-slate-900 max-w-xs truncate align-middle">
+                            {manuscriptDetails?.manuscript.title || paper.title || 'Untitled manuscript'}
+                          </td>
+                          <td className="px-4 py-4 text-slate-700 whitespace-nowrap align-middle">
+                            {manuscriptDetails?.manuscript.author_name || paper.author || 'Unknown author'}
+                          </td>
+                          <td className="px-4 py-4 text-slate-700 whitespace-nowrap align-middle">
+                            {manuscriptDetails?.manuscript.submitted_at ? formatDate(manuscriptDetails.manuscript.submitted_at) : '--'}
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap align-middle">
+                            {(() => {
+                              const statusLabel = manuscriptDetails?.manuscript
+                                ? getManuscriptStatusLabel(manuscriptDetails.manuscript, getLatestRevision(manuscriptDetails.revisions), productionStatus)
+                                : (paper.raw?.status || 'SUBMITTED').replace(/_/g, ' ');
+                              const colorClass = STANDARD_STATUS_COLORS[statusLabel as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.SUBMITTED;
+                              return (
+                                <span className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold border ${colorClass}`}>
+                                  <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0" />
+                                  {statusLabel}
+                                </span>
+                              );
+                            })()}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 
