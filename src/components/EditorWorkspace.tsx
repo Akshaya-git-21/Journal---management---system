@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, ReactNode } from 'react';
 import { Role, ManuscriptStatus, ReviewerRecommendation } from '../types';
 import {
-  ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, DiscussionRow,
+  ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, DiscussionRow, SuggestedReviewerRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getRevisions, subscribeToManuscripts,
   respondToEditorAssignment, submitEditorAssessment, submitEditorRecommendation, publishDecision,
   getManuscript, getContributors, getDiscussions, getReviewerNeedingReplacement, getPendingEditorSuggestions
@@ -34,7 +34,7 @@ import {
 import { Loader2, ArrowLeft, ArrowRight, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send } from 'lucide-react';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
-import { EditorReviewerSelection } from './EditorReviewerSelection';
+import { EditorReviewerSelection, useEditorReviewerSelection, ReviewerSelectionList, ReviewerSelectionConfirmButton } from './EditorReviewerSelection';
 import { ReviewerReplacementAlert } from './ReviewerReplacementAlert';
 import EditorEvaluationSidebar from './EditorEvaluationSidebar';
 import FilePreviewModal from './FilePreviewModal';
@@ -632,12 +632,39 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
     </div>
   );
 }
+/** Renders the reviewer picker heading+list, then `children` (the Author's
+ * suggested reviewers card), then the Confirm button -- so the Confirm
+ * button sits below both lists instead of directly under the picker.
+ * A real component (not an inline hook call) so useEditorReviewerSelection's
+ * hooks mount/unmount cleanly whenever the caller stops rendering this.
+ *
+ * `children` is a render prop fed the full selection state -- the Author
+ * suggestions card needs `toggleSuggestion`/`selectedSuggestionIds` to let
+ * the Editor stage a suggestion pick alongside pool picks (any mix, freely
+ * toggleable) and only commit both together via the single Confirm button
+ * below, instead of each list submitting independently. */
+function ReviewerSelectionWithAuthorSuggestions({ manuscriptId, suggestedReviewers, onSubmitSuccess, children }: {
+  manuscriptId: string;
+  suggestedReviewers: SuggestedReviewerRow[];
+  onSubmitSuccess: () => void;
+  children: (state: ReturnType<typeof useEditorReviewerSelection>) => ReactNode;
+}) {
+  const state = useEditorReviewerSelection({ manuscriptId, suggestedReviewers, onSubmitSuccess });
+  return (
+    <>
+      <ReviewerSelectionList {...state} />
+      {children(state)}
+      <ReviewerSelectionConfirmButton {...state} />
+    </>
+  );
+}
+
 function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab, onInitialTabConsumed }: { details: EditorManuscriptDetails; onBack: () => void; onChanged: () => void; currentUser?: { name: string; email: string; role: Role } | null; initialTab?: 'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | null; onInitialTabConsumed?: () => void }) {
   const { manuscript, assignment, reviewers: initialReviewerAssignments } = details;
   const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>(initialReviewerAssignments || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [sidebarSection, setSidebarSection] = useState<'dashboard' | 'evaluation_timeline' | 'title_abstract' | 'authors' | 'manuscript' | 'references' | 'supplementary' | 'cover_letter' | 'discussions' | 'editor_evaluation' | 'reviews' | 'decision' | 'suggestions' | 'review_history' | 'metadata' | 'revisions' | 'production' | 'galley_files'>('dashboard');
+  const [sidebarSection, setSidebarSection] = useState<'dashboard' | 'evaluation_timeline' | 'title_abstract' | 'submission_files' | 'authors' | 'manuscript' | 'references' | 'supplementary' | 'cover_letter' | 'discussions' | 'editor_evaluation' | 'reviews' | 'decision' | 'suggestions' | 'review_history' | 'metadata' | 'revisions' | 'production' | 'galley_files'>('dashboard');
   const [activeTab, setActiveTab] = useState<'status' | 'files' | 'evaluation' | 'decision' | 'reviews' | 'revisions' | 'comments'>(initialTab || 'status');
   const [production, setProduction] = useState<ProductionRow | null>(null);
   const [productionCorrections, setProductionCorrections] = useState<CorrectionRow[]>([]);
@@ -1574,6 +1601,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
             {sidebarSection === 'dashboard' && activeTab === 'reviews' && (() => {
               const editorAlreadySelected = (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR');
               const authorSuggestions = (details.suggestedReviewers || []).filter(s => s.suggested_by !== 'EDITOR');
+              const canSelectAuthorSuggestionBase = manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT';
               return (
               <div className="space-y-6">
                 {justMovedToNextStage && !editorAlreadySelected && (
@@ -1592,49 +1620,78 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                     </button>
                   </div>
                 )}
-                {manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT' && (
-                  <EditorReviewerSelection
-                    manuscriptId={manuscript.id}
-                    suggestedReviewers={details.suggestedReviewers || []}
-                    onSubmitSuccess={onChanged}
-                  />
-                )}
-
-                {/* List of reviewers the Author suggested -- the Editor's own
-                    selections are already shown above by EditorReviewerSelection's
-                    "Reviewers Selected" card, so repeating them here would just
-                    be the same 2 names twice. */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-6">
-                  <h3 className="text-sm font-black text-slate-900 mb-4">REVIEWER SUGGESTIONS BY AUTHOR ({authorSuggestions.length})</h3>
-                  {authorSuggestions.length > 0 ? (
-                    <div className="space-y-3">
-                      {authorSuggestions.map((reviewer) => {
-                        const isAssigned = reviewerAssignments?.some(r => details.profiles.get(r.reviewer_id)?.email === reviewer.email);
-                        return (
-                          <div key={reviewer.id} className={`border rounded-lg p-4 ${isAssigned ? 'bg-emerald-50 border-emerald-200' : 'border-slate-200'}`}>
-                            <div className="flex items-start justify-between mb-2">
-                              <div className="flex-1">
-                                <p className="font-semibold text-slate-900">{reviewer.name}</p>
-                                <p className="text-xs text-slate-600">{reviewer.email}</p>
-                                {reviewer.note && (
-                                  <p className="text-xs text-slate-500 mt-1">Note: {reviewer.note}</p>
-                                )}
-                                <span className="inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
-                                  Suggested by author
-                                </span>
-                              </div>
-                              {isAssigned && (
-                                <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded">✓ Assigned</span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                {(() => {
+                  // Renders the Author's suggested reviewers, each with its
+                  // own "Select" toggle wired into the SAME staged-selection
+                  // state as the Reviewer Board pool above -- any mix of pool
+                  // picks and Author-suggestion picks is fine (both, one of
+                  // each, etc.), freely checked/unchecked, and nothing is
+                  // written to the server until the single Confirm button at
+                  // the bottom is pressed.
+                  const renderAuthorSuggestionsCard = (state?: ReturnType<typeof useEditorReviewerSelection>) => (
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                      <h3 className="text-sm font-black text-slate-900 mb-4">REVIEWER SUGGESTIONS BY AUTHOR ({authorSuggestions.length})</h3>
+                      {authorSuggestions.length > 0 ? (
+                        <div className="space-y-3">
+                          {authorSuggestions.map((reviewer) => {
+                            const isAssigned = reviewerAssignments?.some(r => details.profiles.get(r.reviewer_id)?.email === reviewer.email);
+                            const isCommitted = state ? state.promotedFromIds.has(reviewer.id) : false;
+                            const isTentative = state ? state.selectedSuggestionIds.includes(reviewer.id) : false;
+                            const canToggle = state ? canSelectAuthorSuggestionBase && !isAssigned && !isCommitted : false;
+                            const Wrapper = canToggle ? 'button' : 'div';
+                            return (
+                              <Wrapper
+                                key={reviewer.id}
+                                type={canToggle ? 'button' : undefined}
+                                onClick={canToggle ? () => state!.toggleSuggestion(reviewer.id) : undefined}
+                                disabled={canToggle ? state!.submitting : undefined}
+                                className={`w-full text-left border rounded-lg p-4 transition ${canToggle ? 'cursor-pointer hover:border-slate-300 disabled:opacity-50' : ''} ${
+                                  isAssigned || isTentative ? 'bg-emerald-50 border-emerald-200' : isCommitted ? 'bg-amber-50 border-amber-200' : 'border-slate-200'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between mb-2">
+                                  <div className="flex-1">
+                                    <p className="font-semibold text-slate-900">{reviewer.name}</p>
+                                    <p className="text-xs text-slate-600">{reviewer.email}</p>
+                                    {reviewer.note && (
+                                      <p className="text-xs text-slate-500 mt-1">Expert Focus Area: {reviewer.note}</p>
+                                    )}
+                                    <span className="inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                                      Suggested by author
+                                    </span>
+                                  </div>
+                                  {isAssigned ? (
+                                    <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded shrink-0">✓ Assigned</span>
+                                  ) : isCommitted ? (
+                                    <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 shrink-0">Awaiting Invitation</span>
+                                  ) : isTentative ? (
+                                    <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded shrink-0">✓ Selected</span>
+                                  ) : null}
+                                </div>
+                              </Wrapper>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-slate-400 text-sm">No suggested reviewers yet.</div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="text-center py-8 text-slate-400 text-sm">No suggested reviewers yet.</div>
-                  )}
-                </div>
+                  );
+
+                  // Order: "Select N Reviewer(s)" heading + reviewer list, then
+                  // the Author's suggestions, then the Confirm button at the
+                  // very bottom -- rather than Confirm sitting directly under
+                  // the reviewer list.
+                  return manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT' ? (
+                    <ReviewerSelectionWithAuthorSuggestions
+                      manuscriptId={manuscript.id}
+                      suggestedReviewers={details.suggestedReviewers || []}
+                      onSubmitSuccess={onChanged}
+                    >
+                      {renderAuthorSuggestionsCard}
+                    </ReviewerSelectionWithAuthorSuggestions>
+                  ) : renderAuthorSuggestionsCard();
+                })()}
               </div>
               );
             })()}
@@ -2058,6 +2115,64 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                 )}
               </div>
             )}
+
+            {sidebarSection === 'submission_files' && (() => {
+              const allFiles = details.files || [];
+              const originalFiles = allFiles.filter(f => !f.revision_id);
+              const sortedRevisions = [...(details.revisions || [])].sort((a, b) => a.revision_number - b.revision_number);
+
+              const renderFileList = (files: typeof allFiles) => (
+                <div className="space-y-3">
+                  {files.map((file) => (
+                    <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 transition">
+                      <div className="flex items-center gap-3 flex-1">
+                        <span className="text-lg">📄</span>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                          <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        {file.public_url && (
+                          <>
+                            <button
+                              onClick={() => setPreviewFile(file)}
+                              className="text-slate-600 hover:text-slate-900 p-2"
+                              title="View"
+                            >
+                              👁️
+                            </button>
+                            <a href={file.public_url} download={file.file_name} className="text-slate-600 hover:text-slate-900 p-2" title="Download">📥</a>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+
+              return (
+                <div className="space-y-6">
+                  <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                    <h3 className="text-sm font-black text-slate-900 mb-4">ORIGINAL SUBMISSION FILES ({originalFiles.length})</h3>
+                    {originalFiles.length > 0 ? renderFileList(originalFiles) : (
+                      <div className="text-center py-8 text-slate-400 text-sm">No original submission files.</div>
+                    )}
+                  </div>
+                  {sortedRevisions.map((rev) => {
+                    const revFiles = allFiles.filter(f => f.revision_id === rev.id);
+                    return (
+                      <div key={rev.id} className="bg-white border border-slate-200 rounded-2xl p-6">
+                        <h3 className="text-sm font-black text-slate-900 mb-4">REVISION {rev.revision_number} — UPLOADED FILES ({revFiles.length})</h3>
+                        {revFiles.length > 0 ? renderFileList(revFiles) : (
+                          <div className="text-center py-8 text-slate-400 text-sm">No files uploaded for this revision yet.</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {sidebarSection === 'manuscript' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6">
@@ -2716,7 +2831,6 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                       return (
                         <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
                           <p className="text-xs font-semibold text-teal-700 text-center">Reviewers Selected</p>
-                          <p className="text-xs text-teal-600 text-center mt-1">Waiting for the Coordinator to send invitations</p>
                         </div>
                       );
                     }
@@ -2926,10 +3040,10 @@ function AcceptDeclineModal({
             <h3 className="font-bold text-slate-900 text-base leading-tight">{details.manuscript.title}</h3>
           </div>
 
-          {/* Subtitle (section) */}
+          {/* Subtitle */}
           <div>
             <p className="text-xs uppercase tracking-wider font-semibold text-slate-600 mb-2">Subtitle</p>
-            <p className="text-sm text-slate-700">{details.manuscript.section || 'Not provided'}</p>
+            <p className="text-sm text-slate-700">{details.manuscript.subtitle || 'Not provided'}</p>
           </div>
 
           {/* Abstract */}

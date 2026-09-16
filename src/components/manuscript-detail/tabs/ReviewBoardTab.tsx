@@ -68,7 +68,7 @@ export function ReviewBoardTab({
         // Load available reviewers
         const { data: reviewers, error: err } = await supabase
           .from('profiles')
-          .select('id, name, email, role, status')
+          .select('id, name, email, role, status, metadata')
           .eq('role', 'REVIEWER')
           .eq('status', 'ACTIVE')
           .order('name');
@@ -383,34 +383,63 @@ export function ReviewBoardTab({
           workflow (0026), instead of the per-suggestion Accept/Decline/Replace
           UI below (which still exists for the pre-existing ad-hoc suggestion
           path -- odd counts, or suggestions already partially actioned). */}
-      {manuscript.status === 'EDITOR_REVIEW' && editorSuggestions.filter(s => getSuggestionStatus(s.id) === 'PENDING').length === 2 && (
+      {manuscript.status === 'EDITOR_REVIEW' && editorSuggestions.filter(s => getSuggestionStatus(s.id) === 'PENDING').length === 2 && (() => {
+        const pendingPair = editorSuggestions.filter(s => getSuggestionStatus(s.id) === 'PENDING');
+        // A suggestion promoted from an Author-suggested name (0088) or
+        // typed freehand by the Editor may not correspond to any real
+        // Reviewer account yet -- coordinatorSendReviewerInvitations()
+        // requires one to already exist for every pending suggestion, so
+        // surface an inline "Add" (same NEEDS_ACCOUNT flow the per-suggestion
+        // Accept & Assign button below already uses) instead of only
+        // failing at Send Invitation time with no way to fix it here.
+        const hasAccount = (s: SuggestedReviewerRow) =>
+          availableReviewers.some(r => r.email.toLowerCase() === s.email.toLowerCase());
+        const allHaveAccounts = pendingPair.every(hasAccount);
+        return (
         <div className="bg-white border-2 border-emerald-200 rounded-2xl p-6 space-y-4">
           <div className="flex items-center gap-2">
             <Send className="w-5 h-5 text-emerald-600" />
             <h3 className="text-sm font-black text-slate-900">Reviewers Selected by Editor</h3>
           </div>
           <div className="space-y-2">
-            {editorSuggestions.filter(s => getSuggestionStatus(s.id) === 'PENDING').map((s, idx) => (
-              <div key={s.id} className="border border-slate-200 rounded-lg p-3">
-                <p className="text-xs font-bold text-slate-500 uppercase mb-1">Reviewer {idx + 1}</p>
-                <p className="text-sm font-semibold text-slate-900">{s.name}</p>
-                <p className="text-xs text-slate-600">{s.email}</p>
+            {pendingPair.map((s, idx) => (
+              <div key={s.id} className="border border-slate-200 rounded-lg p-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase mb-1">Reviewer {idx + 1}</p>
+                  <p className="text-sm font-semibold text-slate-900">{s.name}</p>
+                  <p className="text-xs text-slate-600">{s.email}</p>
+                </div>
+                {!hasAccount(s) && (
+                  <button
+                    type="button"
+                    onClick={() => handleAccept(s.id)}
+                    disabled={processing === s.id}
+                    className="text-xs px-3 py-1.5 bg-slate-800 text-white rounded font-bold hover:bg-slate-900 disabled:opacity-50 transition flex items-center gap-1 shrink-0"
+                  >
+                    {processing === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
+                    Add
+                  </button>
+                )}
               </div>
             ))}
           </div>
           <button
             onClick={handleSendInvitations}
-            disabled={sendingInvitations}
+            disabled={sendingInvitations || !allHaveAccounts}
             className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-sm rounded-lg transition flex items-center justify-center gap-2"
           >
             {sendingInvitations ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             Confirm Reviewer Assignments & Send Invitation
           </button>
+          {!allHaveAccounts && (
+            <p className="text-[11px] text-amber-700 font-semibold">Add an account for every reviewer above before sending invitations.</p>
+          )}
           <p className="text-[11px] text-slate-500">
             The manuscript stays in Editorial Review until both reviewers accept — it only moves to Peer Review once both have.
           </p>
         </div>
-      )}
+        );
+      })()}
 
       {/* Editor Suggested Reviewers -- the 2 selections already shown above
           (via Send Invitation) are excluded here to avoid showing the same
@@ -708,10 +737,24 @@ export function ReviewBoardTab({
               {availableReviewers
                 .filter(r => !assignedReviewerIds.has(r.id))
                 .map(reviewer => (
-                  <div key={reviewer.id} className="flex items-center justify-between p-3 border border-slate-200 rounded-lg hover:bg-slate-50">
-                    <div>
-                      <p className="font-semibold text-slate-900 text-sm">{reviewer.name}</p>
-                      <p className="text-xs text-slate-600">{reviewer.email}</p>
+                  <div key={reviewer.id} className="flex items-center justify-between gap-4 p-3 border border-slate-200 rounded-lg hover:bg-slate-50">
+                    <div className="grid grid-cols-4 gap-4 flex-1 min-w-0">
+                      <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Name</p>
+                        <p className="font-semibold text-slate-900 text-sm truncate">{reviewer.name}</p>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Email ID</p>
+                        <p className="text-xs text-slate-600 truncate">{reviewer.email}</p>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Affiliation</p>
+                        <p className="text-xs text-slate-600 truncate">{reviewer.metadata?.affiliation || '—'}</p>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Expert Focus Area</p>
+                        <p className="text-xs text-slate-600 truncate">{reviewer.metadata?.specialization || reviewer.metadata?.expertise || '—'}</p>
+                      </div>
                     </div>
                     <button
                       onClick={() => handleDirectAssign(reviewer.id)}
@@ -751,24 +794,35 @@ export function ReviewBoardTab({
               Set a password and create the account to continue.
             </p>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4 space-y-2">
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Name</p>
-                <p className="text-sm text-slate-900">{accountForm.name}</p>
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Email</p>
-                <p className="text-sm text-slate-900">{accountForm.email}</p>
-              </div>
-              {accountForm.note && (
-                <div>
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Expertise / Note</p>
-                  <p className="text-sm text-slate-900">{accountForm.note}</p>
-                </div>
-              )}
-            </div>
-
             <div className="space-y-3 mb-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Name</label>
+                <input
+                  type="text"
+                  value={accountForm.name}
+                  onChange={(e) => setAccountForm({ ...accountForm, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={accountForm.email}
+                  onChange={(e) => setAccountForm({ ...accountForm, email: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">The Author's suggestion may have a typo or placeholder value -- correct it here before creating the account.</p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Expertise / Note</label>
+                <input
+                  type="text"
+                  value={accountForm.note}
+                  onChange={(e) => setAccountForm({ ...accountForm, note: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Password</label>
                 <div className="flex gap-2">

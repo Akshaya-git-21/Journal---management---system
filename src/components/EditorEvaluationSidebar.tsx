@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  ChevronDown, Check, FileText, MessageSquare, SquarePen, Printer,
-  Layers, Briefcase, AlertCircle, ExternalLink, Users, Clock,
+  ChevronDown, Check, FileText, SquarePen, Printer, Folder,
+  AlertCircle, ExternalLink, Users, Clock,
   CheckCircle2, Circle, AlertTriangle, BookOpen, LayoutDashboard,
   BarChart3, Eye
 } from 'lucide-react';
@@ -20,6 +20,7 @@ const TAB_MAP: Record<string, string> = {
   'evaluation_timeline': 'title',
   'title_abstract': 'title',
   'authors': 'contributors',
+  'submission_files': 'files',
   'manuscript': 'files',
   'references': 'title',
   'supplementary': 'files',
@@ -147,9 +148,9 @@ export default function EditorEvaluationSidebar({
 
   // Calculate badge values from actual data
   const titleAbstractBadge = (m?.title && m?.abstract) ? '✓' : '○';
+  const submissionFilesBadge = displayDetails.files?.length || 0;
   const authorsBadge = displayDetails.contributors?.length || 0;
   const manuscriptBadge = displayDetails.files?.filter(f => f.file_type?.toLowerCase().includes('manuscript')).length || 0;
-  const referencesBadge = m?.references ? '✓' : '○';
   const supplementaryBadge = displayDetails.files?.filter(f =>
     f.file_type?.toLowerCase().includes('supplementary') ||
     f.file_type?.toLowerCase().includes('additional')
@@ -158,22 +159,15 @@ export default function EditorEvaluationSidebar({
     f.file_name?.toLowerCase().includes('cover') ||
     f.file_name?.toLowerCase().includes('letter')
   ) ? '✓' : '○';
-  const discussionsBadge = displayDetails.discussions?.length || 0;
 
   // Evaluation section badges
   const evaluationBadge = assignment?.assessment_status === 'SUBMITTED' ? '✓' : '○';
   const reviewsBadge = displayDetails.reviewers?.length || 0;
   const decisionBadge = assignment?.recommendation ? '✓' : '○';
   const suggestionsBadge = displayDetails.suggestedReviewers?.length || 0;
-  const reviewHistoryBadge = displayDetails.revisions?.length > 0 ? '✓' : '○';
 
   // Publication section badges
-  const metadataBadge = '✓'; // Metadata is typically always present
-  const revisionsBadge = displayDetails.revisions?.length || 0;
   const productionBadge = m?.production_stage ? '✓' : '○';
-  const galleyFilesBadge = displayDetails.files?.filter(f =>
-    f.file_type?.toLowerCase().includes('galley')
-  ).length || 0;
 
   const SidebarSection = ({ title, items }: any) => (
     <div className="space-y-1.5">
@@ -245,6 +239,12 @@ export default function EditorEvaluationSidebar({
             badge: titleAbstractBadge
           },
           {
+            id: 'submission_files',
+            label: 'Submission Files',
+            icon: Folder,
+            badge: submissionFilesBadge
+          },
+          {
             id: 'authors',
             label: 'Authors / Contributors',
             icon: Users,
@@ -257,12 +257,6 @@ export default function EditorEvaluationSidebar({
             badge: manuscriptBadge
           },
           {
-            id: 'references',
-            label: 'References',
-            icon: Layers,
-            badge: referencesBadge
-          },
-          {
             id: 'supplementary',
             label: 'Supplementary Files',
             icon: FileText,
@@ -273,12 +267,6 @@ export default function EditorEvaluationSidebar({
             label: 'Cover Letter',
             icon: SquarePen,
             badge: coverLetterBadge
-          },
-          {
-            id: 'discussions',
-            label: 'Discussions',
-            icon: MessageSquare,
-            badge: discussionsBadge
           }
         ]}
       />
@@ -310,12 +298,6 @@ export default function EditorEvaluationSidebar({
             label: 'Reviewer Selection',
             icon: Users,
             badge: suggestionsBadge
-          },
-          {
-            id: 'review_history',
-            label: 'Review History',
-            icon: Clock,
-            badge: reviewHistoryBadge
           }
         ]}
       />
@@ -325,28 +307,10 @@ export default function EditorEvaluationSidebar({
         title="PUBLICATION"
         items={[
           {
-            id: 'metadata',
-            label: 'Metadata',
-            icon: Layers,
-            badge: metadataBadge
-          },
-          {
-            id: 'revisions',
-            label: 'Revisions',
-            icon: SquarePen,
-            badge: revisionsBadge
-          },
-          {
             id: 'production',
             label: 'Production',
             icon: Printer,
             badge: productionBadge
-          },
-          {
-            id: 'galley_files',
-            label: 'Galley Files',
-            icon: Briefcase,
-            badge: galleyFilesBadge
           }
         ]}
       />

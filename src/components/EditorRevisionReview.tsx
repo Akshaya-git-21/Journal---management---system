@@ -128,10 +128,6 @@ export default function EditorRevisionReview({
   // ACTION_META), so show that action name rather than the raw value.
   const kind = 'Return to Author';
 
-  const toggleChecklistItem = (id: string) => {
-    setChecklist((prev) => prev.map((item) => (item.id === id ? { ...item, checked: !item.checked } : item)));
-  };
-
   const handleConfirm = async () => {
     if (!selectedAction) return;
     setSubmitting(true);
@@ -293,25 +289,6 @@ export default function EditorRevisionReview({
             disabled={submitting}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"
           />
-        </div>
-
-        {/* 6. Editor Checklist */}
-        <div className="bg-white border border-slate-200 rounded-lg p-6">
-          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor Checklist</h3>
-          <div className="space-y-2.5">
-            {checklist.map((item) => (
-              <label key={item.id} className="flex items-center gap-2.5 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={item.checked}
-                  onChange={() => toggleChecklistItem(item.id)}
-                  disabled={submitting}
-                  className="w-4 h-4 rounded border-slate-300"
-                />
-                <span className={item.checked ? 'text-slate-500 line-through' : 'text-slate-700'}>{item.label}</span>
-              </label>
-            ))}
-          </div>
         </div>
 
         {/* 7-8. Decision buttons + Submit Decision */}

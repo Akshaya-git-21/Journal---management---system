@@ -374,7 +374,12 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
         getRecentStatusHistory(8),
         getOverdueReviewerAssignments(),
       ]);
-      setItems(rows);
+      // A manuscript stays DRAFT until the author actually clicks Submit
+      // (Save Draft alone creates one) -- Coordinators should never see it
+      // before then. RLS also enforces this server-side (see
+      // 0085_hide_draft_manuscripts_from_coordinator.sql); this filter is
+      // just defense-in-depth on the client.
+      setItems(rows.filter((m) => m.status !== 'DRAFT'));
       setPendingApprovals(approvals);
       setEditorialBoardProfiles(editors);
       setReviewerProfiles(reviewers);
@@ -1552,6 +1557,7 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
     accepted: assignmentCounts[profile.id]?.accepted ?? 0,
     completed: assignmentCounts[profile.id]?.completed ?? 0,
     status: profile.status === 'ACTIVE' ? 'Active' : profile.status === 'INVITED' || profile.status === 'PENDING_APPROVAL' ? 'Pending' : profile.status === 'DECLINED' ? 'Declined' : 'Active',
+    specialty: profile.metadata?.specialization || profile.metadata?.expertise || '—',
   }));
 
   return (
@@ -1616,6 +1622,7 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
           <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
             <tr>
               <th className="px-4 py-3">Reviewer</th>
+              <th className="px-4 py-3">Specialty Area</th>
               <th className="px-4 py-3">Invited</th>
               <th className="px-4 py-3">Accepted</th>
               <th className="px-4 py-3">Completed</th>
@@ -1630,12 +1637,13 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
               </tr>
             ) : profiles.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-slate-400">No reviewers found.</td>
+                <td colSpan={7} className="px-4 py-10 text-center text-slate-400">No reviewers found.</td>
               </tr>
             ) : (
               tableRows.map((row) => (
                 <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-4 py-4 font-semibold text-slate-900">{row.name}</td>
+                  <td className="px-4 py-4 text-slate-600">{row.specialty}</td>
                   <td className="px-4 py-4 text-slate-600">{row.invited}</td>
                   <td className="px-4 py-4 text-slate-600">{row.accepted}</td>
                   <td className="px-4 py-4 text-slate-600">{row.completed}</td>

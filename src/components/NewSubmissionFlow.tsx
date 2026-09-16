@@ -252,6 +252,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
       await onSaveDraft({
         id,
         title: title.trim(),
+        subtitle: subtitle.trim(),
         abstract: abstract.trim(),
         coverLetter,
         language: subLanguage,
@@ -919,6 +920,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
         id: nextIdVal,
         author: contributors[0]?.lastName || (currentUser?.name ? currentUser.name.split(' ').slice(-1)[0] : "Lovelace"),
         title: title.trim(),
+        subtitle: subtitle.trim(),
         stage: "Submission",
         language: subLanguage,
         section: subSection,
@@ -2873,7 +2875,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                   </div>
 
                   <div className="space-y-2">
-                    <label className="block text-sm font-bold text-slate-800">Email</label>
+                    <label className="block text-sm font-bold text-slate-800">Email ID</label>
                     <input
                       type="email"
                       value={revEmail}
@@ -2895,7 +2897,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                   </div>
 
                   <div className="space-y-2">
-                    <label className="block text-sm font-bold text-slate-800">Subject Expertise Focus</label>
+                    <label className="block text-sm font-bold text-slate-800">Expert Focus Area</label>
                     <input
                       type="text"
                       value={revReason}
@@ -2929,16 +2931,17 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     <thead className="bg-slate-50 text-slate-800 font-bold uppercase tracking-wider text-xs border-b">
                       <tr>
                         <th className="px-5 py-3.5 w-16 text-center">Row</th>
-                        <th className="px-5 py-3.5">Suggested Contact</th>
+                        <th className="px-5 py-3.5">Name</th>
+                        <th className="px-5 py-3.5">Email ID</th>
                         <th className="px-5 py-3.5">Affiliation</th>
-                        <th className="px-5 py-3.5">Statement of Reason</th>
+                        <th className="px-5 py-3.5">Expert Focus Area</th>
                         <th className="px-5 py-3.5 w-20 text-center">Delete</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y text-slate-750 text-sm font-medium">
                       {reviewerSuggestions.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="px-5 py-10 text-center text-gray-400 italic bg-slate-50/50">
+                          <td colSpan={6} className="px-5 py-10 text-center text-gray-400 italic bg-slate-50/50">
                             No peer suggestions recorded. (You can skip or add as required).
                           </td>
                         </tr>
@@ -2948,8 +2951,8 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                             <td className="px-5 py-3.5 text-center font-mono text-gray-400 text-sm">{index + 1}</td>
                             <td className="px-5 py-3.5">
                               <strong className="block text-slate-900 text-sm">{rev.name}</strong>
-                              <span className="block text-xs text-gray-400 font-mono mt-0.5">{rev.email}</span>
                             </td>
+                            <td className="px-5 py-3.5 text-xs text-gray-500 font-mono">{rev.email}</td>
                             <td className="px-5 py-3.5 italic text-sm">{rev.affiliation}</td>
                             <td className="px-5 py-3.5 text-slate-600 font-normal leading-relaxed text-sm">{rev.reason}</td>
                             <td className="px-5 py-3.5 text-center">

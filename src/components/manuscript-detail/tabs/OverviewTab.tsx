@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, assignEditor, getEditorReviewerActions, getPendingEditorSuggestions } from '../../../lib/workflow';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, assignEditor, coordinatorSetReviewerPool, getManuscriptReviewerPool, getEditorReviewerActions, getPendingEditorSuggestions } from '../../../lib/workflow';
 import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 import { getProduction, subscribeToProduction } from '../../../lib/production';
 import { CheckCircle2, Circle, AlertCircle, FileText, Loader2 } from 'lucide-react';
@@ -67,6 +67,26 @@ export function OverviewTab({
   // showing a stale review tally once production has started.
   const reviewCycleConcluded = ['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status);
 
+  // Editor has selected its 2 reviewers for the current round but the
+  // Coordinator hasn't sent invitations yet (manuscript.status stays
+  // EDITOR_REVIEW until they do -- see editor_select_reviewers() in
+  // 0026_editor_reviewer_selection.sql). Surface that as its own "ready to
+  // invite" state instead of the generic "Editor is reviewing" copy.
+  const [editorReviewerActions, setEditorReviewerActions] = useState<EditorReviewerActionRow[]>([]);
+  useEffect(() => {
+    getEditorReviewerActions(manuscript.id).then(setEditorReviewerActions).catch(() => setEditorReviewerActions([]));
+  }, [manuscript.id]);
+  // No revision-number filter here -- editor_select_reviewers() (0026)
+  // never stamps revision_number on the suggestions it creates (unlike its
+  // replacement-selection sibling in 0034), so they always default to 0
+  // regardless of which round is active. Matching EditorWorkspace.tsx's own
+  // no-round-filter usage (details.suggestedReviewers/editorReviewerActions
+  // call) avoids that mismatch entirely instead of trying to replicate it.
+  const pendingReviewerInvites = manuscript.status === 'EDITOR_REVIEW'
+    ? getPendingEditorSuggestions(suggestedReviewers, editorReviewerActions)
+    : [];
+  const readyToInviteReviewers = pendingReviewerInvites.length > 0;
+
   // Assign Editor (SUBMITTED -> EDITOR_REVIEW)
   const [availableEditors, setAvailableEditors] = useState<ProfileRow[]>([]);
   const [selectedEditorId, setSelectedEditorId] = useState('');
@@ -74,10 +94,52 @@ export function OverviewTab({
   const [assignError, setAssignError] = useState('');
   const [showEditorConfirmation, setShowEditorConfirmation] = useState(false);
 
+  // Reviewer pool the Coordinator curates for the Editor's later "Select
+  // Reviewers" step -- a separate action from assigning the Editor, so the
+  // Coordinator can come back and set/adjust it any time before the Editor
+  // actually uses it (see coordinator_set_reviewer_pool() in
+  // 0087_coordinator_reviewer_pool.sql). The Editor's screen never shows
+  // the full Reviewer Board, only whatever this has been set to.
+  const [availableReviewersForPool, setAvailableReviewersForPool] = useState<ProfileRow[]>([]);
+  const [selectedPoolReviewerIds, setSelectedPoolReviewerIds] = useState<string[]>([]);
+  const [assigningReviewers, setAssigningReviewers] = useState(false);
+  const [reviewerPoolError, setReviewerPoolError] = useState('');
+  const [reviewerPoolSuccess, setReviewerPoolSuccess] = useState(false);
+
+  // The reviewer pool can be set before OR after the Editor is assigned
+  // (SUBMITTED or EDITOR_REVIEW), right up until the Editor has actually
+  // used it to select their 2 reviewers.
+  const canManageReviewerPool = manuscript.status === 'SUBMITTED' || (manuscript.status === 'EDITOR_REVIEW' && !readyToInviteReviewers);
+
   useEffect(() => {
     if (manuscript.status !== 'SUBMITTED') return;
     listActiveProfilesByRole('EDITOR').then(setAvailableEditors).catch((e) => setAssignError(e.message));
   }, [manuscript.status]);
+
+  useEffect(() => {
+    if (!canManageReviewerPool) return;
+    listActiveProfilesByRole('REVIEWER').then(setAvailableReviewersForPool).catch(() => setAvailableReviewersForPool([]));
+    getManuscriptReviewerPool(manuscript.id).then((pool) => setSelectedPoolReviewerIds(pool.map((r) => r.id))).catch(() => {});
+  }, [manuscript.id, canManageReviewerPool]);
+
+  const togglePoolReviewer = (id: string) => {
+    setReviewerPoolSuccess(false);
+    setSelectedPoolReviewerIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const handleAssignReviewersClick = async () => {
+    setAssigningReviewers(true);
+    setReviewerPoolError('');
+    setReviewerPoolSuccess(false);
+    try {
+      await coordinatorSetReviewerPool(manuscript.id, selectedPoolReviewerIds);
+      setReviewerPoolSuccess(true);
+    } catch (e: any) {
+      setReviewerPoolError(e.message || 'Failed to assign reviewers');
+    } finally {
+      setAssigningReviewers(false);
+    }
+  };
 
   const handleAssignEditorClick = () => {
     if (!selectedEditorId) return;
@@ -99,26 +161,6 @@ export function OverviewTab({
       setAssigning(false);
     }
   };
-
-  // Editor has selected its 2 reviewers for the current round but the
-  // Coordinator hasn't sent invitations yet (manuscript.status stays
-  // EDITOR_REVIEW until they do -- see editor_select_reviewers() in
-  // 0026_editor_reviewer_selection.sql). Surface that as its own "ready to
-  // invite" state instead of the generic "Editor is reviewing" copy.
-  const [editorReviewerActions, setEditorReviewerActions] = useState<EditorReviewerActionRow[]>([]);
-  useEffect(() => {
-    getEditorReviewerActions(manuscript.id).then(setEditorReviewerActions).catch(() => setEditorReviewerActions([]));
-  }, [manuscript.id]);
-  // No revision-number filter here -- editor_select_reviewers() (0026)
-  // never stamps revision_number on the suggestions it creates (unlike its
-  // replacement-selection sibling in 0034), so they always default to 0
-  // regardless of which round is active. Matching EditorWorkspace.tsx's own
-  // no-round-filter usage (details.suggestedReviewers/editorReviewerActions
-  // call) avoids that mismatch entirely instead of trying to replicate it.
-  const pendingReviewerInvites = manuscript.status === 'EDITOR_REVIEW'
-    ? getPendingEditorSuggestions(suggestedReviewers, editorReviewerActions)
-    : [];
-  const readyToInviteReviewers = pendingReviewerInvites.length > 0;
 
   // Fixed status description - account for evaluation submission and any
   // active revision cycle (re-review reuses the same EDITOR_REVIEW/
@@ -414,6 +456,66 @@ export function OverviewTab({
           </div>
         )}
       </div>
+
+      {/* Reviewer Pool Card -- a separate action from assigning the Editor.
+          The Coordinator can set/adjust this any time up until the Editor
+          has actually used it to select their 2 reviewers. */}
+      {canManageReviewerPool && availableReviewersForPool.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6">
+          <h3 className="text-sm font-black text-slate-900 mb-1">Available Reviewers for the Editor</h3>
+          <p className="text-xs text-slate-500 mb-4">
+            Select which reviewers the assigned Editor may choose from during their reviewer-selection step, then click Assign Reviewers. This is independent of assigning the Editor -- the Editor's reviewer-selection step will wait until you send this list.
+          </p>
+
+          {reviewerPoolError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-3 mb-3">{reviewerPoolError}</div>
+          )}
+
+          <div className="space-y-1.5 max-h-56 overflow-y-auto mb-4">
+            {availableReviewersForPool.map((r) => {
+              const isChecked = selectedPoolReviewerIds.includes(r.id);
+              const focusArea = r.metadata?.specialization || r.metadata?.expertise || '—';
+              return (
+                <label
+                  key={r.id}
+                  className={`flex items-center justify-between gap-2 p-2 border rounded-lg text-left cursor-pointer transition ${
+                    isChecked ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => togglePoolReviewer(r.id)}
+                      disabled={assigningReviewers}
+                    />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-slate-900 truncate">{r.name}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{r.email} • {focusArea}</p>
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+
+          {reviewerPoolSuccess ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Assigned
+            </span>
+          ) : (
+            <button
+              onClick={handleAssignReviewersClick}
+              disabled={assigningReviewers}
+              className="px-4 py-2 bg-slate-800 text-white text-xs font-bold rounded-lg hover:bg-slate-900 transition disabled:opacity-50 flex items-center gap-2"
+            >
+              {assigningReviewers && <Loader2 className="w-3 h-3 animate-spin" />}
+              {assigningReviewers ? 'Assigning...' : `Assign ${selectedPoolReviewerIds.length > 0 ? selectedPoolReviewerIds.length + ' ' : ''}Reviewer${selectedPoolReviewerIds.length === 1 ? '' : 's'}`}
+            </button>
+          )}
+        </div>
+      )}
 
       <AssignmentConfirmationDialog
         isOpen={showEditorConfirmation}

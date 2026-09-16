@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Role, ManuscriptStatus, ReviewerRecommendation } from '../types';
 import {
-  ManuscriptRow, ReviewerAssignmentRow, ManuscriptFileRow, ScreeningResponse, RevisionRow,
+  ManuscriptRow, ReviewerAssignmentRow, ManuscriptFileRow, ScreeningResponse, RevisionRow, ReviewerReviewAttachmentRow,
   listManuscripts, getReviewerAssignments, subscribeToManuscripts,
-  respondToReviewInvite, submitPeerReview, getManuscriptFiles, getRevisions, getRevisionFiles
+  respondToReviewInvite, submitPeerReview, getManuscriptFiles, getRevisions, getRevisionFiles,
+  reviewerUploadReviewAttachment, reviewerDeleteReviewAttachment, getReviewAttachments
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
 import { getManuscriptStatusLabel } from '../lib/manuscriptStatusLabel';
@@ -11,7 +12,7 @@ import { NavGroup, NavItem } from './SidebarNavGroup';
 import FilePreviewModal from './FilePreviewModal';
 import {
   Loader2, Check, X as XIcon, ChevronDown, User, AlertTriangle, ClipboardList, CheckCircle2, XCircle,
-  FileText, Lock, Eye, History, Star, BarChart3, Download, ClipboardCheck
+  FileText, Lock, Eye, History, Star, BarChart3, Download, ClipboardCheck, Upload, Trash2
 } from 'lucide-react';
 
 const PEER_REVIEW_QUESTIONS: { id: string; label: string; question: string }[] = [
@@ -485,9 +486,17 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
   const [showDeclineModal, setShowDeclineModal] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
   const [files, setFiles] = useState<ManuscriptFileRow[]>([]);
-  const [filesRevisionNumber, setFilesRevisionNumber] = useState<number | null>(null);
   const [previewFile, setPreviewFile] = useState<ManuscriptFileRow | null>(null);
   const [showEvaluation, setShowEvaluation] = useState(false);
+  const [reviewAttachments, setReviewAttachments] = useState<ReviewerReviewAttachmentRow[]>([]);
+
+  // The PDF(s) the Reviewer attached to their own submitted review (see
+  // ReviewForm's "Attach a PDF" -- 0091_reviewer_review_attachments.sql).
+  // Only relevant once a review actually exists to attach to.
+  useEffect(() => {
+    if (assignment.status !== 'SUBMITTED') { setReviewAttachments([]); return; }
+    getReviewAttachments(assignment.id).then(setReviewAttachments).catch(() => {});
+  }, [assignment.id, assignment.status]);
 
   useEffect(() => {
     // The manuscript PDF is only unlocked once the invitation is accepted
@@ -507,12 +516,7 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
       .then(async (revs) => {
         const latest = revs.reduce<typeof revs[number] | null>((best, r) => (!best || r.revision_number > best.revision_number ? r : best), null);
         const revFiles = latest ? await getRevisionFiles(latest.id) : [];
-        if (revFiles.length > 0) {
-          setFilesRevisionNumber(latest!.revision_number);
-          return revFiles;
-        }
-        setFilesRevisionNumber(null);
-        return getManuscriptFiles(manuscript.id);
+        return revFiles.length > 0 ? revFiles : getManuscriptFiles(manuscript.id);
       })
       .then(setFiles)
       .catch(() => {});
@@ -586,14 +590,10 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
         {assignment.status !== 'INVITED' && (
           <div className="mt-5 pt-5 border-t border-slate-100">
             <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">
-              {filesRevisionNumber !== null
-                ? `Revision ${filesRevisionNumber} File${files.length !== 1 ? 's' : ''} (${files.length})`
-                : `Manuscript File${files.length !== 1 ? 's' : ''} (${files.length})`}
+              File{files.length !== 1 ? 's' : ''} ({files.length})
             </h3>
             {files.length === 0 ? (
-              <p className="text-xs text-slate-500 py-1">
-                {filesRevisionNumber !== null ? 'No files were uploaded for this revision.' : 'No files were uploaded by the author.'}
-              </p>
+              <p className="text-xs text-slate-500 py-1">No files were uploaded by the author.</p>
             ) : (
               <div className="space-y-2">
                 {files.map((f) => (
@@ -765,6 +765,30 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
                 </div>
               </div>
 
+              {reviewAttachments.length > 0 && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-900 mb-2">Attached PDF{reviewAttachments.length !== 1 ? 's' : ''}</label>
+                  <div className="space-y-2">
+                    {reviewAttachments.map((a) => (
+                      <div key={a.id} className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-slate-900 truncate">{a.file_name}</p>
+                            {a.file_size && <p className="text-[11px] text-slate-500">{a.file_size}</p>}
+                          </div>
+                        </div>
+                        {a.public_url && (
+                          <a href={a.public_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-slate-200 rounded transition shrink-0" title="View">
+                            <Eye className="w-4 h-4 text-slate-600" />
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
             </div>
 
             <p className="text-xs text-slate-500 italic mt-4">This review is locked and cannot be edited. Contact the coordinator if you need to make changes.</p>
@@ -796,6 +820,63 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [lastSaveTime, setLastSaveTime] = useState<string | null>(null);
+
+  // PDF(s) the Reviewer attaches to their own review (e.g. an annotated
+  // copy of the manuscript) -- separate from the Author's official
+  // submission files. See reviewer_upload_review_attachment() in
+  // 0091_reviewer_review_attachments.sql.
+  const [reviewAttachments, setReviewAttachments] = useState<ReviewerReviewAttachmentRow[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [attachmentError, setAttachmentError] = useState('');
+
+  useEffect(() => {
+    getReviewAttachments(assignmentId).then(setReviewAttachments).catch(() => {});
+  }, [assignmentId]);
+
+  const handleUploadAttachment = async (file: File) => {
+    if (file.type !== 'application/pdf') {
+      setAttachmentError('Only PDF files can be attached.');
+      return;
+    }
+    setAttachmentError('');
+    setUploadingAttachment(true);
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData?.user) throw new Error('User session not found. Please log in again.');
+
+      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const fileKey = `${authData.user.id}/${Date.now()}_${sanitizedFileName}`;
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('manuscript-files')
+        .upload(fileKey, file, { cacheControl: '3600', upsert: false, contentType: 'application/pdf' });
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { data: urlData } = supabase.storage.from('manuscript-files').getPublicUrl(uploadData.path);
+      if (!urlData?.publicUrl) throw new Error('Failed to generate a public URL for the uploaded file.');
+
+      const fileSize = file.size < 1024 * 1024
+        ? `${(file.size / 1024).toFixed(1)} KB`
+        : `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+
+      const attachment = await reviewerUploadReviewAttachment(assignmentId, file.name, fileSize, uploadData.path, urlData.publicUrl);
+      setReviewAttachments(prev => [...prev, attachment]);
+    } catch (e: any) {
+      setAttachmentError(e.message || 'Failed to upload the file');
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const handleRemoveAttachment = async (attachmentId: string) => {
+    setAttachmentError('');
+    try {
+      await reviewerDeleteReviewAttachment(attachmentId);
+      setReviewAttachments(prev => prev.filter(a => a.id !== attachmentId));
+    } catch (e: any) {
+      setAttachmentError(e.message || 'Failed to remove the file');
+    }
+  };
 
   // Re-review context: which revision this round is re-checking, its
   // uploaded files, and the author's response note -- so the reviewer can
@@ -1064,6 +1145,60 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
               placeholder="Provide detailed feedback for the author..."
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
             />
+          </div>
+
+          {/* Upload PDF */}
+          <div className="border-t border-slate-200 pt-6">
+            <p className="text-xs font-bold text-slate-900 mb-1">Attach a PDF</p>
+            <p className="text-[11px] text-slate-500 mb-2">Optionally upload an annotated copy of the manuscript or other supporting PDF alongside your review.</p>
+
+            {attachmentError && (
+              <p className="text-xs text-red-600 font-semibold mb-2">{attachmentError}</p>
+            )}
+
+            {reviewAttachments.length > 0 && (
+              <div className="space-y-2 mb-3">
+                {reviewAttachments.map((a) => (
+                  <div key={a.id} className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-slate-900 truncate">{a.file_name}</p>
+                        {a.file_size && <p className="text-[11px] text-slate-500">{a.file_size}</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {a.public_url && (
+                        <a href={a.public_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-slate-200 rounded transition" title="View">
+                          <Eye className="w-4 h-4 text-slate-600" />
+                        </a>
+                      )}
+                      <button onClick={() => handleRemoveAttachment(a.id)} className="p-1.5 hover:bg-red-50 rounded transition" title="Remove">
+                        <Trash2 className="w-4 h-4 text-red-500" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <label className={`inline-flex items-center gap-2 px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold cursor-pointer transition ${
+              uploadingAttachment ? 'opacity-50 pointer-events-none' : 'hover:bg-slate-50 text-slate-700'
+            }`}>
+              {uploadingAttachment ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {uploadingAttachment ? 'Uploading...' : 'Upload PDF'}
+              <input
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                disabled={uploadingAttachment}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUploadAttachment(file);
+                  e.target.value = '';
+                }}
+              />
+            </label>
           </div>
 
           {/* Recommendation */}

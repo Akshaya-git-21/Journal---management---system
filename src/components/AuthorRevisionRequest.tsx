@@ -118,7 +118,6 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
   const [submitting, setSubmitting] = useState(false);
   const [responseNote, setResponseNote] = useState('');
   const [error, setError] = useState('');
-  const [draftSaved, setDraftSaved] = useState(false);
   const [manualChecklist, setManualChecklist] = useState({ addressedComments: false, confirmedDetails: false });
   const [confirmingSubmit, setConfirmingSubmit] = useState(false);
   const [editorNotes, setEditorNotes] = useState<{ screening_comments: string | null; action_reason: string | null } | null>(null);
@@ -207,14 +206,6 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
 
   const manuscriptFile = revisionFiles.find(f => f.file_type === MANUSCRIPT_FILE_TYPE) || null;
   const canSubmit = !!manuscriptFile;
-
-  const handleSaveDraft = () => {
-    // Files are already persisted to the database the moment they upload --
-    // there's no separate draft state to write. This just reassures the
-    // author that what they've uploaded so far is safe.
-    setDraftSaved(true);
-    setTimeout(() => setDraftSaved(false), 2500);
-  };
 
   const handleSubmitRevision = async () => {
     if (!selectedRevision || !canSubmit || submitting) return;
@@ -467,27 +458,15 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{error}</div>
             )}
-            {draftSaved && (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-700">Your uploaded files are saved.</div>
-            )}
 
-            <div className="flex gap-3">
-              <button
-                disabled={submitting}
-                onClick={handleSaveDraft}
-                className="flex-1 border border-slate-300 text-slate-700 text-sm font-bold py-3 rounded-lg hover:bg-slate-50 transition disabled:opacity-50"
-              >
-                Save as Draft
-              </button>
-              <button
-                disabled={!canSubmit || submitting}
-                onClick={handleSubmitRevision}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-3 rounded-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                Send to Editor
-              </button>
-            </div>
+            <button
+              disabled={!canSubmit || submitting}
+              onClick={handleSubmitRevision}
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-3 rounded-lg transition disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+              Submit
+            </button>
             {!canSubmit && (
               <p className="text-xs text-slate-500 text-center">Upload the revised manuscript to submit.</p>
             )}
@@ -497,9 +476,6 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-6 text-center">
           <CheckCircle className="w-12 h-12 text-emerald-600 mx-auto mb-4" />
           <p className="font-semibold text-emerald-900">Revision Submitted</p>
-          <p className="text-sm text-emerald-700 mt-2">
-            Your revised manuscript has been submitted for coordinator review. Once the coordinator forwards it, the editor will review it and provide feedback.
-          </p>
         </div>
       )}
 

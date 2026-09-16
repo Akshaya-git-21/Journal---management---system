@@ -107,6 +107,7 @@ export interface RevisionRecord {
 export interface Manuscript {
   id: string;
   title: string;
+  subtitle?: string;
   abstract: string;
   references: string;
   isDoubleBlind: boolean; // ANONYMITY SAFEGUARD check

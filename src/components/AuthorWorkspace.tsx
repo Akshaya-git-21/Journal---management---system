@@ -259,6 +259,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       const newManuscript: Manuscript = {
         id: manuscriptId,
         title: paperDetails.title || 'Untitled Manuscript',
+        subtitle: paperDetails.subtitle || '',
         abstract: paperDetails.abstract || '',
         references: '',
         isDoubleBlind: paperDetails.isDoubleBlind || false,
@@ -319,6 +320,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
             .from('manuscripts')
             .update({
               title: newManuscript.title,
+              subtitle: newManuscript.subtitle,
               abstract: newManuscript.abstract,
               references: newManuscript.references,
               is_double_blind: newManuscript.isDoubleBlind,
@@ -331,6 +333,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
             .insert([{
               id: newManuscript.id,
               title: newManuscript.title,
+              subtitle: newManuscript.subtitle,
               abstract: newManuscript.abstract,
               references: newManuscript.references,
               is_double_blind: newManuscript.isDoubleBlind,
@@ -493,6 +496,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           .from('manuscripts')
           .update({
             title: paperDetails.title || '',
+            subtitle: paperDetails.subtitle || '',
             abstract: paperDetails.abstract || '',
             cover_letter: paperDetails.coverLetter || '',
             language: paperDetails.language || 'English',
@@ -506,6 +510,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           .insert([{
             id: manuscriptId,
             title: paperDetails.title || '',
+            subtitle: paperDetails.subtitle || '',
             abstract: paperDetails.abstract || '',
             cover_letter: paperDetails.coverLetter || '',
             status: 'DRAFT',
@@ -668,7 +673,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           )}
 
           {view === 'list' && (
-            <div className="p-6 md:p-8 max-w-7xl mx-auto w-full">
+            <div className="p-6 md:p-8 w-full">
               {/* Stats Cards */}
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
                 {[

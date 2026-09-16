@@ -124,6 +124,25 @@ export const submitManuscript = (manuscriptId: string) =>
 export const assignEditor = (manuscriptId: string, editorId: string) =>
   rpcOrThrow(supabase.rpc('assign_editor', { p_manuscript_id: manuscriptId, p_editor_id: editorId }));
 
+export interface ManuscriptReviewerPoolRow {
+  manuscript_id: string;
+  reviewer_id: string;
+  added_by: string | null;
+  created_at: string;
+}
+
+/** Coordinator-only: replaces the curated reviewer pool made available to
+ * the assigned Editor's "Select Reviewers" step for this manuscript.
+ * See coordinator_set_reviewer_pool() in 0087_coordinator_reviewer_pool.sql. */
+export const coordinatorSetReviewerPool = (manuscriptId: string, reviewerIds: string[]) =>
+  rpcOrThrow<ManuscriptReviewerPoolRow[]>(supabase.rpc('coordinator_set_reviewer_pool', { p_manuscript_id: manuscriptId, p_reviewer_ids: reviewerIds }));
+
+/** Editor/Coordinator: the manuscript's curated reviewer pool (the subset
+ * the Coordinator selected for this manuscript, not the full Reviewer
+ * Board). See get_manuscript_reviewer_pool() in 0087_coordinator_reviewer_pool.sql. */
+export const getManuscriptReviewerPool = (manuscriptId: string) =>
+  rpcOrThrow<ProfileRow[]>(supabase.rpc('get_manuscript_reviewer_pool', { p_manuscript_id: manuscriptId }));
+
 export const respondToEditorAssignment = (assignmentId: string, accept: boolean) =>
   rpcOrThrow(supabase.rpc('respond_to_editor_assignment', { p_assignment_id: assignmentId, p_accept: accept }));
 
@@ -214,12 +233,23 @@ export const coordinatorAssignReviewerDirectly = (manuscriptId: string, reviewer
 export const finalizeReviewerBoard = (manuscriptId: string) =>
   rpcOrThrow(supabase.rpc('finalize_reviewer_board', { p_manuscript_id: manuscriptId }));
 
-/** Editor-only: selects exactly 2 reviewers from the existing Reviewer Board
- * after "Move to Next Stage". Records them as EDITOR suggestions -- the
+/** Editor-only: selects reviewers from the existing Reviewer Board after
+ * "Move to Next Stage" -- fills however many of the 2 total slots are still
+ * open (1 or 2; a slot may already be filled by a promoted Author
+ * suggestion, see 0088/0089). Records them as EDITOR suggestions -- the
  * Coordinator sends the actual invitations via coordinatorSendReviewerInvitations.
- * See editor_select_reviewers() in 0026_editor_reviewer_selection.sql. */
-export const editorSelectReviewers = (manuscriptId: string, reviewerIds: [string, string]) =>
+ * See editor_select_reviewers() in 0090_editor_select_remaining_reviewer_slots.sql. */
+export const editorSelectReviewers = (manuscriptId: string, reviewerIds: string[]) =>
   rpcOrThrow<SuggestedReviewerRow[]>(supabase.rpc('editor_select_reviewers', { p_manuscript_id: manuscriptId, p_reviewer_ids: reviewerIds }));
+
+/** Editor-only: promotes one of the Author's suggested reviewers into an
+ * EDITOR suggestion, reusing the exact same Coordinator Accept & Assign /
+ * Decline / Replace pipeline as editor_select_reviewers() above -- the
+ * Coordinator then creates the account (if needed) and sends the invitation
+ * from the same "Suggested Reviewers" card they already use.
+ * See editor_select_author_suggestion() in 0088_editor_select_author_suggestion.sql. */
+export const editorSelectAuthorSuggestion = (suggestionId: string) =>
+  rpcOrThrow<SuggestedReviewerRow>(supabase.rpc('editor_select_author_suggestion', { p_suggestion_id: suggestionId }));
 
 /** Coordinator-only: sends invitations for every still-pending Editor-selected
  * reviewer on this manuscript in one action. Manuscript status stays
@@ -350,6 +380,35 @@ export const submitPeerReview = (
     p_recommendation: recommendation,
     p_comments_to_editor: commentsToEditor
   }));
+
+export interface ReviewerReviewAttachmentRow {
+  id: string;
+  assignment_id: string;
+  file_name: string;
+  file_size: string | null;
+  storage_path: string | null;
+  public_url: string | null;
+  uploaded_at: string;
+}
+
+/** Reviewer-only: attach a PDF (e.g. an annotated manuscript copy) to their
+ * own review. See reviewer_upload_review_attachment() in
+ * 0091_reviewer_review_attachments.sql. */
+export const reviewerUploadReviewAttachment = (
+  assignmentId: string, fileName: string, fileSize: string, storagePath: string, publicUrl: string
+) =>
+  rpcOrThrow<ReviewerReviewAttachmentRow>(supabase.rpc('reviewer_upload_review_attachment', {
+    p_assignment_id: assignmentId, p_file_name: fileName, p_file_size: fileSize, p_storage_path: storagePath, p_public_url: publicUrl
+  }));
+
+export const reviewerDeleteReviewAttachment = (attachmentId: string) =>
+  rpcOrThrow(supabase.rpc('reviewer_delete_review_attachment', { p_attachment_id: attachmentId }));
+
+export async function getReviewAttachments(assignmentId: string): Promise<ReviewerReviewAttachmentRow[]> {
+  const { data, error } = await supabase.from('reviewer_review_attachments').select('*').eq('assignment_id', assignmentId).order('uploaded_at', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
 
 export const submitEditorRecommendation = (
   manuscriptId: string,
@@ -503,6 +562,7 @@ export interface ManuscriptFileRow {
 export interface ManuscriptRow {
   id: string;
   title: string;
+  subtitle?: string | null;
   abstract: string;
   references: string;
   is_double_blind: boolean;
@@ -576,6 +636,10 @@ export interface SuggestedReviewerRow {
   note: string;
   created_at: string;
   revision_number: number;
+  /** Set on an EDITOR suggestion created by editor_select_author_suggestion()
+   * -- points back at the AUTHOR suggestion it was promoted from, so the UI
+   * can mark that original suggestion as already selected. */
+  promoted_from?: string | null;
 }
 
 export interface DiscussionRow {
@@ -597,6 +661,7 @@ export interface ProfileRow {
   requested_role?: string | null;
   status: string;
   created_at?: string | null;
+  metadata?: Record<string, any> | null;
 }
 
 export interface ChecklistItem {
@@ -761,7 +826,7 @@ export async function assignRevisedManuscriptToEditor(manuscriptId: string, edit
 
 /** Active accounts for a given role -- used by Coordinator's editor/reviewer pickers. */
 export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'GD_MEMBER'): Promise<ProfileRow[]> {
-  const { data, error } = await supabase.from('profiles').select('id, name, email, role, status, created_at').eq('role', role).eq('status', 'ACTIVE').order('name', { ascending: true });
+  const { data, error } = await supabase.from('profiles').select('id, name, email, role, status, created_at, metadata').eq('role', role).eq('status', 'ACTIVE').order('name', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
 }
