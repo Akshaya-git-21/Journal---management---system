@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Loader2, AlertCircle, CheckCircle, Users } from 'lucide-react';
-import { ProfileRow, SuggestedReviewerRow, editorSelectReviewers, editorSelectAuthorSuggestion, getManuscriptReviewerPool } from '../lib/workflow';
+import { ProfileRow, SuggestedReviewerRow, ReviewerAssignmentRow, editorSelectReviewers, editorSelectAuthorSuggestion, getManuscriptReviewerPool } from '../lib/workflow';
 
 interface Props {
   manuscriptId: string;
   suggestedReviewers: SuggestedReviewerRow[];
   onSubmitSuccess: () => void;
+  /** So a declined reviewer's real status can be shown instead of a stale
+   * "Awaiting Invitation", and so the Editor can pick a replacement for that
+   * one slot instead of being stuck at "already selected". Optional --
+   * callers that don't have this yet just fall back to the old behavior. */
+  reviewerAssignments?: ReviewerAssignmentRow[];
+  profiles?: Map<string, { email: string }>;
 }
 
 /** Both the Reviewer Board pool and the Author's suggested reviewers feed
@@ -15,7 +21,7 @@ interface Props {
  * committing. Confirm then promotes any picked Author suggestions
  * (editor_select_author_suggestion) followed by the pool picks
  * (editor_select_reviewers) in one action. */
-export function useEditorReviewerSelection({ manuscriptId, suggestedReviewers, onSubmitSuccess }: Props) {
+export function useEditorReviewerSelection({ manuscriptId, suggestedReviewers, onSubmitSuccess, reviewerAssignments = [], profiles }: Props) {
   const [reviewers, setReviewers] = useState<ProfileRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPoolIds, setSelectedPoolIds] = useState<string[]>([]);
@@ -47,10 +53,32 @@ export function useEditorReviewerSelection({ manuscriptId, suggestedReviewers, o
   const editorSelections = suggestedReviewers.filter(s => s.suggested_by === 'EDITOR');
   const authorSuggestions = suggestedReviewers.filter(s => s.suggested_by === 'AUTHOR');
   const promotedFromIds = new Set(editorSelections.map(s => s.promoted_from).filter(Boolean));
-  const remainingSlots = Math.max(0, 2 - editorSelections.length);
+
+  // A selection whose actual invitation was declined no longer occupies its
+  // slot -- without this, the Editor was permanently stuck at "already
+  // selected" (both names still listed as "Awaiting Invitation" forever)
+  // the moment either reviewer declined, with no way to pick a replacement
+  // from here.
+  const emailToAssignmentStatus = new Map<string, ReviewerAssignmentRow['status']>();
+  if (profiles) {
+    for (const a of reviewerAssignments) {
+      const email = profiles.get(a.reviewer_id)?.email?.toLowerCase();
+      if (email) emailToAssignmentStatus.set(email, a.status);
+    }
+  }
+  const selectionStatus = (s: SuggestedReviewerRow) => emailToAssignmentStatus.get(s.email.toLowerCase()) ?? null;
+  const declinedSelections = editorSelections.filter(s => selectionStatus(s) === 'DECLINED');
+  const activeSelectionsCount = editorSelections.length - declinedSelections.length;
+  const remainingSlots = Math.max(0, 2 - activeSelectionsCount);
   const alreadySelected = remainingSlots === 0;
+  const hasDeclinedSelection = declinedSelections.length > 0;
   const totalTentative = selectedPoolIds.length + selectedSuggestionIds.length;
   const canPickMore = totalTentative < remainingSlots;
+
+  // Never re-offer a reviewer who has already declined this manuscript --
+  // the pool picker was showing every candidate the Coordinator ever added,
+  // including ones already known not to want it.
+  const visibleReviewers = reviewers.filter(r => emailToAssignmentStatus.get(r.email.toLowerCase()) !== 'DECLINED');
 
   const togglePool = (id: string) => {
     setError('');
@@ -89,7 +117,7 @@ export function useEditorReviewerSelection({ manuscriptId, suggestedReviewers, o
       if (distinctPoolIds.length > 0) {
         await editorSelectReviewers(manuscriptId, distinctPoolIds);
       }
-      setSuccess('Reviewers selected. The Coordinator will send their invitations next.');
+      setSuccess('Reviewers selected. Awaiting invitation.');
       setSelectedPoolIds([]);
       setSelectedSuggestionIds([]);
       onSubmitSuccess();
@@ -101,9 +129,10 @@ export function useEditorReviewerSelection({ manuscriptId, suggestedReviewers, o
   };
 
   return {
-    reviewers, loading, selectedPoolIds, togglePool,
+    reviewers: visibleReviewers, loading, selectedPoolIds, togglePool,
     authorSuggestions, selectedSuggestionIds, toggleSuggestion, promotedFromIds, canPickMore,
-    submitting, error, success, handleSubmit, alreadySelected, editorSelections, remainingSlots, totalTentative
+    submitting, error, success, handleSubmit, alreadySelected, editorSelections, remainingSlots, totalTentative,
+    selectionStatus, hasDeclinedSelection, activeSelectionsCount
   };
 }
 
@@ -114,7 +143,7 @@ type SelectionState = ReturnType<typeof useEditorReviewerSelection>;
 // Coordinator has actually sent the invitations, so without this the
 // Editor's own selection would otherwise vanish from view entirely in
 // the gap between confirming it and the Coordinator inviting them.
-function ReviewersSelectedCard({ editorSelections }: Pick<SelectionState, 'editorSelections'>) {
+function ReviewersSelectedCard({ editorSelections, selectionStatus }: Pick<SelectionState, 'editorSelections' | 'selectionStatus'>) {
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
       <div className="flex items-center gap-2">
@@ -122,17 +151,21 @@ function ReviewersSelectedCard({ editorSelections }: Pick<SelectionState, 'edito
         <h3 className="text-sm font-black text-slate-900">Reviewers Selected</h3>
       </div>
       <div className="space-y-2">
-        {editorSelections.map((r) => (
-          <div key={r.id} className="flex items-center justify-between p-3 border border-emerald-200 bg-emerald-50 rounded-lg">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">{r.name}</p>
-              <p className="text-xs text-slate-600">{r.email}</p>
+        {editorSelections.map((r) => {
+          const status = selectionStatus(r);
+          const isDeclined = status === 'DECLINED';
+          return (
+            <div key={r.id} className={`flex items-center justify-between p-3 border rounded-lg ${isDeclined ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
+              <div>
+                <p className="text-sm font-semibold text-slate-900">{r.name}</p>
+                <p className="text-xs text-slate-600">{r.email}</p>
+              </div>
+              <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full shrink-0 ${isDeclined ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                {isDeclined ? 'Declined' : 'Awaiting Invitation'}
+              </span>
             </div>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 shrink-0">
-              Awaiting Invitation
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -142,16 +175,24 @@ function ReviewersSelectedCard({ editorSelections }: Pick<SelectionState, 'edito
  * place other content (e.g. the Author's suggested reviewers) between the
  * list and the Confirm button instead of them being stacked back-to-back. */
 export function ReviewerSelectionList(state: SelectionState) {
-  const { reviewers, loading, selectedPoolIds, togglePool, submitting, error, success, alreadySelected, editorSelections, remainingSlots } = state;
+  const { reviewers, loading, selectedPoolIds, togglePool, submitting, error, success, alreadySelected, editorSelections, remainingSlots, selectionStatus, hasDeclinedSelection } = state;
 
-  if (alreadySelected) return <ReviewersSelectedCard editorSelections={editorSelections} />;
+  // A declined reviewer stays visible above (with its real "Declined"
+  // status) instead of silently disappearing, and the picker below reopens
+  // for just the freed-up slot rather than the Editor being stuck at
+  // "already selected" forever.
+  if (alreadySelected) return <ReviewersSelectedCard editorSelections={editorSelections} selectionStatus={selectionStatus} />;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-      <div className="flex items-center gap-2">
-        <Users className="w-5 h-5 text-slate-700" />
-        <h3 className="text-sm font-black text-slate-900">Select {remainingSlots} Reviewer{remainingSlots === 1 ? '' : 's'}</h3>
-      </div>
+    <div className="space-y-4">
+      {editorSelections.length > 0 && <ReviewersSelectedCard editorSelections={editorSelections} selectionStatus={selectionStatus} />}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Users className="w-5 h-5 text-slate-700" />
+          <h3 className="text-sm font-black text-slate-900">
+            {hasDeclinedSelection ? 'Choose Another Reviewer' : `Select ${remainingSlots} Reviewer${remainingSlots === 1 ? '' : 's'}`}
+          </h3>
+        </div>
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-red-800 flex items-start gap-2">
@@ -200,6 +241,7 @@ export function ReviewerSelectionList(state: SelectionState) {
           })}
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -208,7 +250,7 @@ export function ReviewerSelectionList(state: SelectionState) {
  * below other content instead of directly under the reviewer list. Renders
  * nothing once the Editor has already selected (ReviewerSelectionList shows
  * the "Reviewers Selected" card in that state instead). */
-export function ReviewerSelectionConfirmButton({ totalTentative, submitting, handleSubmit, alreadySelected, editorSelections }: SelectionState) {
+export function ReviewerSelectionConfirmButton({ totalTentative, submitting, handleSubmit, alreadySelected, activeSelectionsCount }: SelectionState) {
   if (alreadySelected) return null;
   return (
     <button
@@ -218,7 +260,7 @@ export function ReviewerSelectionConfirmButton({ totalTentative, submitting, han
       className="w-full px-4 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-lg transition flex items-center justify-center gap-2"
     >
       {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-      Confirm {editorSelections.length + totalTentative}/2 Selected
+      Confirm {activeSelectionsCount + totalTentative}/2 Selected
     </button>
   );
 }

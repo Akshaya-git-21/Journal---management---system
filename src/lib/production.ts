@@ -26,7 +26,16 @@ export type ProductionStatus =
   // Module 80 -- Author's final approval waits for the GD Member's explicit "Move to Publish" click.
   | 'AUTHOR_FINAL_APPROVED'
   // Module 82 -- Coordinator must explicitly send the author-approved proof to the GD Member before they can move it to publish.
-  | 'SENT_TO_GD_FOR_FINALIZE';
+  | 'SENT_TO_GD_FOR_FINALIZE'
+  // Module 93 -- Author's Final Review correction request now routes through
+  // the Coordinator and Editor before reaching the GD Member.
+  | 'AUTHOR_FINAL_CORRECTIONS_SUBMITTED' | 'AUTHOR_FINAL_CORRECTIONS_UNDER_EDITOR_REVIEW'
+  // Module 94 -- the Editor's Move to GD / Return to Author decision (Module
+  // 93) now also lands with the Coordinator for an explicit send.
+  | 'AUTHOR_FINAL_RETURN_PENDING_SEND' | 'AUTHOR_FINAL_MOVE_TO_GD_PENDING_SEND'
+  // Module 96 -- once the Author gives final approval, the Coordinator sends
+  // it to the Editor for the final Publish/Move-to-GD decision.
+  | 'AUTHOR_FINAL_APPROVED_UNDER_EDITOR_REVIEW';
 
 /** Whose turn it is to act next, independent of the exact production_status
  * string -- set atomically by the Module 69 RPCs, never inferred client-side.
@@ -152,7 +161,7 @@ export interface CorrectionRow {
 }
 
 export type ProofReviewerRole = 'AUTHOR_FIRST' | 'EDITOR' | 'AUTHOR_FINAL' | 'COORDINATOR_OVERRIDE';
-export type ProofReviewDecision = 'APPROVED' | 'CORRECTIONS_REQUESTED' | 'OVERRIDE';
+export type ProofReviewDecision = 'APPROVED' | 'CORRECTIONS_REQUESTED' | 'OVERRIDE' | 'RETURNED_TO_AUTHOR';
 
 /** Module 69 -- one row per Author/Editor/Coordinator-override decision,
  * append-only and never overwritten (Rule 7's full history). See
@@ -493,6 +502,54 @@ export const gdMemberMoveToPublish = (manuscriptId: string) =>
  * 0082_coordinator_sends_to_gd_for_finalize.sql. */
 export const coordinatorSendToGdForFinalize = (manuscriptId: string) =>
   rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_send_to_gd_for_finalize', { p_manuscript_id: manuscriptId }));
+
+/** Coordinator-only (Module 93): explicit "Send to Editor" click once the
+ * Author has requested corrections on Final Review (AUTHOR_FINAL_CORRECTIONS_SUBMITTED).
+ * See coordinator_send_author_corrections_to_editor() in
+ * 0093_editor_reviews_author_final_corrections.sql. */
+export const coordinatorSendAuthorCorrectionsToEditor = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_send_author_corrections_to_editor', { p_manuscript_id: manuscriptId }));
+
+/** Editor-only (Module 93): decision on the Author's Final Review correction
+ * request -- always exactly two actions. 'MOVE_TO_GD' forwards to the GD
+ * Member (reuses AUTHOR_FINAL_CORRECTIONS_REQUESTED); 'RETURN_TO_AUTHOR'
+ * sends it back to the Author on the same proof version (comments required,
+ * shown to the Author as the reason). See editor_review_author_corrections()
+ * in 0093_editor_reviews_author_final_corrections.sql. */
+export const editorReviewAuthorCorrections = (manuscriptId: string, decision: 'MOVE_TO_GD' | 'RETURN_TO_AUTHOR', comments: string = '') =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('editor_review_author_corrections', { p_manuscript_id: manuscriptId, p_decision: decision, p_comments: comments }));
+
+/** Coordinator-only (Module 94): explicit "Send to Author" click once the
+ * Editor has returned the Author's correction request (AUTHOR_FINAL_RETURN_PENDING_SEND).
+ * See coordinator_send_author_final_return() in
+ * 0094_author_final_return_and_move_to_gd_pending_send.sql. */
+export const coordinatorSendAuthorFinalReturn = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_send_author_final_return', { p_manuscript_id: manuscriptId }));
+
+/** Coordinator-only (Module 94): explicit "Send to GD" click once the Editor
+ * has moved the Author's correction request toward the GD Member
+ * (AUTHOR_FINAL_MOVE_TO_GD_PENDING_SEND). See
+ * coordinator_send_author_final_corrections_to_gd() in
+ * 0094_author_final_return_and_move_to_gd_pending_send.sql. */
+export const coordinatorSendAuthorFinalCorrectionsToGd = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_send_author_final_corrections_to_gd', { p_manuscript_id: manuscriptId }));
+
+/** Coordinator-only (Module 96): explicit "Send to Editor" click once the
+ * Author has given final approval (AUTHOR_FINAL_APPROVED). Replaces
+ * coordinatorSendToGdForFinalize as the action for this status. See
+ * coordinator_send_author_final_approval_to_editor() in
+ * 0096_editor_final_publish_decision.sql. */
+export const coordinatorSendAuthorFinalApprovalToEditor = (manuscriptId: string) =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('coordinator_send_author_final_approval_to_editor', { p_manuscript_id: manuscriptId }));
+
+/** Editor-only (Module 96): the final publish decision, always exactly two
+ * actions. 'PUBLISH' moves straight to READY_FOR_PUBLICATION (the
+ * Coordinator's existing "choose Publisher" gate); 'MOVE_TO_GD' reuses the
+ * same AUTHOR_FINAL_MOVE_TO_GD_PENDING_SEND loop as Phase 4's correction
+ * round. See editor_review_author_final_approval() in
+ * 0096_editor_final_publish_decision.sql. */
+export const editorReviewAuthorFinalApproval = (manuscriptId: string, decision: 'PUBLISH' | 'MOVE_TO_GD') =>
+  rpcOrThrow<ProductionRow>(supabase.rpc('editor_review_author_final_approval', { p_manuscript_id: manuscriptId, p_decision: decision }));
 
 // ------------------------------------------
 // File uploads -- same manuscript-files bucket, new path prefix

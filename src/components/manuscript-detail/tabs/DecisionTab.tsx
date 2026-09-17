@@ -7,7 +7,9 @@ import {
 } from '../../../lib/workflow';
 import {
   getProduction, startProduction, assignGDMember, subscribeToProduction, sendProofToAuthor,
-  coordinatorNotifyGDMember, coordinatorSendToEditor, coordinatorSendToAuthorFinal, editorSendCorrectionsToGD, coordinatorSendToGdForFinalize, ProductionRow
+  coordinatorNotifyGDMember, coordinatorSendToEditor, coordinatorSendToAuthorFinal, editorSendCorrectionsToGD,
+  coordinatorSendAuthorCorrectionsToEditor, coordinatorSendAuthorFinalReturn, coordinatorSendAuthorFinalCorrectionsToGd,
+  coordinatorSendAuthorFinalApprovalToEditor, ProductionRow
 } from '../../../lib/production';
 import ProofReviewTimeline from '../../production/ProofReviewTimeline';
 import { createAndActivateGDMemberAccount, createAndActivatePublisherAccount } from '../../../lib/auth';
@@ -114,10 +116,19 @@ export function DecisionTab({
   const [sendToEditorError, setSendToEditorError] = useState('');
   const [sendingToAuthorFinal, setSendingToAuthorFinal] = useState(false);
   const [sendToAuthorFinalError, setSendToAuthorFinalError] = useState('');
-  const [sendingToGdForFinalize, setSendingToGdForFinalize] = useState(false);
-  const [sendToGdForFinalizeError, setSendToGdForFinalizeError] = useState('');
   const [sendingCorrectionsToGD, setSendingCorrectionsToGD] = useState(false);
   const [sendCorrectionsToGDError, setSendCorrectionsToGDError] = useState('');
+  // Module 93 -- "Send to Editor" for the Author's Final Review correction request.
+  const [sendingAuthorCorrectionsToEditor, setSendingAuthorCorrectionsToEditor] = useState(false);
+  const [sendAuthorCorrectionsToEditorError, setSendAuthorCorrectionsToEditorError] = useState('');
+  // Module 94 -- "Send to Author" / "Send to GD" for the Editor's decision on that request.
+  const [sendingAuthorFinalReturn, setSendingAuthorFinalReturn] = useState(false);
+  const [sendAuthorFinalReturnError, setSendAuthorFinalReturnError] = useState('');
+  const [sendingAuthorFinalCorrectionsToGd, setSendingAuthorFinalCorrectionsToGd] = useState(false);
+  const [sendAuthorFinalCorrectionsToGdError, setSendAuthorFinalCorrectionsToGdError] = useState('');
+  // Module 96 -- "Send to Editor" once the Author has given final approval.
+  const [sendingAuthorFinalApprovalToEditor, setSendingAuthorFinalApprovalToEditor] = useState(false);
+  const [sendAuthorFinalApprovalToEditorError, setSendAuthorFinalApprovalToEditorError] = useState('');
   // Moved here from OverviewTab.tsx's "Current Status" card -- these are the
   // pre-decision peer-review actions (sending submitted reviews on to the
   // Editor, and forwarding a resubmitted revision back to the Editor), now
@@ -137,6 +148,10 @@ export function DecisionTab({
   // come back -- that round trip made the card sit there for several extra
   // seconds after the click had already succeeded.
   const [invitationsJustSent, setInvitationsJustSent] = useState(false);
+  // Module 98 -- Review Timeline required alongside sending invitations,
+  // same as the Editorial Timeline required when assigning the Editor.
+  const [reviewTimelineStart, setReviewTimelineStart] = useState('');
+  const [reviewTimelineEnd, setReviewTimelineEnd] = useState('');
   // "Choose Publisher" gate -- shown once READY_FOR_PUBLICATION, mirrors the
   // GD Member assignment gate above (pick existing or create new), just
   // targeting the Publisher role and send_to_publisher() instead.
@@ -296,10 +311,18 @@ export function DecisionTab({
   };
 
   const handleInviteReviewers = async () => {
+    if (!reviewTimelineStart || !reviewTimelineEnd) {
+      setSendInvitationsError('Please set a review timeline start and end date.');
+      return;
+    }
+    if (reviewTimelineEnd < reviewTimelineStart) {
+      setSendInvitationsError('End date cannot be before the start date.');
+      return;
+    }
     setSendingInvitations(true);
     setSendInvitationsError('');
     try {
-      await coordinatorSendReviewerInvitations(manuscript.id);
+      await coordinatorSendReviewerInvitations(manuscript.id, reviewTimelineStart, reviewTimelineEnd);
       setInvitationsJustSent(true);
       onWorkflowChange();
     } catch (e: any) {
@@ -365,21 +388,6 @@ export function DecisionTab({
     }
   };
 
-  const handleSendToGdForFinalize = async () => {
-    if (sendingToGdForFinalize) return;
-    setSendingToGdForFinalize(true);
-    setSendToGdForFinalizeError('');
-    try {
-      const updated = await coordinatorSendToGdForFinalize(manuscript.id);
-      setProductionStatus(updated.production_status);
-      onWorkflowChange();
-    } catch (e: any) {
-      setSendToGdForFinalizeError(e.message || 'Failed to send the proof to the GD Member.');
-    } finally {
-      setSendingToGdForFinalize(false);
-    }
-  };
-
   const handleSendCorrectionsToGD = async () => {
     if (sendingCorrectionsToGD) return;
     setSendingCorrectionsToGD(true);
@@ -392,6 +400,66 @@ export function DecisionTab({
       setSendCorrectionsToGDError(e.message || 'Failed to send the corrections to the GD Member.');
     } finally {
       setSendingCorrectionsToGD(false);
+    }
+  };
+
+  const handleSendAuthorCorrectionsToEditor = async () => {
+    if (sendingAuthorCorrectionsToEditor) return;
+    setSendingAuthorCorrectionsToEditor(true);
+    setSendAuthorCorrectionsToEditorError('');
+    try {
+      const updated = await coordinatorSendAuthorCorrectionsToEditor(manuscript.id);
+      setProductionStatus(updated.production_status);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendAuthorCorrectionsToEditorError(e.message || 'Failed to send the corrections to the Editor.');
+    } finally {
+      setSendingAuthorCorrectionsToEditor(false);
+    }
+  };
+
+  const handleSendAuthorFinalReturn = async () => {
+    if (sendingAuthorFinalReturn) return;
+    setSendingAuthorFinalReturn(true);
+    setSendAuthorFinalReturnError('');
+    try {
+      const updated = await coordinatorSendAuthorFinalReturn(manuscript.id);
+      setProductionStatus(updated.production_status);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendAuthorFinalReturnError(e.message || 'Failed to send this to the Author.');
+    } finally {
+      setSendingAuthorFinalReturn(false);
+    }
+  };
+
+  const handleSendAuthorFinalCorrectionsToGd = async () => {
+    if (sendingAuthorFinalCorrectionsToGd) return;
+    setSendingAuthorFinalCorrectionsToGd(true);
+    setSendAuthorFinalCorrectionsToGdError('');
+    try {
+      const updated = await coordinatorSendAuthorFinalCorrectionsToGd(manuscript.id);
+      setProductionStatus(updated.production_status);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendAuthorFinalCorrectionsToGdError(e.message || 'Failed to send this to the GD Member.');
+    } finally {
+      setSendingAuthorFinalCorrectionsToGd(false);
+    }
+  };
+
+  const handleSendAuthorFinalApprovalToEditor = async () => {
+    if (sendingAuthorFinalApprovalToEditor) return;
+    setSendingAuthorFinalApprovalToEditor(true);
+    setSendAuthorFinalApprovalToEditorError('');
+    try {
+      const updated = await coordinatorSendAuthorFinalApprovalToEditor(manuscript.id);
+      setProductionStatus(updated.production_status);
+      onWorkflowChange();
+    } catch (e: any) {
+      setSendAuthorFinalApprovalToEditorError(e.message || 'Failed to send this to the Editor.');
+    } finally {
+      setSendingAuthorFinalApprovalToEditor(false);
     }
   };
 
@@ -1032,9 +1100,30 @@ export function DecisionTab({
           {sendInvitationsError && (
             <p className="text-xs text-red-700 mb-2">{sendInvitationsError}</p>
           )}
+          <div className="flex items-center gap-2 mb-3">
+            <label className="text-xs font-bold text-teal-800 shrink-0">Review Timeline</label>
+            <input
+              type="date"
+              value={reviewTimelineStart}
+              onChange={(e) => setReviewTimelineStart(e.target.value)}
+              disabled={sendingInvitations}
+              title="Start date"
+              className="border border-teal-300 rounded-lg px-3 py-2 text-xs bg-white"
+            />
+            <span className="text-xs text-teal-700">to</span>
+            <input
+              type="date"
+              value={reviewTimelineEnd}
+              min={reviewTimelineStart || undefined}
+              onChange={(e) => setReviewTimelineEnd(e.target.value)}
+              disabled={sendingInvitations}
+              title="End date (deadline)"
+              className="border border-teal-300 rounded-lg px-3 py-2 text-xs bg-white"
+            />
+          </div>
           <button
             onClick={handleInviteReviewers}
-            disabled={sendingInvitations}
+            disabled={sendingInvitations || !reviewTimelineStart || !reviewTimelineEnd}
             className="w-full bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-sm font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
           >
             {sendingInvitations && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -1474,7 +1563,7 @@ export function DecisionTab({
           instead of only once it's already with the Author. See
           ProductionWorkspace.tsx for the same panel plus the Coordinator
           Override escape hatch for a stuck manuscript. */}
-      {!isEditor && production && ['PROOF_GENERATED', 'PROOF_SUBMITTED_TO_COORDINATOR', 'PROOF_UPDATED', 'FINAL_PROOF_READY', 'PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW', 'AUTHOR_APPROVED', 'CORRECTIONS_IN_PROGRESS', 'PROOF_SENT_TO_EDITOR', 'EDITOR_CORRECTIONS_PENDING_SEND', 'EDITOR_CORRECTIONS_REQUESTED', 'PROOF_READY_FOR_EDITOR', 'EDITOR_APPROVED', 'PROOF_SENT_TO_AUTHOR_FINAL', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED', 'AUTHOR_FINAL_APPROVED', 'SENT_TO_GD_FOR_FINALIZE', 'READY_FOR_PUBLICATION'].includes(productionStatus || '') && (
+      {!isEditor && production && ['PROOF_GENERATED', 'PROOF_SUBMITTED_TO_COORDINATOR', 'PROOF_UPDATED', 'FINAL_PROOF_READY', 'PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW', 'AUTHOR_APPROVED', 'CORRECTIONS_IN_PROGRESS', 'PROOF_SENT_TO_EDITOR', 'EDITOR_CORRECTIONS_PENDING_SEND', 'EDITOR_CORRECTIONS_REQUESTED', 'PROOF_READY_FOR_EDITOR', 'EDITOR_APPROVED', 'PROOF_SENT_TO_AUTHOR_FINAL', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED', 'AUTHOR_FINAL_CORRECTIONS_SUBMITTED', 'AUTHOR_FINAL_CORRECTIONS_UNDER_EDITOR_REVIEW', 'AUTHOR_FINAL_RETURN_PENDING_SEND', 'AUTHOR_FINAL_MOVE_TO_GD_PENDING_SEND', 'AUTHOR_FINAL_APPROVED', 'AUTHOR_FINAL_APPROVED_UNDER_EDITOR_REVIEW', 'SENT_TO_GD_FOR_FINALIZE', 'READY_FOR_PUBLICATION'].includes(productionStatus || '') && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
           <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
             <MessageCircle className="w-4 h-4" /> Proof &amp; Review Status
@@ -1526,11 +1615,12 @@ export function DecisionTab({
               editor_review_proof() in 0069_editor_final_approval_workflow.sql.
               This button doesn't change that; it's a manual nudge (re-sends
               the notification) for "they say they never saw it". Excludes
-              EDITOR_CORRECTIONS_REQUESTED -- that status already has its own
-              "Sent to GD for editorial correction" confirmation right below
-              from the actual send action, so showing this nudge button at
-              the same time was a confusing duplicate. */}
-          {['CORRECTIONS_IN_PROGRESS', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED'].includes(productionStatus || '') && (
+              EDITOR_CORRECTIONS_REQUESTED and AUTHOR_FINAL_CORRECTIONS_REQUESTED
+              -- both already have their own "Sent to GD for correction"
+              confirmation right below from the actual send action (Module 81
+              / Module 94), so showing this nudge button at the same time was
+              a confusing duplicate. */}
+          {['CORRECTIONS_IN_PROGRESS'].includes(productionStatus || '') && (
             <div>
               {!hasNotifiedGDMember ? (
                 <button
@@ -1613,24 +1703,87 @@ export function DecisionTab({
               <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Author for final confirmation -- Proof v{production?.current_proof_version}.
             </p>
           )}
+          {!isEditor && productionStatus === 'AUTHOR_FINAL_CORRECTIONS_SUBMITTED' && (
+            <div>
+              <button
+                type="button"
+                onClick={handleSendAuthorCorrectionsToEditor}
+                disabled={sendingAuthorCorrectionsToEditor}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sendingAuthorCorrectionsToEditor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                {sendingAuthorCorrectionsToEditor ? 'Sending...' : 'Send to Editor'}
+              </button>
+              {sendAuthorCorrectionsToEditorError && (
+                <p className="mt-2 text-xs font-semibold text-red-600">{sendAuthorCorrectionsToEditorError}</p>
+              )}
+            </div>
+          )}
+          {!isEditor && productionStatus === 'AUTHOR_FINAL_CORRECTIONS_UNDER_EDITOR_REVIEW' && (
+            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Editor to review the Author's correction request.
+            </p>
+          )}
+          {!isEditor && productionStatus === 'AUTHOR_FINAL_RETURN_PENDING_SEND' && (
+            <div>
+              <button
+                type="button"
+                onClick={handleSendAuthorFinalReturn}
+                disabled={sendingAuthorFinalReturn}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sendingAuthorFinalReturn ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                {sendingAuthorFinalReturn ? 'Sending...' : 'Send to Author'}
+              </button>
+              {sendAuthorFinalReturnError && (
+                <p className="mt-2 text-xs font-semibold text-red-600">{sendAuthorFinalReturnError}</p>
+              )}
+            </div>
+          )}
+          {!isEditor && productionStatus === 'AUTHOR_FINAL_MOVE_TO_GD_PENDING_SEND' && (
+            <div>
+              <button
+                type="button"
+                onClick={handleSendAuthorFinalCorrectionsToGd}
+                disabled={sendingAuthorFinalCorrectionsToGd}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sendingAuthorFinalCorrectionsToGd ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                {sendingAuthorFinalCorrectionsToGd ? 'Sending...' : `Send to ${assignedGDMemberProfile?.name || 'GD Member'}`}
+              </button>
+              {sendAuthorFinalCorrectionsToGdError && (
+                <p className="mt-2 text-xs font-semibold text-red-600">{sendAuthorFinalCorrectionsToGdError}</p>
+              )}
+            </div>
+          )}
+          {!isEditor && productionStatus === 'AUTHOR_FINAL_CORRECTIONS_REQUESTED' && (
+            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Sent to {assignedGDMemberProfile?.name || 'the GD Member'} for correction.
+            </p>
+          )}
           {!isEditor && productionStatus === 'AUTHOR_FINAL_APPROVED' && (
             <div>
               <p className="text-xs font-semibold text-emerald-700 mb-2">
-                Final Proof Approved by Author and Editor -- Proof v{production?.current_proof_version} is ready for publication.
+                Author gave final approval -- Proof v{production?.current_proof_version}.
               </p>
               <button
                 type="button"
-                onClick={handleSendToGdForFinalize}
-                disabled={sendingToGdForFinalize}
+                onClick={handleSendAuthorFinalApprovalToEditor}
+                disabled={sendingAuthorFinalApprovalToEditor}
                 className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {sendingToGdForFinalize ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                {sendingToGdForFinalize ? 'Sending...' : `Send to ${assignedGDMemberProfile?.name || 'GD Member'} for Finalize`}
+                {sendingAuthorFinalApprovalToEditor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                {sendingAuthorFinalApprovalToEditor ? 'Sending...' : 'Send to Editor'}
               </button>
-              {sendToGdForFinalizeError && (
-                <p className="mt-2 text-xs font-semibold text-red-600">{sendToGdForFinalizeError}</p>
+              {sendAuthorFinalApprovalToEditorError && (
+                <p className="mt-2 text-xs font-semibold text-red-600">{sendAuthorFinalApprovalToEditorError}</p>
               )}
             </div>
+          )}
+          {!isEditor && productionStatus === 'AUTHOR_FINAL_APPROVED_UNDER_EDITOR_REVIEW' && (
+            <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Sent to Editor for the final publish decision.
+            </p>
           )}
           {!isEditor && productionStatus === 'SENT_TO_GD_FOR_FINALIZE' && (
             <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">

@@ -1,9 +1,16 @@
 import { useEffect, useState } from 'react';
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, assignEditor, coordinatorSetReviewerPool, getManuscriptReviewerPool, getEditorReviewerActions, getPendingEditorSuggestions } from '../../../lib/workflow';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, assignEditor, getEditorReviewerActions, getPendingEditorSuggestions, coordinatorSendEditorReminder, getManuscriptReviewerPool } from '../../../lib/workflow';
 import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
 import { getProduction, subscribeToProduction } from '../../../lib/production';
-import { CheckCircle2, Circle, AlertCircle, FileText, Loader2 } from 'lucide-react';
+import { CheckCircle2, Circle, AlertCircle, FileText, Loader2, Bell } from 'lucide-react';
 import { AssignmentConfirmationDialog } from '../../AssignmentConfirmationDialog';
+
+/** Module 97 -- "12 Sep 2026" style formatting for the Editorial Timeline,
+ * shared by the assign form's confirmation dialog and the display card. */
+function formatTimelineDate(iso: string | null | undefined): string {
+  if (!iso) return '--';
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
 
 interface Props {
   manuscript: ManuscriptRow;
@@ -87,78 +94,83 @@ export function OverviewTab({
     : [];
   const readyToInviteReviewers = pendingReviewerInvites.length > 0;
 
+  // Whether the Coordinator has already sent a reviewer pool to the Editor
+  // (from the Review Board tab) -- once they have, "Next Action Required"
+  // has nothing left for the Coordinator to do until the Editor picks their
+  // 2, so the card should stop nagging them to send it again.
+  const [reviewerPoolSent, setReviewerPoolSent] = useState(false);
+  const awaitingReviewerPoolSend = manuscript.status === 'EDITOR_REVIEW' && !!activeEditor && activeEditor.status === 'ACCEPTED'
+    && evaluationSubmitted && !readyToInviteReviewers;
+  useEffect(() => {
+    if (!awaitingReviewerPoolSend) return;
+    getManuscriptReviewerPool(manuscript.id).then((pool) => setReviewerPoolSent(pool.length > 0)).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manuscript.id, awaitingReviewerPoolSend]);
+
   // Assign Editor (SUBMITTED -> EDITOR_REVIEW)
   const [availableEditors, setAvailableEditors] = useState<ProfileRow[]>([]);
   const [selectedEditorId, setSelectedEditorId] = useState('');
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState('');
   const [showEditorConfirmation, setShowEditorConfirmation] = useState(false);
+  // Module 97 -- the Editorial Timeline (deadline for the first editorial
+  // evaluation) the Coordinator must set alongside the Editor.
+  const [editorTimelineStart, setEditorTimelineStart] = useState('');
+  const [editorTimelineEnd, setEditorTimelineEnd] = useState('');
 
-  // Reviewer pool the Coordinator curates for the Editor's later "Select
-  // Reviewers" step -- a separate action from assigning the Editor, so the
-  // Coordinator can come back and set/adjust it any time before the Editor
-  // actually uses it (see coordinator_set_reviewer_pool() in
-  // 0087_coordinator_reviewer_pool.sql). The Editor's screen never shows
-  // the full Reviewer Board, only whatever this has been set to.
-  const [availableReviewersForPool, setAvailableReviewersForPool] = useState<ProfileRow[]>([]);
-  const [selectedPoolReviewerIds, setSelectedPoolReviewerIds] = useState<string[]>([]);
-  const [assigningReviewers, setAssigningReviewers] = useState(false);
-  const [reviewerPoolError, setReviewerPoolError] = useState('');
-  const [reviewerPoolSuccess, setReviewerPoolSuccess] = useState(false);
-
-  // The reviewer pool can be set before OR after the Editor is assigned
-  // (SUBMITTED or EDITOR_REVIEW), right up until the Editor has actually
-  // used it to select their 2 reviewers.
-  const canManageReviewerPool = manuscript.status === 'SUBMITTED' || (manuscript.status === 'EDITOR_REVIEW' && !readyToInviteReviewers);
+  // Module 97 -- manual reminder to the assigned Editor about the pending
+  // first evaluation.
+  const [sendingReminder, setSendingReminder] = useState(false);
+  const [reminderError, setReminderError] = useState('');
 
   useEffect(() => {
     if (manuscript.status !== 'SUBMITTED') return;
     listActiveProfilesByRole('EDITOR').then(setAvailableEditors).catch((e) => setAssignError(e.message));
   }, [manuscript.status]);
 
-  useEffect(() => {
-    if (!canManageReviewerPool) return;
-    listActiveProfilesByRole('REVIEWER').then(setAvailableReviewersForPool).catch(() => setAvailableReviewersForPool([]));
-    getManuscriptReviewerPool(manuscript.id).then((pool) => setSelectedPoolReviewerIds(pool.map((r) => r.id))).catch(() => {});
-  }, [manuscript.id, canManageReviewerPool]);
-
-  const togglePoolReviewer = (id: string) => {
-    setReviewerPoolSuccess(false);
-    setSelectedPoolReviewerIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
-  };
-
-  const handleAssignReviewersClick = async () => {
-    setAssigningReviewers(true);
-    setReviewerPoolError('');
-    setReviewerPoolSuccess(false);
-    try {
-      await coordinatorSetReviewerPool(manuscript.id, selectedPoolReviewerIds);
-      setReviewerPoolSuccess(true);
-    } catch (e: any) {
-      setReviewerPoolError(e.message || 'Failed to assign reviewers');
-    } finally {
-      setAssigningReviewers(false);
-    }
-  };
-
   const handleAssignEditorClick = () => {
     if (!selectedEditorId) return;
+    if (!editorTimelineStart || !editorTimelineEnd) {
+      setAssignError('Please set an editorial timeline start and end date.');
+      return;
+    }
+    if (editorTimelineEnd < editorTimelineStart) {
+      setAssignError('End date cannot be before the start date.');
+      return;
+    }
+    setAssignError('');
     setShowEditorConfirmation(true);
   };
 
   const handleConfirmEditorAssignment = async () => {
-    if (!selectedEditorId) return;
+    if (!selectedEditorId || !editorTimelineStart || !editorTimelineEnd) return;
     setAssigning(true);
     setAssignError('');
     try {
-      await assignEditor(manuscript.id, selectedEditorId);
+      await assignEditor(manuscript.id, selectedEditorId, editorTimelineStart, editorTimelineEnd);
       onWorkflowChange?.();
       setShowEditorConfirmation(false);
       setSelectedEditorId('');
+      setEditorTimelineStart('');
+      setEditorTimelineEnd('');
     } catch (e: any) {
       setAssignError(e.message || 'Failed to assign editor');
     } finally {
       setAssigning(false);
+    }
+  };
+
+  const handleSendEditorReminder = async () => {
+    if (sendingReminder) return;
+    setSendingReminder(true);
+    setReminderError('');
+    try {
+      await coordinatorSendEditorReminder(manuscript.id);
+      onWorkflowChange?.();
+    } catch (e: any) {
+      setReminderError(e.message || 'Failed to send reminder');
+    } finally {
+      setSendingReminder(false);
     }
   };
 
@@ -251,6 +263,38 @@ export function OverviewTab({
               </p>
             </div>
           </div>
+
+          {/* Module 97 -- Editorial Timeline: the deadline the Coordinator
+              gave the Editor for the first editorial evaluation, plus a
+              manual reminder they can send the assigned Editor about it.
+              Only rendered when the assignment actually has one set (a
+              pre-Module-97 assignment won't). */}
+          {activeEditor.timeline_start_date && activeEditor.timeline_end_date && (
+            <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Editorial Timeline</p>
+                <p className="text-sm text-slate-800">
+                  Start: {formatTimelineDate(activeEditor.timeline_start_date)} &nbsp;&bull;&nbsp; Deadline: {formatTimelineDate(activeEditor.timeline_end_date)}
+                </p>
+                {activeEditor.last_reminder_sent_at && (
+                  <p className="text-xs text-slate-400 mt-1">Last reminder sent {new Date(activeEditor.last_reminder_sent_at).toLocaleString()}</p>
+                )}
+              </div>
+              <div>
+                <button
+                  type="button"
+                  onClick={handleSendEditorReminder}
+                  disabled={sendingReminder || activeEditor.assessment_status === 'SUBMITTED'}
+                  title={activeEditor.assessment_status === 'SUBMITTED' ? 'Evaluation already submitted -- no reminder needed' : 'Send a reminder to the assigned Editor'}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {sendingReminder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bell className="w-3.5 h-3.5" />}
+                  {sendingReminder ? 'Sending...' : 'Send Reminder'}
+                </button>
+                {reminderError && <p className="mt-1.5 text-xs font-semibold text-red-600">{reminderError}</p>}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -407,11 +451,14 @@ export function OverviewTab({
         )}
       </div>
 
-      {/* Next Action Required Card */}
+      {/* Next Action Required Card -- hidden once the Coordinator has
+          already sent the reviewer pool to the Editor; nothing is left for
+          the Coordinator to do until the Editor picks their 2. */}
+      {!(awaitingReviewerPoolSend && reviewerPoolSent) && (
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6">
         <h3 className="text-sm font-black text-blue-900 mb-3">Next Action Required</h3>
         <p className="text-sm text-blue-800 mb-4">
-          {getNextAction(manuscript.status, activeEditor, reviewerAssignments, evaluationSubmitted)}
+          {getNextAction(manuscript.status, activeEditor, reviewerAssignments, evaluationSubmitted, readyToInviteReviewers)}
         </p>
 
         {manuscript.status === 'SUBMITTED' ? (
@@ -422,26 +469,49 @@ export function OverviewTab({
             {availableEditors.length === 0 ? (
               <p className="text-xs text-blue-700">No active editor accounts available to assign.</p>
             ) : (
-              <div className="flex items-center gap-2">
-                <select
-                  value={selectedEditorId}
-                  onChange={(e) => setSelectedEditorId(e.target.value)}
-                  disabled={assigning}
-                  className="flex-1 border border-blue-300 rounded-lg px-3 py-2 text-xs bg-white"
-                >
-                  <option value="">-- Select Editor --</option>
-                  {availableEditors.map((ed) => (
-                    <option key={ed.id} value={ed.id}>{ed.name} ({ed.email})</option>
-                  ))}
-                </select>
-                <button
-                  onClick={handleAssignEditorClick}
-                  disabled={!selectedEditorId || assigning}
-                  className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2"
-                >
-                  {assigning && <Loader2 className="w-3 h-3 animate-spin" />}
-                  {assigning ? 'Assigning...' : 'Assign Editor'}
-                </button>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedEditorId}
+                    onChange={(e) => setSelectedEditorId(e.target.value)}
+                    disabled={assigning}
+                    className="flex-1 border border-blue-300 rounded-lg px-3 py-2 text-xs bg-white"
+                  >
+                    <option value="">-- Select Editor --</option>
+                    {availableEditors.map((ed) => (
+                      <option key={ed.id} value={ed.id}>{ed.name} ({ed.email})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] font-semibold text-blue-800 shrink-0">Editorial Timeline</label>
+                  <input
+                    type="date"
+                    value={editorTimelineStart}
+                    onChange={(e) => setEditorTimelineStart(e.target.value)}
+                    disabled={assigning}
+                    title="Start date"
+                    className="border border-blue-300 rounded-lg px-3 py-2 text-xs bg-white"
+                  />
+                  <span className="text-xs text-blue-700">to</span>
+                  <input
+                    type="date"
+                    value={editorTimelineEnd}
+                    min={editorTimelineStart || undefined}
+                    onChange={(e) => setEditorTimelineEnd(e.target.value)}
+                    disabled={assigning}
+                    title="End date (deadline)"
+                    className="border border-blue-300 rounded-lg px-3 py-2 text-xs bg-white"
+                  />
+                  <button
+                    onClick={handleAssignEditorClick}
+                    disabled={!selectedEditorId || !editorTimelineStart || !editorTimelineEnd || assigning}
+                    className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {assigning && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {assigning ? 'Assigning...' : 'Assign Editor'}
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -451,76 +521,18 @@ export function OverviewTab({
               onClick={() => onGoToTab?.(getNextActionTab(manuscript.status, activeEditor, evaluationSubmitted))}
               className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition"
             >
-              {getNextActionButton(manuscript.status, activeEditor, reviewerAssignments, evaluationSubmitted)}
+              {getNextActionButton(manuscript.status, activeEditor, reviewerAssignments, evaluationSubmitted, readyToInviteReviewers)}
             </button>
           </div>
         )}
       </div>
-
-      {/* Reviewer Pool Card -- a separate action from assigning the Editor.
-          The Coordinator can set/adjust this any time up until the Editor
-          has actually used it to select their 2 reviewers. */}
-      {canManageReviewerPool && availableReviewersForPool.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-1">Available Reviewers for the Editor</h3>
-          <p className="text-xs text-slate-500 mb-4">
-            Select which reviewers the assigned Editor may choose from during their reviewer-selection step, then click Assign Reviewers. This is independent of assigning the Editor -- the Editor's reviewer-selection step will wait until you send this list.
-          </p>
-
-          {reviewerPoolError && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-3 mb-3">{reviewerPoolError}</div>
-          )}
-
-          <div className="space-y-1.5 max-h-56 overflow-y-auto mb-4">
-            {availableReviewersForPool.map((r) => {
-              const isChecked = selectedPoolReviewerIds.includes(r.id);
-              const focusArea = r.metadata?.specialization || r.metadata?.expertise || '—';
-              return (
-                <label
-                  key={r.id}
-                  className={`flex items-center justify-between gap-2 p-2 border rounded-lg text-left cursor-pointer transition ${
-                    isChecked ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => togglePoolReviewer(r.id)}
-                      disabled={assigningReviewers}
-                    />
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-slate-900 truncate">{r.name}</p>
-                      <p className="text-[11px] text-slate-500 truncate">{r.email} • {focusArea}</p>
-                    </div>
-                  </div>
-                </label>
-              );
-            })}
-          </div>
-
-          {reviewerPoolSuccess ? (
-            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Assigned
-            </span>
-          ) : (
-            <button
-              onClick={handleAssignReviewersClick}
-              disabled={assigningReviewers}
-              className="px-4 py-2 bg-slate-800 text-white text-xs font-bold rounded-lg hover:bg-slate-900 transition disabled:opacity-50 flex items-center gap-2"
-            >
-              {assigningReviewers && <Loader2 className="w-3 h-3 animate-spin" />}
-              {assigningReviewers ? 'Assigning...' : `Assign ${selectedPoolReviewerIds.length > 0 ? selectedPoolReviewerIds.length + ' ' : ''}Reviewer${selectedPoolReviewerIds.length === 1 ? '' : 's'}`}
-            </button>
-          )}
-        </div>
       )}
 
       <AssignmentConfirmationDialog
         isOpen={showEditorConfirmation}
         title="Confirm Editor Assignment"
         message="Do you confirm the assignment of this editor to review this manuscript?"
+        details={editorTimelineStart && editorTimelineEnd ? `Editorial Timeline: ${formatTimelineDate(editorTimelineStart)} - ${formatTimelineDate(editorTimelineEnd)}` : undefined}
         editorName={selectedEditorId ? profiles[selectedEditorId]?.name : undefined}
         editorEmail={selectedEditorId ? profiles[selectedEditorId]?.email : undefined}
         confirmText="Confirm Assign"
@@ -536,7 +548,7 @@ export function OverviewTab({
   );
 }
 
-function getNextAction(status: string, editor: any, reviewers: any[], evaluationSubmitted: boolean): string {
+function getNextAction(status: string, editor: any, reviewers: any[], evaluationSubmitted: boolean, readyToInviteReviewers: boolean = false): string {
   switch (status) {
     case 'SUBMITTED':
       return 'Assign an editor to begin the review process.';
@@ -544,7 +556,8 @@ function getNextAction(status: string, editor: any, reviewers: any[], evaluation
       if (!editor) return 'Waiting for editor assignment.';
       if (editor.status !== 'ACCEPTED') return 'Waiting for editor to accept the assignment.';
       if (!evaluationSubmitted) return 'Waiting for editor to complete their evaluation.';
-      return 'Ready to assign peer reviewers.';
+      if (readyToInviteReviewers) return 'Editor selected reviewers -- confirm and send invitations.';
+      return 'Ready to send available reviewers to the Editor.';
     case 'UNDER_REVIEW':
       const accepted = reviewers.filter(r => r.status === 'ACCEPTED').length;
       const submitted = reviewers.filter(r => r.status === 'SUBMITTED').length;
@@ -579,7 +592,7 @@ function getNextActionTab(status: string, editor: any, evaluationSubmitted: bool
   }
 }
 
-function getNextActionButton(status: string, editor: any, reviewers: any[], evaluationSubmitted: boolean): string {
+function getNextActionButton(status: string, editor: any, reviewers: any[], evaluationSubmitted: boolean, readyToInviteReviewers: boolean = false): string {
   switch (status) {
     case 'SUBMITTED':
       return 'Assign Editor';
@@ -587,7 +600,8 @@ function getNextActionButton(status: string, editor: any, reviewers: any[], eval
       if (!editor || editor.status !== 'ACCEPTED' || !evaluationSubmitted) {
         return 'View Editor Evaluation';
       }
-      return 'Assign Reviewers';
+      if (readyToInviteReviewers) return 'Send Invitations';
+      return 'Send to Editor';
     case 'UNDER_REVIEW':
       return 'View Review Board';
     case 'AWAITING_DECISION':

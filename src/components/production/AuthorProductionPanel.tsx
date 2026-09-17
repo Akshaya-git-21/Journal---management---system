@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Eye, Download, CheckCircle2, AlertTriangle, Upload } from 'lucide-react';
 import {
-  ProductionRow, ProofRow, CorrectionRow,
-  getProduction, getProofs, getCorrections,
+  ProductionRow, ProofRow, CorrectionRow, ProofReviewRow,
+  getProduction, getProofs, getCorrections, getProofReviews,
   authorOpenProof, authorApproveProof, authorSubmitCorrections, authorFinalReviewProof,
   uploadCorrectionAttachment
 } from '../../lib/production';
+import { ManuscriptFileRow, getRevisions, getRevisionFiles, getManuscriptFiles } from '../../lib/workflow';
 
 function formatDate(iso: string | null | undefined) {
   if (!iso) return '--';
@@ -40,6 +41,8 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
   const [production, setProduction] = useState<ProductionRow | null>(null);
   const [proofs, setProofs] = useState<ProofRow[]>([]);
   const [corrections, setCorrections] = useState<CorrectionRow[]>([]);
+  const [reviews, setReviews] = useState<ProofReviewRow[]>([]);
+  const [acceptedFiles, setAcceptedFiles] = useState<ManuscriptFileRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -52,10 +55,11 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
 
   const load = async () => {
     try {
-      const [prod, pf, corr] = await Promise.all([getProduction(manuscriptId), getProofs(manuscriptId), getCorrections(manuscriptId)]);
+      const [prod, pf, corr, rv] = await Promise.all([getProduction(manuscriptId), getProofs(manuscriptId), getCorrections(manuscriptId), getProofReviews(manuscriptId)]);
       setProduction(prod);
       setProofs(pf);
       setCorrections(corr);
+      setReviews(rv);
       if (prod?.production_status === 'PROOF_SENT_TO_AUTHOR') {
         await authorOpenProof(manuscriptId);
         const refreshed = await getProduction(manuscriptId);
@@ -68,7 +72,19 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
     }
   };
 
-  useEffect(() => { load(); }, [manuscriptId]);
+  useEffect(() => {
+    load();
+    // The document that led to ACCEPTED -- same source as the Editor's and
+    // GD Member's own "Final Accepted Manuscript" sections.
+    getRevisions(manuscriptId)
+      .then((revisions) => {
+        const latestRevision = revisions.length > 0 ? revisions[revisions.length - 1] : null;
+        return latestRevision ? getRevisionFiles(latestRevision.id) : getManuscriptFiles(manuscriptId);
+      })
+      .then((files) => setAcceptedFiles(files.filter((f) => f.file_type?.toLowerCase().includes('manuscript'))))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manuscriptId]);
 
   if (loading) return <div className="flex items-center justify-center py-16 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading production status...</div>;
 
@@ -87,9 +103,18 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
   const inCorrection = !awaitingReview && !awaitingFinalReview && (
     status === 'CORRECTIONS_SUBMITTED' || status === 'PRODUCTION_REVIEW' ||
     status === 'CLARIFICATION_REQUESTED' || status === 'CORRECTIONS_IN_PROGRESS' ||
-    status === 'EDITOR_CORRECTIONS_REQUESTED' || status === 'AUTHOR_FINAL_CORRECTIONS_REQUESTED'
+    status === 'EDITOR_CORRECTIONS_REQUESTED' || status === 'AUTHOR_FINAL_CORRECTIONS_REQUESTED' ||
+    status === 'AUTHOR_FINAL_CORRECTIONS_SUBMITTED' || status === 'AUTHOR_FINAL_CORRECTIONS_UNDER_EDITOR_REVIEW' ||
+    status === 'AUTHOR_FINAL_RETURN_PENDING_SEND' || status === 'AUTHOR_FINAL_MOVE_TO_GD_PENDING_SEND'
   );
   const latestCorrection = corrections.find((c) => c.proof_version === production?.current_proof_version) || null;
+  // Module 93 -- when the Editor sends the correction request back rather
+  // than moving it to the GD Member, their note is what the Author sees as
+  // the reason it came back on the same proof version.
+  const returnedByEditor = awaitingFinalReview
+    ? reviews.find((r) => r.reviewer_role === 'EDITOR' && r.decision === 'RETURNED_TO_AUTHOR'
+        && r.proof_version === production?.current_proof_version && !r.superseded_at) || null
+    : null;
 
   const submitCorrections = async () => {
     if (!comments.trim()) { setError('Comments are required to submit Proof Corrections.'); return; }
@@ -177,11 +202,30 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
 
       {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700 flex items-center gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /> {error}</div>}
 
+      {acceptedFiles.length > 0 && (
+        <div className="rounded-lg border border-slate-200 p-4">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Final Accepted Manuscript</p>
+          <div className="space-y-2">
+            {acceptedFiles.map((f) => (
+              <div key={f.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3.5 py-2.5 text-sm">
+                <p className="font-semibold text-slate-800">{f.file_name}</p>
+                {f.public_url && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a href={f.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-3.5 h-3.5" /> View</a>
+                    <a href={f.public_url} download className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Download className="w-3.5 h-3.5" /> Download</a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {!production || production.production_status === 'NOT_STARTED' ? (
         <p className="text-slate-500 leading-relaxed">Your manuscript will move into production shortly after acceptance.</p>
       ) : !latestProof || status === 'IN_PRODUCTION' || status === 'COPYEDITING' || status === 'FORMATTING' || status === 'TYPESETTING' ? (
         <p className="text-slate-500 leading-relaxed">Your manuscript is currently being prepared for production (copyediting, formatting, typesetting). You&rsquo;ll be notified once your proof is ready for review.</p>
-      ) : status === 'AUTHOR_APPROVED' || status === 'AUTHOR_FINAL_APPROVED' || status === 'READY_FOR_PUBLICATION' ? (
+      ) : status === 'AUTHOR_APPROVED' || status === 'AUTHOR_FINAL_APPROVED' || status === 'AUTHOR_FINAL_APPROVED_UNDER_EDITOR_REVIEW' || status === 'READY_FOR_PUBLICATION' ? (
         <div className="space-y-4">
           <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-700 font-medium flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 shrink-0" /> You gave final approval on Proof v{latestProof.version}. Both editorial and your final approval are in -- it is ready for publication.
@@ -227,14 +271,21 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
         <div className="space-y-5">
           {inCorrection ? (
             <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl leading-relaxed text-amber-900">
-              <strong className="block font-bold text-sm mb-1">In Correction</strong>
+              <strong className="block font-bold text-sm mb-1">Correction Requested</strong>
               <span className="text-sm">The requested corrections are with the production team. You&rsquo;ll be notified once an updated proof is ready.</span>
             </div>
           ) : awaitingFinalReview ? (
-            <div className="bg-[#eefcf4] border border-emerald-100 p-4 rounded-xl leading-relaxed text-[#004d2e]">
-              <strong className="block text-[#004d2b] font-bold text-sm mb-1">Editor-Approved Proof — Final Review</strong>
-              <span className="text-sm">The editorial team has approved this proof. Please give your final confirmation before it moves to publication.</span>
-            </div>
+            returnedByEditor ? (
+              <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl leading-relaxed text-amber-900">
+                <strong className="block font-bold text-sm mb-1">Editor's Response to Your Correction Request</strong>
+                <span className="text-sm whitespace-pre-wrap">{returnedByEditor.comments}</span>
+              </div>
+            ) : (
+              <div className="bg-[#eefcf4] border border-emerald-100 p-4 rounded-xl leading-relaxed text-[#004d2e]">
+                <strong className="block text-[#004d2b] font-bold text-sm mb-1">Editor-Approved Proof — Final Review</strong>
+                <span className="text-sm">The editorial team has approved this proof. Please give your final confirmation before it moves to publication.</span>
+              </div>
+            )
           ) : (
             <div className="bg-[#eefcf4] border border-emerald-100 p-4 rounded-xl leading-relaxed text-[#004d2e]">
               <strong className="block text-[#004d2b] font-bold text-sm mb-1">Final Proof Available</strong>

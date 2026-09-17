@@ -82,7 +82,7 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
   // Publisher was seeing every manuscript any Publisher had been assigned.
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<Tab>('QUEUE');
+  const [activeTab, setActiveTab] = useState<Tab>('SCHEDULED');
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [contributors, setContributors] = useState<ContributorRow[]>([]);
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);

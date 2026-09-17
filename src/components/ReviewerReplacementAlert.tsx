@@ -63,6 +63,12 @@ export const ReviewerReplacementAlert: React.FC<Props> = ({
   const mostRecentDecline = getReviewerNeedingReplacement(reviewerAssignments, manuscriptStatus, pendingReplacementCount);
   const needsReplacement = !!mostRecentDecline;
 
+  // Never re-offer a reviewer who has already declined this manuscript --
+  // the picker was showing every active Reviewer Board account, including
+  // ones already known not to want it.
+  const declinedReviewerIds = new Set(reviewerAssignments.filter(r => r.status === 'DECLINED').map(r => r.reviewer_id));
+  const availableReviewers = reviewers.filter(r => !declinedReviewerIds.has(r.id));
+
   // Re-render every minute so the countdown stays accurate without a
   // frontend-only timer driving the actual deadline (that's still the DB
   // timestamp -- this just refreshes the display).
@@ -192,8 +198,10 @@ export const ReviewerReplacementAlert: React.FC<Props> = ({
             <div className="max-h-40 overflow-y-auto space-y-1.5 border border-slate-200 rounded-lg p-2">
               {reviewers.length === 0 ? (
                 <p className="text-xs text-slate-500 py-2 text-center">Loading Reviewer Board...</p>
+              ) : availableReviewers.length === 0 ? (
+                <p className="text-xs text-slate-500 py-2 text-center">No other reviewers available.</p>
               ) : (
-                reviewers.map(r => (
+                availableReviewers.map(r => (
                   <button
                     key={r.id}
                     type="button"

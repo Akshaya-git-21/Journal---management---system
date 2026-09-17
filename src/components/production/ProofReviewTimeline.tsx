@@ -22,6 +22,7 @@ function decisionLabel(decision: ProofReviewRow['decision']) {
     case 'APPROVED': return 'Approved';
     case 'CORRECTIONS_REQUESTED': return 'Corrections Requested';
     case 'OVERRIDE': return 'Override';
+    case 'RETURNED_TO_AUTHOR': return 'Returned to Author';
     default: return decision;
   }
 }

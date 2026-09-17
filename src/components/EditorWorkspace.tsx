@@ -43,6 +43,15 @@ import EditorProductionVerification from './production/EditorProductionVerificat
 import { getProduction, getCorrections, subscribeToProduction, ProductionRow, CorrectionRow } from '../lib/production';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 
+/** Module 97 -- "12 Sep 2026" style formatting for the Editorial Timeline.
+ * Appends a local midnight time so a plain YYYY-MM-DD date column doesn't
+ * shift a day backward in negative-UTC-offset timezones (new Date('2026-09-12')
+ * parses as UTC midnight, which toLocaleDateString can then roll back). */
+function formatTimelineDate(iso: string | null | undefined): string {
+  if (!iso) return '--';
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 /** Which Editor tab a given notification type should land on -- e.g.
  * REVIEWS_READY_FOR_DECISION means the Coordinator just released both peer
  * reviews, so clicking that notification should open straight to the
@@ -120,7 +129,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   const [rows, setRows] = useState<EditorManuscriptDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
-  const [pendingTab, setPendingTab] = useState<'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | null>(null);
+  const [pendingTab, setPendingTab] = useState<'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | 'production' | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     submissions: true,
@@ -504,7 +513,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   );
 }
 
-function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onOpen: (id: string, tab?: 'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments') => void }) {
+function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onOpen: (id: string, tab?: 'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | 'production') => void }) {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -552,10 +561,19 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
             const reviewsReady = !isRevisionSubmitted && !editorDecisionIsFresh && details.manuscript.status === 'AWAITING_DECISION'
               && details.reviewers.length > 0 && details.reviewers.every((rv) => rv.status === 'SUBMITTED');
             const awaitingCoordinator = !isRevisionSubmitted && editorDecisionIsFresh && details.manuscript.status === 'AWAITING_DECISION';
+            // Once accepted, the manuscript moves into production/proofreading
+            // -- nothing left on the peer-review side, so open straight to the
+            // Production Verification screen instead of the default Status tab.
+            const inProofreading = details.manuscript.status === 'ACCEPTED';
             return (
-              <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id, isRevisionSubmitted ? 'status' : reviewsReady ? 'reviews' : undefined)}>
+              <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id, isRevisionSubmitted ? 'status' : reviewsReady ? 'reviews' : inProofreading ? 'production' : undefined)}>
                 <td className="px-4 py-3 font-bold text-slate-800">
                   {details.manuscript.title}
+                  {details.assignment.timeline_start_date && details.assignment.timeline_end_date && (
+                    <p className="mt-0.5 text-[11px] font-normal text-slate-500">
+                      Editorial Timeline: {formatTimelineDate(details.assignment.timeline_start_date)} – {formatTimelineDate(details.assignment.timeline_end_date)}
+                    </p>
+                  )}
                   {reviewsReady && (
                     <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold uppercase tracking-wide align-middle">
                       Reviewers Submitted
@@ -582,8 +600,8 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
                   )}
                 </td>
                 <td className="px-4 py-3 text-xs font-bold text-slate-600">{details.assignment.status}</td>
-                <td className={`px-4 py-3 text-right font-bold text-xs ${isRevisionSubmitted ? 'text-indigo-600' : reviewsReady ? 'text-emerald-600' : awaitingCoordinator ? 'text-slate-500' : 'text-[#008751]'}`}>
-                  {isRevisionSubmitted ? 'Review Revision →' : reviewsReady ? 'Reviews Ready →' : awaitingCoordinator ? 'Pending Decision →' : 'Open →'}
+                <td className={`px-4 py-3 text-right font-bold text-xs ${isRevisionSubmitted ? 'text-indigo-600' : reviewsReady ? 'text-emerald-600' : awaitingCoordinator ? 'text-slate-500' : inProofreading ? 'text-emerald-600' : 'text-[#008751]'}`}>
+                  {isRevisionSubmitted ? 'Review Revision →' : reviewsReady ? 'Reviews Ready →' : awaitingCoordinator ? 'Pending Decision →' : inProofreading ? 'Review Proofreading →' : 'Open →'}
                 </td>
               </tr>
             );
@@ -643,13 +661,15 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
  * the Editor stage a suggestion pick alongside pool picks (any mix, freely
  * toggleable) and only commit both together via the single Confirm button
  * below, instead of each list submitting independently. */
-function ReviewerSelectionWithAuthorSuggestions({ manuscriptId, suggestedReviewers, onSubmitSuccess, children }: {
+function ReviewerSelectionWithAuthorSuggestions({ manuscriptId, suggestedReviewers, onSubmitSuccess, reviewerAssignments, profiles, children }: {
   manuscriptId: string;
   suggestedReviewers: SuggestedReviewerRow[];
   onSubmitSuccess: () => void;
+  reviewerAssignments?: ReviewerAssignmentRow[];
+  profiles?: Map<string, { email: string }>;
   children: (state: ReturnType<typeof useEditorReviewerSelection>) => ReactNode;
 }) {
-  const state = useEditorReviewerSelection({ manuscriptId, suggestedReviewers, onSubmitSuccess });
+  const state = useEditorReviewerSelection({ manuscriptId, suggestedReviewers, onSubmitSuccess, reviewerAssignments, profiles });
   return (
     <>
       <ReviewerSelectionList {...state} />
@@ -659,7 +679,7 @@ function ReviewerSelectionWithAuthorSuggestions({ manuscriptId, suggestedReviewe
   );
 }
 
-function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab, onInitialTabConsumed }: { details: EditorManuscriptDetails; onBack: () => void; onChanged: () => void; currentUser?: { name: string; email: string; role: Role } | null; initialTab?: 'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | null; onInitialTabConsumed?: () => void }) {
+function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab, onInitialTabConsumed }: { details: EditorManuscriptDetails; onBack: () => void; onChanged: () => void; currentUser?: { name: string; email: string; role: Role } | null; initialTab?: 'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | 'production' | null; onInitialTabConsumed?: () => void }) {
   const { manuscript, assignment, reviewers: initialReviewerAssignments } = details;
   const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>(initialReviewerAssignments || []);
   const [busy, setBusy] = useState(false);
@@ -696,7 +716,10 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
   // the parent clear the request so navigating away and back doesn't keep
   // forcing the same tab.
   useEffect(() => {
-    if (initialTab) {
+    if (initialTab === 'production') {
+      setSidebarSection('production');
+      onInitialTabConsumed?.();
+    } else if (initialTab) {
       setSidebarSection('dashboard');
       setActiveTab(initialTab);
       onInitialTabConsumed?.();
@@ -1189,7 +1212,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                   }
                   if (!evaluationDone) return 'Complete your editorial screening evaluation.';
                   if (readyToSelectReviewers) return 'Select 2 reviewers to begin peer review.';
-                  if (editorHasSuggestedReviewers && manuscript.status === 'EDITOR_REVIEW') return 'Reviewers selected -- waiting for the Coordinator to send invitations.';
+                  if (editorHasSuggestedReviewers && manuscript.status === 'EDITOR_REVIEW') return 'Reviewers selected -- awaiting invitation.';
                   if (isRevisionReviewPage) return `Revision ${revisionN} is ready for your review.`;
                   if (isPeerReviewRound && !hasRequiredReviews) return 'Waiting for reviewers to submit their reports.';
                   if (isPeerReviewRound && hasRequiredReviews && !manuscript.reviews_released_at) return 'Reviews are in -- waiting for the Coordinator to send them to you.';
@@ -1259,6 +1282,18 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                           )}
                           <p className="text-sm text-slate-600 mt-1">{getStatusDescription()}</p>
                         </div>
+
+                        {/* Module 97 -- Editorial Timeline: the deadline the
+                            Coordinator set for the first editorial
+                            evaluation, visible here so the Editor doesn't
+                            need to hunt for it elsewhere. */}
+                        {assignment.timeline_start_date && assignment.timeline_end_date && (
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Editorial Timeline</p>
+                            <p className="text-sm font-semibold text-slate-800">Start: {formatTimelineDate(assignment.timeline_start_date)}</p>
+                            <p className="text-sm font-semibold text-slate-800">Deadline: {formatTimelineDate(assignment.timeline_end_date)}</p>
+                          </div>
+                        )}
 
                         {pendingProductionVerification && (
                           <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
@@ -1587,12 +1622,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                             Pending Invitation
                           </span>
                         </div>
-                        <p className="text-xs text-slate-500 italic mt-3">Selected as a replacement reviewer -- awaiting the Coordinator to send the invitation.</p>
+                        <p className="text-xs text-slate-500 italic mt-3">Selected as a replacement reviewer -- awaiting invitation.</p>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet. Reviewer assignment is handled by the Coordinator.</div>
+                  <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet.</div>
                 )}
               </div>
               );
@@ -1687,6 +1722,8 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                       manuscriptId={manuscript.id}
                       suggestedReviewers={details.suggestedReviewers || []}
                       onSubmitSuccess={onChanged}
+                      reviewerAssignments={reviewerAssignments}
+                      profiles={details.profiles}
                     >
                       {renderAuthorSuggestionsCard}
                     </ReviewerSelectionWithAuthorSuggestions>
@@ -2421,7 +2458,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                     })()}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet. Reviewer assignment is handled by the Coordinator.</div>
+                  <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet.</div>
                 )}
               </div>
             )}
@@ -2691,6 +2728,8 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                   manuscriptId={manuscript.id}
                   suggestedReviewers={details.suggestedReviewers || []}
                   onSubmitSuccess={onChanged}
+                  reviewerAssignments={reviewerAssignments}
+                  profiles={details.profiles}
                 />
               ) : (
                 <div className="bg-white border border-slate-200 rounded-2xl p-6">

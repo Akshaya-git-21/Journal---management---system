@@ -69,13 +69,34 @@ export async function getEditorAssignedManuscripts(editorId: string): Promise<Ed
     if (assignError) throw new Error(assignError.message);
     if (!assignments || assignments.length === 0) return [];
 
+    // A manuscript can carry more than one editor_assignments row for the
+    // SAME editor (e.g. declined once, then reassigned to them again later)
+    // -- without deduping, both rows produced separate list entries keyed by
+    // the same manuscript.id, which React can't tell apart (duplicate-key
+    // warning) and which broke clicking that row entirely. Keep only the one
+    // assignment per manuscript that's actually current: prefer ACCEPTED,
+    // then INVITED, then (only if every row is DECLINED) the most recent
+    // DECLINED one so a fully-declined manuscript doesn't just vanish.
+    const statusRank: Record<string, number> = { ACCEPTED: 0, INVITED: 1, DECLINED: 2 };
+    const latestByManuscript = new Map<string, typeof assignments[number]>();
+    for (const a of assignments) {
+      const existing = latestByManuscript.get(a.manuscript_id);
+      if (!existing) { latestByManuscript.set(a.manuscript_id, a); continue; }
+      const existingRank = statusRank[existing.status] ?? 3;
+      const rank = statusRank[a.status] ?? 3;
+      if (rank < existingRank || (rank === existingRank && a.assigned_at > existing.assigned_at)) {
+        latestByManuscript.set(a.manuscript_id, a);
+      }
+    }
+    const dedupedAssignments = Array.from(latestByManuscript.values());
+
     // Each assignment's own data is independent of every other assignment's,
     // so fetch them all concurrently instead of one at a time -- with a
     // couple dozen assignments (each doing ~8 queries), the old sequential
     // for-loop took several seconds per refresh, which made the UI look
     // stuck on the old screen after a successful action even though the
     // write had already succeeded and a refetch was already in flight.
-    const settled = await Promise.all(assignments.map(async (assignment): Promise<EditorManuscriptDetails | null> => {
+    const settled = await Promise.all(dedupedAssignments.map(async (assignment): Promise<EditorManuscriptDetails | null> => {
       try {
         const manuscript = await getManuscript(assignment.manuscript_id);
         if (!manuscript) return null;

@@ -15,6 +15,12 @@ import {
   FileText, Lock, Eye, History, Star, BarChart3, Download, ClipboardCheck, Upload, Trash2
 } from 'lucide-react';
 
+/** Module 98 -- "12 Sep 2026" style formatting for the Review Timeline. */
+function formatTimelineDate(iso: string | null | undefined): string {
+  if (!iso) return '--';
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 const PEER_REVIEW_QUESTIONS: { id: string; label: string; question: string }[] = [
   { id: 'focus_scope_relevance', label: 'Focus, Scope, and Relevance', question: 'Does this manuscript explicitly match the research parameters and technical domain of this journal?' },
   { id: 'theoretical_novelty', label: 'Theoretical Novelty', question: 'Does the study introduce distinct data insights, experimental approaches, or practical advancements that set it apart from prior publications?' },
@@ -370,12 +376,12 @@ function ManuscriptList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
                   <p className="text-emerald-700 font-bold flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> Double-Blind Seal Active</p>
                 </div>
                 <div>
-                  <p className="text-slate-500 font-semibold mb-1">Assigned Date</p>
-                  <p className="text-slate-900 font-bold">{assignment.assigned_at ? new Date(assignment.assigned_at).toLocaleDateString() : 'N/A'}</p>
+                  <p className="text-slate-500 font-semibold mb-1">Review Timeline Start</p>
+                  <p className="text-slate-900 font-bold">{assignment.timeline_start_date ? formatTimelineDate(assignment.timeline_start_date) : (assignment.invited_at ? new Date(assignment.invited_at).toLocaleDateString() : 'N/A')}</p>
                 </div>
                 <div>
                   <p className="text-slate-500 font-semibold mb-1">Due Date</p>
-                  <p className="text-red-700 font-bold">{assignment.due_at ? new Date(assignment.due_at).toLocaleDateString() : 'TBD'}</p>
+                  <p className="text-red-700 font-bold">{assignment.due_date ? formatTimelineDate(assignment.due_date) : 'TBD'}</p>
                 </div>
               </div>
             </div>
@@ -386,8 +392,9 @@ function ManuscriptList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
                   invitation -- see Phase 2 spec ("Reviewer login shows
                   manuscript info only... before accepting"). Found live: this
                   download button ignored that and was clickable while still
-                  INVITED. */}
-              {assignment.status !== 'INVITED' && (
+                  INVITED, and stayed clickable even after DECLINED -- a
+                  declined reviewer should see only title/abstract too. */}
+              {assignment.status !== 'INVITED' && assignment.status !== 'DECLINED' && (
                 <button
                   onClick={(e) => handleDownload(e, manuscript.id)}
                   disabled={downloading === manuscript.id}
@@ -501,8 +508,8 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
   useEffect(() => {
     // The manuscript PDF is only unlocked once the invitation is accepted
     // (see spec: "Do not show the manuscript PDF ... before the reviewer
-    // accepts the invitation").
-    if (assignment.status === 'INVITED') return;
+    // accepts the invitation") -- and locked again if they decline it.
+    if (assignment.status === 'INVITED' || assignment.status === 'DECLINED') return;
 
     // getManuscriptFiles() only ever returns the ORIGINAL submission's files
     // (revision_id is null). Once the author has submitted ANY revision --
@@ -585,9 +592,20 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
             </div>
           </div>
         </div>
+
+        {/* Module 98 -- Review Timeline, shown right here so the Reviewer
+            doesn't need to open another page to find it. */}
+        {assignment.timeline_start_date && assignment.due_date && (
+          <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Review Timeline</p>
+            <p className="text-sm font-semibold text-slate-800">Start: {formatTimelineDate(assignment.timeline_start_date)}</p>
+            <p className="text-sm font-semibold text-slate-800">Deadline: {formatTimelineDate(assignment.due_date)}</p>
+          </div>
+        )}
+
         <p className="text-sm text-slate-600 leading-relaxed">{manuscript.abstract}</p>
 
-        {assignment.status !== 'INVITED' && (
+        {assignment.status !== 'INVITED' && assignment.status !== 'DECLINED' && (
           <div className="mt-5 pt-5 border-t border-slate-100">
             <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">
               File{files.length !== 1 ? 's' : ''} ({files.length})

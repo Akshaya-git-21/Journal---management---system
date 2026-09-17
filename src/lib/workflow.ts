@@ -38,6 +38,14 @@ export interface EditorAssignmentRow {
   assessment_submitted_at: string | null;
   recommendation: ReviewerRecommendation | null;
   recommendation_submitted_at: string | null;
+  /** Module 97 -- the deadline the Coordinator set for the Editor's first
+   * editorial evaluation, visible to both roles. Null for assignments made
+   * before this module. */
+  timeline_start_date: string | null;
+  timeline_end_date: string | null;
+  /** Module 97 -- when the Coordinator last sent a manual reminder about
+   * the pending evaluation. Null until the first reminder is sent. */
+  last_reminder_sent_at: string | null;
 }
 
 export interface ScreeningResponse {
@@ -55,6 +63,13 @@ export interface ReviewerAssignmentRow {
   invited_at: string;
   responded_at: string | null;
   due_date: string | null;
+  /** Module 98 -- the deadline the Coordinator set when sending this
+   * reviewer's invitation, visible to both the Coordinator and the
+   * Reviewer. Null for assignments made before this module. */
+  timeline_start_date: string | null;
+  /** Module 98 -- when the Coordinator last sent a manual reminder about
+   * this pending review. Null until the first reminder is sent. */
+  last_reminder_sent_at: string | null;
   recommendation: ReviewerRecommendation | null;
   comments_to_author: string | null;
   comments_to_editor: string | null;
@@ -121,8 +136,15 @@ function rpcOrThrow<T>(promise: PromiseLike<{ data: T; error: any }>): Promise<T
 export const submitManuscript = (manuscriptId: string) =>
   rpcOrThrow(supabase.rpc('submit_manuscript', { p_manuscript_id: manuscriptId }));
 
-export const assignEditor = (manuscriptId: string, editorId: string) =>
-  rpcOrThrow(supabase.rpc('assign_editor', { p_manuscript_id: manuscriptId, p_editor_id: editorId }));
+export const assignEditor = (manuscriptId: string, editorId: string, startDate: string, endDate: string) =>
+  rpcOrThrow(supabase.rpc('assign_editor', { p_manuscript_id: manuscriptId, p_editor_id: editorId, p_start_date: startDate, p_end_date: endDate }));
+
+/** Coordinator-only (Module 97): manual reminder to the assigned Editor
+ * about the pending first editorial evaluation -- refuses server-side once
+ * already submitted. See coordinator_send_editor_reminder() in
+ * 0097_editorial_timeline_and_reminder.sql. */
+export const coordinatorSendEditorReminder = (manuscriptId: string) =>
+  rpcOrThrow<EditorAssignmentRow>(supabase.rpc('coordinator_send_editor_reminder', { p_manuscript_id: manuscriptId }));
 
 export interface ManuscriptReviewerPoolRow {
   manuscript_id: string;
@@ -212,11 +234,11 @@ export type CoordinatorAcceptResult =
   | { status: 'ASSIGNED'; action: EditorReviewerActionRow }
   | { status: 'NEEDS_ACCOUNT'; suggestion_id: string; name: string; email: string; note: string | null };
 
-export const coordinatorAcceptSuggestion = (suggestionId: string) =>
-  rpcOrThrow<CoordinatorAcceptResult>(supabase.rpc('coordinator_accept_suggestion', { p_suggestion_id: suggestionId }));
+export const coordinatorAcceptSuggestion = (suggestionId: string, startDate: string, endDate: string) =>
+  rpcOrThrow<CoordinatorAcceptResult>(supabase.rpc('coordinator_accept_suggestion', { p_suggestion_id: suggestionId, p_start_date: startDate, p_end_date: endDate }));
 
-export const coordinatorFinalizeReviewerSuggestion = (suggestionId: string, reviewerId: string) =>
-  rpcOrThrow<EditorReviewerActionRow>(supabase.rpc('coordinator_finalize_reviewer_suggestion', { p_suggestion_id: suggestionId, p_reviewer_id: reviewerId }));
+export const coordinatorFinalizeReviewerSuggestion = (suggestionId: string, reviewerId: string, startDate: string, endDate: string) =>
+  rpcOrThrow<EditorReviewerActionRow>(supabase.rpc('coordinator_finalize_reviewer_suggestion', { p_suggestion_id: suggestionId, p_reviewer_id: reviewerId, p_start_date: startDate, p_end_date: endDate }));
 
 export const coordinatorReactivateReviewer = (profileId: string) =>
   rpcOrThrow<ProfileRow>(supabase.rpc('coordinator_reactivate_reviewer', { p_profile_id: profileId }));
@@ -255,8 +277,15 @@ export const editorSelectAuthorSuggestion = (suggestionId: string) =>
  * reviewer on this manuscript in one action. Manuscript status stays
  * EDITOR_REVIEW until both reviewers accept -- see respond_to_review_invite()
  * in 0026_editor_reviewer_selection.sql. */
-export const coordinatorSendReviewerInvitations = (manuscriptId: string) =>
-  rpcOrThrow<ReviewerAssignmentRow[]>(supabase.rpc('coordinator_send_reviewer_invitations', { p_manuscript_id: manuscriptId }));
+export const coordinatorSendReviewerInvitations = (manuscriptId: string, startDate: string, endDate: string) =>
+  rpcOrThrow<ReviewerAssignmentRow[]>(supabase.rpc('coordinator_send_reviewer_invitations', { p_manuscript_id: manuscriptId, p_start_date: startDate, p_end_date: endDate }));
+
+/** Coordinator-only (Module 98): manual reminder to a specific reviewer
+ * about their pending review -- refuses server-side once submitted or
+ * declined. See coordinator_send_reviewer_reminder() in
+ * 0098_reviewer_timeline_and_reminder.sql. */
+export const coordinatorSendReviewerReminder = (reviewerAssignmentId: string) =>
+  rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('coordinator_send_reviewer_reminder', { p_reviewer_assignment_id: reviewerAssignmentId }));
 
 /** Editor-only: selects a single replacement reviewer for a declined slot,
  * within the 2-day replacement window. See editor_select_replacement_reviewer()
@@ -334,8 +363,16 @@ export const notifyExpiredReviewerReplacements = () =>
  * replacement RPCs (coordinator_assign_reviewer_directly,
  * coordinator_replace_suggestion) only work at EDITOR_REVIEW. See
  * coordinator_replace_reviewer() in 0024_coordinator_replace_declined_reviewer.sql. */
-export const coordinatorReplaceReviewer = (declinedAssignmentId: string, replacementReviewerId: string) =>
-  rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('coordinator_replace_reviewer', { p_declined_assignment_id: declinedAssignmentId, p_replacement_reviewer_id: replacementReviewerId }));
+export const coordinatorReplaceReviewer = (declinedAssignmentId: string, replacementReviewerId: string, startDate: string, endDate: string) =>
+  rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('coordinator_replace_reviewer', { p_declined_assignment_id: declinedAssignmentId, p_replacement_reviewer_id: replacementReviewerId, p_start_date: startDate, p_end_date: endDate }));
+
+/** Coordinator-only (Module 100): "Notify Editor" nudge once a reviewer has
+ * declined -- doesn't change any routing, just pushes a notification so the
+ * Editor knows to choose a replacement. See
+ * coordinator_notify_editor_reviewer_declined() in
+ * 0100_coordinator_notify_editor_reviewer_declined.sql. */
+export const coordinatorNotifyEditorReviewerDeclined = (manuscriptId: string, reviewerName?: string) =>
+  rpcOrThrow(supabase.rpc('coordinator_notify_editor_reviewer_declined', { p_manuscript_id: manuscriptId, p_reviewer_name: reviewerName ?? null }));
 
 /** Coordinator-only: forwards a submitted revision (manuscript_revisions.status
  * = 'REVISION_SUBMITTED') to the assigned editor for re-review. See

@@ -87,6 +87,11 @@ interface OjsSubmissionDetailProps {
    * own "Submit Revision" button opens -- only relevant while the
    * manuscript is REVISION_REQUESTED. */
   onSubmitRevision?: () => void;
+  /** Which workflow tab to open on first render -- defaults to 'SUBMISSION'.
+   * Lets the Manuscript Queue's "Review Proofreading" button land straight
+   * on the 'production' tab (AuthorProductionPanel) instead of requiring an
+   * extra click once inside the detail page. */
+  initialTab?: string;
 }
 
 // Predefined OJS templates
@@ -113,10 +118,11 @@ export default function OjsSubmissionDetail({
   onBack,
   onUpdatePaperDiscussions,
   currentUser,
-  onSubmitRevision
+  onSubmitRevision,
+  initialTab
 }: OjsSubmissionDetailProps) {
   // Navigation tabs within submission view
-  const [activeTab, setActiveTab] = useState<string>('SUBMISSION');
+  const [activeTab, setActiveTab] = useState<string>(initialTab || 'SUBMISSION');
   const [activeFileDropdown, setActiveFileDropdown] = useState<boolean>(false);
   const [editingFileName, setEditingFileName] = useState<string>(paper.fileName || `${paper.title || 'test'}-publication.pdf`);
   const [showFileEditModal, setShowFileEditModal] = useState<boolean>(false);

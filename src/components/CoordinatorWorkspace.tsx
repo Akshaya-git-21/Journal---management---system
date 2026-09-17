@@ -11,6 +11,7 @@ import {
   notifyExpiredReviewerReplacements
 } from '../lib/workflow';
 import { getManuscriptStatusLabel, getLatestRevision, getRevisionMeta, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
+import { listProduction, subscribeToProduction } from '../lib/production';
 import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
@@ -42,8 +43,8 @@ const STAGE_TABS: { key: string; label: string; predicate: (m: ManuscriptRow) =>
   { key: 'DONE', label: 'Resolved', predicate: (m) => ['ACCEPTED', 'PUBLISHED', 'REJECTED', 'REVISION_REQUESTED'].includes(m.status) },
 ];
 
-function StatusBadge({ manuscript, latestRevision }: { manuscript: ManuscriptRow; latestRevision?: RevisionRow | null }) {
-  const label = getManuscriptStatusLabel(manuscript, latestRevision);
+function StatusBadge({ manuscript, latestRevision, productionStatus }: { manuscript: ManuscriptRow; latestRevision?: RevisionRow | null; productionStatus?: string | null }) {
+  const label = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
   const revisionMeta = getRevisionMeta(latestRevision);
   const style = STANDARD_STATUS_COLORS[label as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT;
   return (
@@ -70,6 +71,12 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const [recentActivity, setRecentActivity] = useState<StatusHistoryRow[]>([]);
   const [overdueReviews, setOverdueReviews] = useState<OverdueReviewRow[]>([]);
   const [activityProfiles, setActivityProfiles] = useState<Record<string, ProfileRow>>({});
+  // manuscript_id -> production_status, so the Manuscript Queue's status
+  // badge reflects the actual proof/review sub-stage (PROOFREADING vs
+  // PRODUCTION PREPARATION vs IN PUBLISH) instead of the coarse legacy
+  // production_stage field alone -- same overlay getManuscriptStatusLabel()
+  // already applies everywhere else (Author/Editor/GD queues).
+  const [productionByManuscript, setProductionByManuscript] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('ALL');
   const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'PUBLISHERS' | 'GD_MEMBERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS' | 'PRODUCTION_QUEUE' | 'IN_PRODUCTION' | 'PROOFS_AWAITING_AUTHOR' | 'CORRECTIONS' | 'READY_FOR_PUBLICATION' | 'PDF_TEMPLATE'>('DASHBOARD');
@@ -364,7 +371,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
 
   const load = async () => {
     try {
-      const [rows, approvals, editors, reviewers, publishers, gdMembers, activity, overdue] = await Promise.all([
+      const [rows, approvals, editors, reviewers, publishers, gdMembers, activity, overdue, production] = await Promise.all([
         listManuscripts(),
         listPendingApprovals(),
         listActiveProfilesByRole('EDITOR'),
@@ -373,7 +380,9 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
         listActiveProfilesByRole('GD_MEMBER'),
         getRecentStatusHistory(8),
         getOverdueReviewerAssignments(),
+        listProduction(),
       ]);
+      setProductionByManuscript(Object.fromEntries(production.map((p) => [p.manuscript_id, p.production_status])));
       // A manuscript stays DRAFT until the author actually clicks Submit
       // (Save Draft alone creates one) -- Coordinators should never see it
       // before then. RLS also enforces this server-side (see
@@ -404,6 +413,16 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   useEffect(() => {
     load();
     const unsubscribe = subscribeToManuscripts(load);
+    return unsubscribe;
+  }, []);
+
+  // production_status lives in a separate table (manuscript_production) --
+  // subscribeToManuscripts() above only fires on the manuscripts table
+  // itself, so without this the queue's status badge would go stale the
+  // moment a manuscript moves through the proof/review loop without also
+  // touching manuscripts.
+  useEffect(() => {
+    const unsubscribe = subscribeToProduction(load);
     return unsubscribe;
   }, []);
 
@@ -526,6 +545,7 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
                   tab={tab}
                   setTab={setTab}
                   stageCounts={stageCounts}
+                  productionByManuscript={productionByManuscript}
                 />
               )
             ) : isEditorialBoardSection ? (
@@ -769,7 +789,7 @@ function formatDate(iso: string | null) {
   return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function QueueTable({ items, onOpen }: { items: ManuscriptRow[]; onOpen: (id: string) => void }) {
+function QueueTable({ items, onOpen, productionByManuscript }: { items: ManuscriptRow[]; onOpen: (id: string) => void; productionByManuscript?: Record<string, string> }) {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const totalPages = Math.ceil(items.length / itemsPerPage);
@@ -800,7 +820,7 @@ function QueueTable({ items, onOpen }: { items: ManuscriptRow[]; onOpen: (id: st
                 <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.id}</td>
                 <td className="px-4 py-3 font-bold text-slate-800 max-w-xs truncate">{m.title}</td>
                 <td className="px-4 py-3 text-slate-600 text-xs">{m.author_name}</td>
-                <td className="px-4 py-3"><StatusBadge manuscript={m} /></td>
+                <td className="px-4 py-3"><StatusBadge manuscript={m} productionStatus={productionByManuscript?.[m.id]} /></td>
                 <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(m.submitted_at)}</td>
                 <td className="px-4 py-3 text-right text-[#008751] font-bold text-xs">Open &rarr;</td>
               </tr>
@@ -1477,7 +1497,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
   );
 }
 
-function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onOpen, onRefresh, tab, setTab, stageCounts }: { items: ManuscriptRow[]; filtered: ManuscriptRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onOpen: (id: string | null) => void; onRefresh: () => void; tab: string; setTab: (value: string) => void; stageCounts?: { all: number; submitted: number; editorReview: number; underReview: number; awaitingDecision: number; done: number }; }) {
+function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onOpen, onRefresh, tab, setTab, stageCounts, productionByManuscript }: { items: ManuscriptRow[]; filtered: ManuscriptRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onOpen: (id: string | null) => void; onRefresh: () => void; tab: string; setTab: (value: string) => void; stageCounts?: { all: number; submitted: number; editorReview: number; underReview: number; awaitingDecision: number; done: number }; productionByManuscript?: Record<string, string>; }) {
   const getStageCount = (stageKey: string) => {
     if (!stageCounts) return 0;
     switch (stageKey) {
@@ -1538,7 +1558,7 @@ function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onO
       {loading ? (
         <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>
       ) : (
-        <QueueTable items={filtered} onOpen={onOpen} />
+        <QueueTable items={filtered} onOpen={onOpen} productionByManuscript={productionByManuscript} />
       )}
     </>
   );

@@ -48,6 +48,10 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   const [error, setError] = useState('');
   const [view, setView] = useState<'list' | 'new' | 'detail' | 'discussion' | 'revision'>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Which tab OjsSubmissionDetail should open on -- set when "Review
+  // Proofreading" is clicked so it lands straight on the production tab
+  // instead of the default submission overview.
+  const [detailInitialTab, setDetailInitialTab] = useState<string | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState({ submissions: true });
@@ -666,9 +670,10 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           {view === 'detail' && selected && (
             <OjsSubmissionDetail
               paper={selected}
-              onBack={() => { setView('list'); setSelectedId(null); }}
+              onBack={() => { setView('list'); setSelectedId(null); setDetailInitialTab(undefined); }}
               currentUser={currentUser}
               onSubmitRevision={() => setView('revision')}
+              initialTab={detailInitialTab}
             />
           )}
 
@@ -788,6 +793,20 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                               </div>
                             </td>
                             <td className="px-6 py-4 space-x-2 whitespace-nowrap">
+                              {/* Review Proofreading -- straight to the production
+                                  tab (AuthorProductionPanel) instead of requiring
+                                  View then a second click once inside. Same
+                                  visibility condition as OjsSubmissionDetail's own
+                                  "View Proofreading" button (accepted + production
+                                  actually started). */}
+                              {m.status === 'ACCEPTED' && productionByManuscript[m.id] && productionByManuscript[m.id] !== 'NOT_STARTED' && (
+                                <button
+                                  onClick={() => { setSelectedId(m.id); setDetailInitialTab('production'); setView('detail'); }}
+                                  className="rounded border border-emerald-300 bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-200 transition"
+                                >
+                                  Review Proofreading
+                                </button>
+                              )}
                               {m.status === 'DRAFT' ? (
                                 <button
                                   onClick={() => setView('new')}

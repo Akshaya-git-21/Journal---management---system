@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Eye, Download, Loader2, Send, Check, History } from 'lucide-react';
 import {
   ProductionRow, ProofRow, CorrectionRow, ProofReviewRow,
-  getProduction, getProofs, getCorrections, getProofReviews, subscribeToProduction, editorReviewProof
+  getProduction, getProofs, getCorrections, getProofReviews, subscribeToProduction, editorReviewProof, editorReviewAuthorCorrections,
+  editorReviewAuthorFinalApproval
 } from '../../lib/production';
-import { ProfileRow, getProfilesByIds } from '../../lib/workflow';
+import { ProfileRow, ManuscriptFileRow, getProfilesByIds, getRevisions, getRevisionFiles, getManuscriptFiles } from '../../lib/workflow';
 
 function formatDate(iso: string | null | undefined) {
   if (!iso) return '--';
@@ -26,10 +27,15 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
   const [loading, setLoading] = useState(true);
   const [feedbackDraft, setFeedbackDraft] = useState('');
   const [mode, setMode] = useState<'idle' | 'correcting'>('idle');
+  // Module 93 -- the Editor's comment on the Author's Final Review
+  // correction request, shared between the "Move to GD" and "Return to
+  // Author" actions.
+  const [authorCorrectionsDraft, setAuthorCorrectionsDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [gdMemberProfile, setGdMemberProfile] = useState<ProfileRow | null>(null);
+  const [acceptedFiles, setAcceptedFiles] = useState<ManuscriptFileRow[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,10 +52,22 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     load();
+    // The document that led to ACCEPTED -- same source as
+    // GDMemberProductionDetail.tsx's "Final Accepted Manuscript" section:
+    // the latest revision's files if this manuscript went through any
+    // revision cycles, otherwise the original submission files.
+    getRevisions(manuscriptId)
+      .then((revisions) => {
+        const latestRevision = revisions.length > 0 ? revisions[revisions.length - 1] : null;
+        return latestRevision ? getRevisionFiles(latestRevision.id) : getManuscriptFiles(manuscriptId);
+      })
+      .then((files) => { if (!cancelled) setAcceptedFiles(files.filter((f) => f.file_type?.toLowerCase().includes('manuscript'))); })
+      .catch(() => {});
     // A fresh round resets the draft/mode so a stale comment from a prior
     // round never carries over into the new one.
     setFeedbackDraft('');
     setMode('idle');
+    setAuthorCorrectionsDraft('');
     const unsubscribe = subscribeToProduction(load);
     return () => { cancelled = true; unsubscribe(); };
   }, [manuscriptId]);
@@ -60,8 +78,18 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
 
   const awaitingReview = production?.production_status === 'PROOF_SENT_TO_EDITOR';
   const awaitingSendToGD = production?.production_status === 'EDITOR_CORRECTIONS_PENDING_SEND';
+  const awaitingAuthorCorrectionsReview = production?.production_status === 'AUTHOR_FINAL_CORRECTIONS_UNDER_EDITOR_REVIEW';
+  const awaitingAuthorFinalReturnSend = production?.production_status === 'AUTHOR_FINAL_RETURN_PENDING_SEND';
+  const awaitingAuthorFinalMoveToGdSend = production?.production_status === 'AUTHOR_FINAL_MOVE_TO_GD_PENDING_SEND';
+  const awaitingFinalPublishDecision = production?.production_status === 'AUTHOR_FINAL_APPROVED_UNDER_EDITOR_REVIEW';
   const sortedProofs = [...proofs].sort((a, b) => b.version - a.version);
   const sortedCorrections = [...corrections].sort((a, b) => b.proof_version - a.proof_version || new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
+  // Module 94, Phase 4 -- once the Editor has approved this manuscript's
+  // proof at least once before, a fresh PROOF_SENT_TO_EDITOR round can only
+  // be a GD correction round from the Author's Final Review sub-loop (the
+  // Phase 1 loop never returns here after an approval) -- so the Editor's
+  // two actions are labeled for that context instead of the first-ever review.
+  const everEditorApproved = reviews.some((r) => r.reviewer_role === 'EDITOR' && r.decision === 'APPROVED');
 
   const submitFeedback = async (decision: 'APPROVE' | 'CORRECTIONS_REQUIRED') => {
     setBusy(true);
@@ -77,7 +105,36 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
     }
   };
 
-  if (!production || (!awaitingReview && !awaitingSendToGD && reviews.length === 0)) {
+  const submitAuthorCorrectionsDecision = async (decision: 'MOVE_TO_GD' | 'RETURN_TO_AUTHOR') => {
+    if (decision === 'RETURN_TO_AUTHOR' && !authorCorrectionsDraft.trim()) {
+      setError('A comment is required to return this to the Author.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await editorReviewAuthorCorrections(manuscriptId, decision, authorCorrectionsDraft);
+      setAuthorCorrectionsDraft('');
+    } catch (e: any) {
+      setError(e?.message || 'Failed to submit your decision');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitFinalPublishDecision = async (decision: 'PUBLISH' | 'MOVE_TO_GD') => {
+    setBusy(true);
+    setError(null);
+    try {
+      await editorReviewAuthorFinalApproval(manuscriptId, decision);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to submit your decision');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!production || (!awaitingReview && !awaitingSendToGD && !awaitingAuthorCorrectionsReview && !awaitingAuthorFinalReturnSend && !awaitingAuthorFinalMoveToGdSend && !awaitingFinalPublishDecision && reviews.length === 0)) {
     return <p className="text-slate-500 text-sm">No proof corrections have been sent for verification yet.</p>;
   }
 
@@ -91,17 +148,59 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
           Your corrections on Proof v{production.current_proof_version} are recorded -- send them to {gdMemberProfile?.name || 'the GD Member'} to action.
         </div>
+      ) : awaitingAuthorCorrectionsReview ? (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+          The Author requested corrections on Proof v{production.current_proof_version} -- review below.
+        </div>
+      ) : awaitingAuthorFinalReturnSend ? (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+          Your response is recorded -- the Coordinator will forward it to the Author.
+        </div>
+      ) : awaitingAuthorFinalMoveToGdSend ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700 flex items-center gap-1.5">
+          <Check className="w-3.5 h-3.5 shrink-0" /> Moved to Production.
+        </div>
+      ) : awaitingFinalPublishDecision ? (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+          The Author has given final approval on Proof v{production.current_proof_version} -- publish or move to GD below.
+        </div>
       ) : production.production_status === 'EDITOR_APPROVED' ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700 flex items-center gap-1.5">
-          <Check className="w-3.5 h-3.5 shrink-0" /> Approved -- Proof v{production.current_proof_version} awaiting Coordinator to send for Author final review.
+          <Check className="w-3.5 h-3.5 shrink-0" /> Approved -- Proof v{production.current_proof_version} awaiting for Author final review.
         </div>
       ) : production.pending_review_role === 'AUTHOR_FINAL' ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700 flex items-center gap-1.5">
-          <Check className="w-3.5 h-3.5 shrink-0" /> Approved -- Proof v{production.current_proof_version} is with the Author for final review.
+          <Check className="w-3.5 h-3.5 shrink-0" /> Proof v{production.current_proof_version} is sent for author.
+        </div>
+      ) : production.production_status === 'AUTHOR_FINAL_CORRECTIONS_REQUESTED' ? (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+          Proof v{production.current_proof_version} is sent to GD.
         </div>
       ) : (
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
           Nothing is currently awaiting your review. {production.pending_review_role === 'AUTHOR_FIRST' ? 'The Author is reviewing the current proof.' : 'The GD Member is preparing a new version.'}
+        </div>
+      )}
+
+      {acceptedFiles.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 p-4">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Final Accepted Manuscript</p>
+          <div className="space-y-2">
+            {acceptedFiles.map((f) => (
+              <div key={f.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+                <div>
+                  <p className="font-semibold text-slate-800">{f.file_name}</p>
+                  <p className="text-xs text-slate-400">Uploaded {formatDate(f.uploaded_at)}</p>
+                </div>
+                {f.public_url && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a href={f.public_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Eye className="w-3.5 h-3.5" /> View</a>
+                    <a href={f.public_url} download className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Download className="w-3.5 h-3.5" /> Download</a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -142,11 +241,13 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
         )}
       </div>
 
-      <div className="rounded-2xl border border-slate-200 p-4">
-        <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Author Corrections</p>
-        {sortedCorrections.length === 0 ? (
-          <p className="text-sm text-slate-400">No corrections submitted yet.</p>
-        ) : (
+      {sortedCorrections.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 p-4">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">
+            {sortedCorrections.every((c) => c.correction_source === 'EDITOR') ? 'Editor Corrections'
+              : sortedCorrections.every((c) => c.correction_source === 'AUTHOR') ? 'Author Corrections'
+              : 'Corrections'}
+          </p>
           <div className="space-y-2">
             {sortedCorrections.map((c) => (
               <div key={c.id} className="rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm space-y-1.5">
@@ -168,8 +269,8 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {awaitingReview && (
         <div className="rounded-2xl border-2 border-slate-900 bg-slate-50 p-4 space-y-3">
@@ -210,24 +311,82 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
                 className="inline-flex items-center gap-1 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40"
                 title="Sends this proof to the Author for Final Review -- does not publish it directly."
               >
-                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Approve / Publish
+                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} {everEditorApproved ? 'Send to Author for final confirmation' : 'Approve / Publish'}
               </button>
               <button
                 disabled={busy}
                 onClick={() => setMode('correcting')}
                 className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
               >
-                Corrections Required
+                {everEditorApproved ? 'Move to GD' : 'Corrections Required'}
               </button>
             </div>
           )}
-          <p className="text-[11px] text-slate-400">"Approve / Publish" sends this proof to the Author for final review -- it does not publish the article directly.</p>
+          <p className="text-[11px] text-slate-400">
+            {everEditorApproved
+              ? '"Send to Author for final confirmation" sends this proof to the Author -- it does not publish the article directly.'
+              : '"Approve / Publish" sends this proof to the Author for final review -- it does not publish the article directly.'}
+          </p>
         </div>
       )}
 
       {awaitingSendToGD && (
         <div className="rounded-2xl border border-slate-200 p-4 space-y-1">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Sent for Correction</p>
+        </div>
+      )}
+
+      {awaitingAuthorCorrectionsReview && (
+        <div className="rounded-2xl border-2 border-slate-900 bg-slate-50 p-4 space-y-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Author's Correction Request</p>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <textarea
+            value={authorCorrectionsDraft}
+            onChange={(e) => setAuthorCorrectionsDraft(e.target.value)}
+            placeholder="Add a comment (required to Return to Author; optional if moving to the GD Member)..."
+            rows={3}
+            autoFocus
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#008751]"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              disabled={busy}
+              onClick={() => submitAuthorCorrectionsDecision('MOVE_TO_GD')}
+              className="inline-flex items-center gap-1 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40"
+            >
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Move to GD
+            </button>
+            <button
+              disabled={busy || !authorCorrectionsDraft.trim()}
+              onClick={() => submitAuthorCorrectionsDecision('RETURN_TO_AUTHOR')}
+              className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+            >
+              Return to Author
+            </button>
+          </div>
+        </div>
+      )}
+
+      {awaitingFinalPublishDecision && (
+        <div className="rounded-2xl border-2 border-slate-900 bg-slate-50 p-4 space-y-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Final Publish Decision</p>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              disabled={busy}
+              onClick={() => submitFinalPublishDecision('PUBLISH')}
+              className="inline-flex items-center gap-1 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] disabled:opacity-40"
+            >
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Publish
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => submitFinalPublishDecision('MOVE_TO_GD')}
+              className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+            >
+              Move to GD
+            </button>
+          </div>
         </div>
       )}
 

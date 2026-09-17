@@ -37,7 +37,9 @@ function stepIndex(status: string | undefined, gdWorkStatus?: string) {
     case 'CORRECTIONS_IN_PROGRESS': case 'FINAL_PROOF_READY':
     case 'PROOF_SENT_TO_EDITOR': case 'EDITOR_CORRECTIONS_REQUESTED': case 'EDITOR_CORRECTIONS_PENDING_SEND': case 'PROOF_READY_FOR_EDITOR': return 6;
     case 'AUTHOR_APPROVED': case 'EDITOR_APPROVED': case 'PROOF_SENT_TO_AUTHOR_FINAL': case 'AUTHOR_FINAL_CORRECTIONS_REQUESTED':
-    case 'AUTHOR_FINAL_APPROVED': case 'SENT_TO_GD_FOR_FINALIZE': return 7;
+    case 'AUTHOR_FINAL_CORRECTIONS_SUBMITTED': case 'AUTHOR_FINAL_CORRECTIONS_UNDER_EDITOR_REVIEW':
+    case 'AUTHOR_FINAL_RETURN_PENDING_SEND': case 'AUTHOR_FINAL_MOVE_TO_GD_PENDING_SEND':
+    case 'AUTHOR_FINAL_APPROVED': case 'AUTHOR_FINAL_APPROVED_UNDER_EDITOR_REVIEW': case 'SENT_TO_GD_FOR_FINALIZE': return 7;
     case 'READY_FOR_PUBLICATION': case 'PUBLISHED': return 8;
     default: return 0;
   }
@@ -627,14 +629,19 @@ export default function GDMemberProductionDetail({ manuscriptId, onBack, onOpenP
              Editor. Kept visible here permanently (not just while it's the
              active/unresolved round) so navigating back to an earlier
              sidebar tab (e.g. Corrections) for a manuscript that has since
-             moved forward still shows this history, not an empty page. The
-             round tied to the current proof version is still highlighted in
-             red as the one needing action; earlier, already-superseded
-             rounds render muted with a "Resolved" badge. */}
+             moved forward still shows this history, not an empty page. Only
+             the single newest correction (getCorrections() already orders
+             newest-first, so corrections[0]) is highlighted in red as the
+             one needing action -- multiple correction entries can share the
+             same proof_version (e.g. several back-and-forth notes before the
+             GD Member has uploaded a new version), and highlighting all of
+             them was misleading. Everything else renders muted with a
+             "Resolved" badge. */}
           {corrections.length > 0 && (
             <div className="space-y-3">
               {corrections.map((c) => {
-                const isActive = c.proof_version === production?.current_proof_version
+                const isActive = c.id === corrections[0].id
+                  && c.proof_version === production?.current_proof_version
                   && ['CORRECTIONS_IN_PROGRESS', 'EDITOR_CORRECTIONS_REQUESTED', 'AUTHOR_FINAL_CORRECTIONS_REQUESTED'].includes(status || '');
                 const proofAtRound = proofs.find((p) => p.version === c.proof_version) || proofs[0];
                 return (

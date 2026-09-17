@@ -62,6 +62,12 @@ const PROOFREADING_PRODUCTION_STATUSES = new Set([
   'EDITOR_APPROVED',
   // Module 80/82 -- Author's final approval waits for the Coordinator to send it to the GD Member, then for the GD Member's "Move to Publish" click.
   'AUTHOR_FINAL_APPROVED', 'SENT_TO_GD_FOR_FINALIZE',
+  // Module 93/94 -- Author's Final Review correction request routes through
+  // the Coordinator and Editor before reaching the GD Member.
+  'AUTHOR_FINAL_CORRECTIONS_SUBMITTED', 'AUTHOR_FINAL_CORRECTIONS_UNDER_EDITOR_REVIEW',
+  'AUTHOR_FINAL_RETURN_PENDING_SEND', 'AUTHOR_FINAL_MOVE_TO_GD_PENDING_SEND',
+  // Module 96 -- the Editor's final Publish/Move-to-GD decision.
+  'AUTHOR_FINAL_APPROVED_UNDER_EDITOR_REVIEW',
 ]);
 
 /**
