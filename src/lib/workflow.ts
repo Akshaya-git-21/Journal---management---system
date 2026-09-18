@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { ManuscriptStatus, ReviewerRecommendation } from '../types';
+import { isReviewerOverdue } from './reviewerStatus';
 export type { ReviewerRecommendation };
 
 /**
@@ -70,6 +71,11 @@ export interface ReviewerAssignmentRow {
   /** Module 98 -- when the Coordinator last sent a manual reminder about
    * this pending review. Null until the first reminder is sent. */
   last_reminder_sent_at: string | null;
+  /** Module 104 -- when the Coordinator explicitly requested a replacement
+   * for this reviewer (declined or overdue). Null until requested; required
+   * before the Editor can select a replacement for an overdue (not yet
+   * declined) assignment -- see editor_select_replacement_reviewer(). */
+  replacement_requested_at: string | null;
   recommendation: ReviewerRecommendation | null;
   comments_to_author: string | null;
   comments_to_editor: string | null;
@@ -288,14 +294,11 @@ export const coordinatorSendReviewerReminder = (reviewerAssignmentId: string) =>
   rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('coordinator_send_reviewer_reminder', { p_reviewer_assignment_id: reviewerAssignmentId }));
 
 /** Editor-only: selects a single replacement reviewer for a declined slot,
- * within the 2-day replacement window. See editor_select_replacement_reviewer()
- * in 0027_reviewer_replacement_deadline.sql. */
+ * or (Module 104) an overdue slot the Coordinator has explicitly requested a
+ * replacement for. See editor_select_replacement_reviewer() in
+ * 0104_reviewer_overdue_replacement_flow.sql. */
 export const editorSelectReplacementReviewer = (declinedAssignmentId: string, replacementReviewerId: string) =>
   rpcOrThrow<SuggestedReviewerRow>(supabase.rpc('editor_select_replacement_reviewer', { p_declined_assignment_id: declinedAssignmentId, p_replacement_reviewer_id: replacementReviewerId }));
-
-/** 2-day reviewer-replacement deadline, derived from the declined
- * assignment's real DB timestamp (not a frontend-only timer). */
-export const REPLACEMENT_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
 
 /** Shared by the dashboard-wide and per-manuscript replacement alerts so
  * both agree on when a slot actually needs replacing: manuscript still
@@ -307,13 +310,21 @@ export const REPLACEMENT_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
  * non-declined reviewer assignments AND replacements the Editor has already
  * selected (pending EDITOR suggestions the Coordinator hasn't sent an
  * invitation for yet -- see editor_select_replacement_reviewer() in
- * 0027_reviewer_replacement_deadline.sql). Round-scoped (revision_number) so
- * a decline in one re-review round can never be masked by an earlier round's
- * already-resolved assignments, nor vice versa. Once the Editor picks
- * someone, the alert's job is done; the Coordinator invitation happens
- * separately. Returns the most recently declined assignment IN THE CURRENT
- * ROUND (the one the 2-day window is measured from), or null if no
- * replacement is needed. */
+ * 0104_reviewer_overdue_replacement_flow.sql). Round-scoped (revision_number)
+ * so a decline/overdue in one re-review round can never be masked by an
+ * earlier round's already-resolved assignments, nor vice versa. Once the
+ * Editor picks someone, the alert's job is done; the Coordinator invitation
+ * happens separately.
+ *
+ * Module 104: the Editor is only allowed to act on an overdue (not yet
+ * declined) assignment once the Coordinator has explicitly requested a
+ * replacement for it (replacement_requested_at set) -- there's no more
+ * automatic-after-N-days trigger, so an overdue row without that timestamp
+ * doesn't qualify here even though it IS overdue.
+ *
+ * Returns the most recently actionable assignment in the current round
+ * (declined, by responded_at; or overdue+requested, by
+ * replacement_requested_at), or null if no replacement is needed. */
 export function getReviewerNeedingReplacement(
   reviewerAssignments: ReviewerAssignmentRow[],
   manuscriptStatus: string,
@@ -325,10 +336,15 @@ export function getReviewerNeedingReplacement(
   const roundAssignments = reviewerAssignments.filter(r => (r.revision_number ?? 0) === currentRound);
   const activeCount = roundAssignments.filter(r => r.status !== 'DECLINED').length;
   if (activeCount + pendingReplacementCount >= 2) return null;
-  const declined = roundAssignments
-    .filter(r => r.status === 'DECLINED' && r.responded_at)
-    .sort((a, b) => new Date(b.responded_at!).getTime() - new Date(a.responded_at!).getTime());
-  return declined[0] || null;
+  const isOverdueAndRequested = (r: ReviewerAssignmentRow) => isReviewerOverdue(r) && !!r.replacement_requested_at;
+  const actionable = roundAssignments
+    .filter(r => (r.status === 'DECLINED' && r.responded_at) || isOverdueAndRequested(r))
+    .sort((a, b) => {
+      const aTime = new Date(a.status === 'DECLINED' ? a.responded_at! : a.replacement_requested_at!).getTime();
+      const bTime = new Date(b.status === 'DECLINED' ? b.responded_at! : b.replacement_requested_at!).getTime();
+      return bTime - aTime;
+    });
+  return actionable[0] || null;
 }
 
 /** Unactioned EDITOR-suggested reviewers -- selected by the Editor but not
@@ -358,21 +374,16 @@ export function getPendingEditorSuggestions(
 export const notifyExpiredReviewerReplacements = () =>
   rpcOrThrow<number>(supabase.rpc('notify_expired_reviewer_replacements'));
 
-/** Coordinator-only: replaces a reviewer who declined after the board was
- * already finalized (manuscript status UNDER_REVIEW) -- the pre-finalization
- * replacement RPCs (coordinator_assign_reviewer_directly,
- * coordinator_replace_suggestion) only work at EDITOR_REVIEW. See
- * coordinator_replace_reviewer() in 0024_coordinator_replace_declined_reviewer.sql. */
-export const coordinatorReplaceReviewer = (declinedAssignmentId: string, replacementReviewerId: string, startDate: string, endDate: string) =>
-  rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('coordinator_replace_reviewer', { p_declined_assignment_id: declinedAssignmentId, p_replacement_reviewer_id: replacementReviewerId, p_start_date: startDate, p_end_date: endDate }));
-
-/** Coordinator-only (Module 100): "Notify Editor" nudge once a reviewer has
- * declined -- doesn't change any routing, just pushes a notification so the
- * Editor knows to choose a replacement. See
- * coordinator_notify_editor_reviewer_declined() in
- * 0100_coordinator_notify_editor_reviewer_declined.sql. */
-export const coordinatorNotifyEditorReviewerDeclined = (manuscriptId: string, reviewerName?: string) =>
-  rpcOrThrow(supabase.rpc('coordinator_notify_editor_reviewer_declined', { p_manuscript_id: manuscriptId, p_reviewer_name: reviewerName ?? null }));
+/** Coordinator-only (Module 104): request a replacement for a declined OR
+ * overdue reviewer -- the Coordinator never picks the replacement reviewer
+ * directly anymore, only requests one; the Editor always makes the actual
+ * selection (editorSelectReplacementReviewer). Idempotent -- safe to call
+ * again to re-notify the Editor. Supersedes coordinatorReplaceReviewer() and
+ * coordinatorNotifyEditorReviewerDeclined(). See
+ * coordinator_request_reviewer_replacement() in
+ * 0104_reviewer_overdue_replacement_flow.sql. */
+export const coordinatorRequestReviewerReplacement = (reviewerAssignmentId: string) =>
+  rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('coordinator_request_reviewer_replacement', { p_reviewer_assignment_id: reviewerAssignmentId }));
 
 /** Coordinator-only: forwards a submitted revision (manuscript_revisions.status
  * = 'REVISION_SUBMITTED') to the assigned editor for re-review. See

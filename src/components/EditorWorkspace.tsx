@@ -8,6 +8,8 @@ import {
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
 import { getManuscriptStatusLabel, getRoleAwareStatusLabel, getLatestRevision, getRevisionMeta, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
+import { isReviewerOverdue, getReviewerDisplayStatus } from '../lib/reviewerStatus';
+import { formatTimelineDate } from '../lib/dateFormat';
 import {
   getEditorAssignedManuscripts,
   subscribeToEditorAssignments,
@@ -43,14 +45,6 @@ import EditorProductionVerification from './production/EditorProductionVerificat
 import { getProduction, getCorrections, subscribeToProduction, ProductionRow, CorrectionRow } from '../lib/production';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 
-/** Module 97 -- "12 Sep 2026" style formatting for the Editorial Timeline.
- * Appends a local midnight time so a plain YYYY-MM-DD date column doesn't
- * shift a day backward in negative-UTC-offset timezones (new Date('2026-09-12')
- * parses as UTC midnight, which toLocaleDateString can then roll back). */
-function formatTimelineDate(iso: string | null | undefined): string {
-  if (!iso) return '--';
-  return new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
 
 /** Which Editor tab a given notification type should land on -- e.g.
  * REVIEWS_READY_FOR_DECISION means the Coordinator just released both peer
@@ -152,7 +146,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
     'in-submission-stage': { label: 'In Submission Stage', predicate: (r) => r.assignment.status === 'INVITED' },
     'awaiting-reviews': { label: 'Awaiting Reviews', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' && r.reviewers.some((rv) => rv.status !== 'SUBMITTED') },
     'reviews-submitted': { label: 'Reviews Submitted', predicate: (r) => r.reviewers.length > 0 && r.reviewers.every((rv) => rv.status === 'SUBMITTED') },
-    'reviews-overdue': { label: 'Reviews Overdue', predicate: (r) => r.reviewers.some((rv) => rv.status !== 'SUBMITTED' && !!rv.due_date && new Date(rv.due_date) < new Date()) },
+    'reviews-overdue': { label: 'Reviews Overdue', predicate: (r) => r.reviewers.some((rv) => isReviewerOverdue(rv)) },
     'revisions-submitted': { label: 'Revisions Submitted', predicate: (r) => r.revisions.length > 0 },
     'in-review-stage': { label: 'In Review Stage', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' },
     // Copyediting/production sub-stage lives in manuscript_production,
@@ -1535,13 +1529,15 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                           </div>
                           <div className="text-right">
                             <span className={`inline-flex text-xs font-bold px-2 py-1 rounded ${
-                              ra.status === 'SUBMITTED'
+                              getReviewerDisplayStatus(ra) === 'SUBMITTED'
                                 ? 'bg-emerald-100 text-emerald-700'
+                                : getReviewerDisplayStatus(ra) === 'OVERDUE'
+                                ? 'bg-red-100 text-red-700'
                                 : ra.status === 'ACCEPTED'
                                 ? 'bg-amber-100 text-amber-700'
                                 : 'bg-slate-100 text-slate-700'
                             }`}>
-                              {ra.status || 'Pending'}
+                              {getReviewerDisplayStatus(ra) === 'OVERDUE' ? '🔴 Overdue' : (ra.status || 'Pending')}
                             </span>
                             {ra.submitted_at && (
                               <p className="text-xs text-slate-500 mt-1">{formatDate(ra.submitted_at)}</p>
@@ -2383,13 +2379,15 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                           </div>
                           <div className="text-right">
                             <span className={`inline-flex text-xs font-bold px-2 py-1 rounded ${
-                              ra.status === 'SUBMITTED'
+                              getReviewerDisplayStatus(ra) === 'SUBMITTED'
                                 ? 'bg-emerald-100 text-emerald-700'
+                                : getReviewerDisplayStatus(ra) === 'OVERDUE'
+                                ? 'bg-red-100 text-red-700'
                                 : ra.status === 'ACCEPTED'
                                 ? 'bg-amber-100 text-amber-700'
                                 : 'bg-slate-100 text-slate-700'
                             }`}>
-                              {ra.status || 'Pending'}
+                              {getReviewerDisplayStatus(ra) === 'OVERDUE' ? '🔴 Overdue' : (ra.status || 'Pending')}
                             </span>
                             {ra.submitted_at && (
                               <p className="text-xs text-slate-500 mt-1">{formatDate(ra.submitted_at)}</p>

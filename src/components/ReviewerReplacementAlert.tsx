@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, X, Loader2, CheckCircle, ExternalLink, GripVertical } from 'lucide-react';
-import { ReviewerAssignmentRow, ProfileRow, editorSelectReplacementReviewer, getReviewerNeedingReplacement, REPLACEMENT_WINDOW_MS } from '../lib/workflow';
+import { ReviewerAssignmentRow, ProfileRow, editorSelectReplacementReviewer, getReviewerNeedingReplacement } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
 
 interface Props {
@@ -28,16 +28,6 @@ interface Props {
   pendingReplacementCount?: number;
 }
 
-function formatTimeRemaining(deadline: number): string {
-  const ms = deadline - Date.now();
-  if (ms <= 0) return 'Deadline expired';
-  const days = Math.floor(ms / (24 * 60 * 60 * 1000));
-  if (days >= 2) return `Time remaining: ${days} days`;
-  if (days === 1) return '1 day remaining';
-  const hours = Math.max(1, Math.floor(ms / (60 * 60 * 1000)));
-  return hours <= 6 ? 'Deadline approaching' : `${hours} hours remaining`;
-}
-
 const WIDGET_HEIGHT_PX = 260;
 
 export const ReviewerReplacementAlert: React.FC<Props> = ({
@@ -50,8 +40,6 @@ export const ReviewerReplacementAlert: React.FC<Props> = ({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [, forceTick] = useState(0);
-
   // Draggable anywhere on screen -- defaults to the left side, stacked
   // vertically by stackIndex. Once the user drags it, dragPos overrides the
   // default position permanently for this widget instance.
@@ -68,15 +56,6 @@ export const ReviewerReplacementAlert: React.FC<Props> = ({
   // ones already known not to want it.
   const declinedReviewerIds = new Set(reviewerAssignments.filter(r => r.status === 'DECLINED').map(r => r.reviewer_id));
   const availableReviewers = reviewers.filter(r => !declinedReviewerIds.has(r.id));
-
-  // Re-render every minute so the countdown stays accurate without a
-  // frontend-only timer driving the actual deadline (that's still the DB
-  // timestamp -- this just refreshes the display).
-  useEffect(() => {
-    if (!needsReplacement) return;
-    const id = setInterval(() => forceTick(t => t + 1), 60_000);
-    return () => clearInterval(id);
-  }, [needsReplacement]);
 
   useEffect(() => {
     if (mostRecentDecline) setDismissed(false);
@@ -120,9 +99,6 @@ export const ReviewerReplacementAlert: React.FC<Props> = ({
   };
 
   if (!needsReplacement || dismissed) return null;
-
-  const deadline = new Date(mostRecentDecline.responded_at!).getTime() + REPLACEMENT_WINDOW_MS;
-  const expired = Date.now() > deadline;
 
   const handleSubmit = async () => {
     if (!selectedId) return;
@@ -183,13 +159,8 @@ export const ReviewerReplacementAlert: React.FC<Props> = ({
           </span>
         )}
         <p className="text-sm text-slate-700">
-          {expired
-            ? 'The reviewer replacement deadline has expired. The Coordinator will assign a replacement reviewer from the approved Reviewer Board.'
-            : 'A selected reviewer has declined the invitation. Please select another reviewer from the approved Reviewer Board.'}
+          A reviewer needs replacing. Please select another reviewer from the approved Reviewer Board.
         </p>
-        {!expired && (
-          <p className="text-xs font-bold text-amber-700">{formatTimeRemaining(deadline)}</p>
-        )}
 
         {error && <p className="text-xs text-red-600">{error}</p>}
 
@@ -238,14 +209,12 @@ export const ReviewerReplacementAlert: React.FC<Props> = ({
             </div>
           </div>
         ) : (
-          !expired && (
-            <button
-              onClick={() => setChoosing(true)}
-              className="w-full px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition"
-            >
-              Choose Another Reviewer
-            </button>
-          )
+          <button
+            onClick={() => setChoosing(true)}
+            className="w-full px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition"
+          >
+            Choose Another Reviewer
+          </button>
         )}
       </div>
     </div>

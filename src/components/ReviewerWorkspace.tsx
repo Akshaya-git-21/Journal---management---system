@@ -8,6 +8,8 @@ import {
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
 import { getManuscriptStatusLabel } from '../lib/manuscriptStatusLabel';
+import { isReviewerOverdue } from '../lib/reviewerStatus';
+import { formatTimelineDate } from '../lib/dateFormat';
 import { NavGroup, NavItem } from './SidebarNavGroup';
 import FilePreviewModal from './FilePreviewModal';
 import {
@@ -15,11 +17,6 @@ import {
   FileText, Lock, Eye, History, Star, BarChart3, Download, ClipboardCheck, Upload, Trash2
 } from 'lucide-react';
 
-/** Module 98 -- "12 Sep 2026" style formatting for the Review Timeline. */
-function formatTimelineDate(iso: string | null | undefined): string {
-  if (!iso) return '--';
-  return new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
 
 const PEER_REVIEW_QUESTIONS: { id: string; label: string; question: string }[] = [
   { id: 'focus_scope_relevance', label: 'Focus, Scope, and Relevance', question: 'Does this manuscript explicitly match the research parameters and technical domain of this journal?' },
@@ -351,12 +348,14 @@ function ManuscriptList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) =>
               <div className="flex items-center gap-2 mb-2">
                 <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">{manuscript.id}</span>
                 <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                  isReviewerOverdue(assignment) ? 'bg-red-100 text-red-700' :
                   assignment.status === 'INVITED' ? 'bg-amber-100 text-amber-700' :
                   assignment.status === 'ACCEPTED' ? 'bg-blue-100 text-blue-700' :
                   assignment.status === 'SUBMITTED' ? 'bg-emerald-100 text-emerald-700' :
                   'bg-red-100 text-red-700'
                 }`}>
-                  {assignment.status === 'INVITED' ? (assignment.revision_number > 0 ? `ASSIGNMENT STATUS: REVISION ${assignment.revision_number} - RE-REVIEW` : 'ASSIGNMENT STATUS: INVITED') :
+                  {isReviewerOverdue(assignment) ? '🔴 OVERDUE' :
+                   assignment.status === 'INVITED' ? (assignment.revision_number > 0 ? `ASSIGNMENT STATUS: REVISION ${assignment.revision_number} - RE-REVIEW` : 'ASSIGNMENT STATUS: INVITED') :
                    assignment.status === 'ACCEPTED' ? 'ASSIGNMENT STATUS: ACCEPTED FOR REVIEW' :
                    assignment.status === 'SUBMITTED' ? 'REVIEW SUBMITTED' :
                    'DECLINED'}
@@ -581,12 +580,13 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
               <div>
                 <p className="text-xs text-slate-500 font-semibold">Assignment Status</p>
                 <p className={`text-sm font-bold ${
+                  isReviewerOverdue(assignment) ? 'text-red-700' :
                   assignment.status === 'INVITED' ? 'text-amber-700' :
                   assignment.status === 'ACCEPTED' ? 'text-blue-700' :
                   assignment.status === 'SUBMITTED' ? 'text-emerald-700' :
                   'text-red-700'
                 }`}>
-                  {assignment.status}
+                  {isReviewerOverdue(assignment) ? 'OVERDUE' : assignment.status}
                 </p>
               </div>
             </div>

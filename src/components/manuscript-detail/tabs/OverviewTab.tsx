@@ -1,16 +1,11 @@
 import { useEffect, useState } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, assignEditor, getEditorReviewerActions, getPendingEditorSuggestions, coordinatorSendEditorReminder, getManuscriptReviewerPool } from '../../../lib/workflow';
 import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
+import { getReviewerDisplayStatus } from '../../../lib/reviewerStatus';
+import { formatTimelineDate } from '../../../lib/dateFormat';
 import { getProduction, subscribeToProduction } from '../../../lib/production';
 import { CheckCircle2, Circle, AlertCircle, FileText, Loader2, Bell } from 'lucide-react';
 import { AssignmentConfirmationDialog } from '../../AssignmentConfirmationDialog';
-
-/** Module 97 -- "12 Sep 2026" style formatting for the Editorial Timeline,
- * shared by the assign form's confirmation dialog and the display card. */
-function formatTimelineDate(iso: string | null | undefined): string {
-  if (!iso) return '--';
-  return new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
 
 interface Props {
   manuscript: ManuscriptRow;
@@ -435,15 +430,19 @@ export function OverviewTab({
           <div className="space-y-2 text-sm">
             {reviewerAssignments.map((assignment, idx) => {
               const profile = profiles[assignment.reviewer_id];
+              const displayStatus = getReviewerDisplayStatus(assignment);
               return (
                 <div key={assignment.id} className="flex items-center gap-2 p-2 bg-slate-50 rounded">
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold text-slate-900 truncate">Reviewer {idx + 1}: {profile?.name || 'Unknown'}</p>
-                    <p className="text-xs text-slate-600">{assignment.status}</p>
+                    <p className={`text-xs ${displayStatus === 'OVERDUE' ? 'text-red-600 font-bold' : 'text-slate-600'}`}>
+                      {displayStatus === 'OVERDUE' ? '🔴 Overdue' : displayStatus}
+                    </p>
                   </div>
-                  {assignment.status === 'SUBMITTED' && <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
-                  {assignment.status === 'ACCEPTED' && <Circle className="w-4 h-4 text-blue-600 fill-blue-600 flex-shrink-0" />}
-                  {assignment.status === 'INVITED' && <Circle className="w-4 h-4 text-amber-600 fill-amber-600 flex-shrink-0" />}
+                  {displayStatus === 'SUBMITTED' && <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
+                  {displayStatus === 'ACCEPTED' && <Circle className="w-4 h-4 text-blue-600 fill-blue-600 flex-shrink-0" />}
+                  {displayStatus === 'INVITED' && <Circle className="w-4 h-4 text-amber-600 fill-amber-600 flex-shrink-0" />}
+                  {displayStatus === 'OVERDUE' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
                 </div>
               );
             })}
@@ -554,8 +553,6 @@ function getNextAction(status: string, editor: any, reviewers: any[], evaluation
       return 'Assign an editor to begin the review process.';
     case 'EDITOR_REVIEW':
       if (!editor) return 'Waiting for editor assignment.';
-      if (editor.status !== 'ACCEPTED') return 'Waiting for editor to accept the assignment.';
-      if (!evaluationSubmitted) return 'Waiting for editor to complete their evaluation.';
       if (readyToInviteReviewers) return 'Editor selected reviewers -- confirm and send invitations.';
       return 'Ready to send available reviewers to the Editor.';
     case 'UNDER_REVIEW':
@@ -579,7 +576,7 @@ function getNextAction(status: string, editor: any, reviewers: any[], evaluation
 function getNextActionTab(status: string, editor: any, evaluationSubmitted: boolean): string {
   switch (status) {
     case 'EDITOR_REVIEW':
-      if (!editor || editor.status !== 'ACCEPTED' || !evaluationSubmitted) return 'evaluation';
+      if (!editor) return 'evaluation';
       return 'review-board';
     case 'UNDER_REVIEW':
       return 'reviewers';
@@ -597,9 +594,7 @@ function getNextActionButton(status: string, editor: any, reviewers: any[], eval
     case 'SUBMITTED':
       return 'Assign Editor';
     case 'EDITOR_REVIEW':
-      if (!editor || editor.status !== 'ACCEPTED' || !evaluationSubmitted) {
-        return 'View Editor Evaluation';
-      }
+      if (!editor) return 'View Editor Evaluation';
       if (readyToInviteReviewers) return 'Send Invitations';
       return 'Send to Editor';
     case 'UNDER_REVIEW':

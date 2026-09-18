@@ -4,19 +4,15 @@ import {
   coordinatorAcceptSuggestion, coordinatorDeclineSuggestion, coordinatorReplaceSuggestion,
   getEditorReviewerActions,
   coordinatorFinalizeReviewerSuggestion, approveUserRole, coordinatorReactivateReviewer,
-  coordinatorReplaceReviewer, coordinatorSendReviewerInvitations, REPLACEMENT_WINDOW_MS,
+  coordinatorSendReviewerInvitations,
   coordinatorSetReviewerPool, getManuscriptReviewerPool, coordinatorSendReviewerReminder,
-  coordinatorNotifyEditorReviewerDeclined
+  coordinatorRequestReviewerReplacement
 } from '../../../lib/workflow';
+import { getReviewerDisplayStatus, reviewerNeedsReplacement } from '../../../lib/reviewerStatus';
+import { formatTimelineDate } from '../../../lib/dateFormat';
 import { createReviewerAccount } from '../../../lib/auth';
 import { AlertCircle, Loader2, CheckCircle, Star, XCircle, RefreshCw, UserPlus, Send, Bell } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
-
-/** Module 98 -- "12 Sep 2026" style formatting for the Review Timeline. */
-function formatTimelineDate(iso: string | null | undefined): string {
-  if (!iso) return '--';
-  return new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
 
 const generateTempPassword = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
@@ -62,12 +58,6 @@ export function ReviewBoardTab({
   const [showReplaceModal, setShowReplaceModal] = useState<string | null>(null);
   const [replacementReviewerId, setReplacementReviewerId] = useState<string | null>(null);
   const [sendingInvitations, setSendingInvitations] = useState(false);
-  const [showReplaceDeclinedModal, setShowReplaceDeclinedModal] = useState<string | null>(null);
-  const [declinedReplacementId, setDeclinedReplacementId] = useState<string | null>(null);
-  // Module 101 -- Review Timeline required for a direct replacement too,
-  // same as every other reviewer invitation.
-  const [declinedReplacementStart, setDeclinedReplacementStart] = useState('');
-  const [declinedReplacementEnd, setDeclinedReplacementEnd] = useState('');
 
   // The Coordinator no longer invites reviewers directly from this list --
   // they select candidates and send the list to the Editor, who picks who
@@ -91,12 +81,17 @@ export function ReviewBoardTab({
   const [sendingReminderFor, setSendingReminderFor] = useState<string | null>(null);
   const [reminderError, setReminderError] = useState('');
 
-  // "Notify Editor" once a reviewer has declined -- doesn't change any
-  // routing (the Editor already sees the replacement picker automatically),
-  // just a manual nudge for "they say they never saw it".
-  const [notifyingEditorFor, setNotifyingEditorFor] = useState<string | null>(null);
-  const [notifiedEditorFor, setNotifiedEditorFor] = useState<string | null>(null);
-  const [notifyEditorError, setNotifyEditorError] = useState('');
+  // Module 104 -- "Request Replacement": the Coordinator's only lever once a
+  // reviewer has declined or gone overdue. This never picks the replacement
+  // itself -- it just asks the Editor to (for a decline, the Editor is
+  // already auto-alerted via ReviewerReplacementAlert; for overdue, this
+  // click is what unlocks the Editor's picker for that specific row, via
+  // replacement_requested_at).
+  const [requestingReplacementFor, setRequestingReplacementFor] = useState<string | null>(null);
+  // Scoped to the specific assignment the error came from -- a shared string
+  // would render under every reviewer card that needs a replacement, not
+  // just the one that was actually clicked.
+  const [requestReplacementError, setRequestReplacementError] = useState<{ id: string; message: string } | null>(null);
 
   // Accept-a-new-reviewer flow: suggestion accepted but no matching account exists yet
   const [needsAccount, setNeedsAccount] = useState<{ suggestionId: string; name: string; email: string; note: string | null } | null>(null);
@@ -373,42 +368,6 @@ export function ReviewBoardTab({
     }
   };
 
-  // Handle replacing a reviewer who declined after the board was already
-  // finalized (manuscript already UNDER_REVIEW) -- coordinatorAssignReviewerDirectly
-  // and coordinatorReplaceSuggestion only work pre-finalization.
-  const handleReplaceDeclinedReviewer = async (declinedAssignmentId: string) => {
-    if (!declinedReplacementId) {
-      setError('Please select a replacement reviewer');
-      return;
-    }
-    if (!declinedReplacementStart || !declinedReplacementEnd) {
-      setError('Please set a review timeline start and end date.');
-      return;
-    }
-    if (declinedReplacementEnd < declinedReplacementStart) {
-      setError('End date cannot be before the start date.');
-      return;
-    }
-
-    setError('');
-    setProcessing(declinedAssignmentId);
-
-    try {
-      await coordinatorReplaceReviewer(declinedAssignmentId, declinedReplacementId, declinedReplacementStart, declinedReplacementEnd);
-      setShowReplaceDeclinedModal(null);
-      setDeclinedReplacementId(null);
-      setDeclinedReplacementStart('');
-      setDeclinedReplacementEnd('');
-      setSuccess('Replacement reviewer invited');
-      setTimeout(() => setSuccess(''), 3000);
-      onDataChange();
-    } catch (e: any) {
-      setError(e.message || 'Failed to replace reviewer');
-    } finally {
-      setProcessing(null);
-    }
-  };
-
   // Handle sending invitations for the 2 reviewers the Editor selected
   // (via "Move to Next Stage") -- a single action instead of Accept-ing
   // each suggestion individually. See coordinator_send_reviewer_invitations()
@@ -458,17 +417,17 @@ export function ReviewBoardTab({
     }
   };
 
-  const handleNotifyEditorReviewerDeclined = async (reviewerAssignmentId: string, reviewerName?: string) => {
-    if (notifyingEditorFor) return;
-    setNotifyEditorError('');
-    setNotifyingEditorFor(reviewerAssignmentId);
+  const handleRequestReplacement = async (reviewerAssignmentId: string) => {
+    if (requestingReplacementFor) return;
+    setRequestReplacementError(null);
+    setRequestingReplacementFor(reviewerAssignmentId);
     try {
-      await coordinatorNotifyEditorReviewerDeclined(manuscript.id, reviewerName);
-      setNotifiedEditorFor(reviewerAssignmentId);
+      await coordinatorRequestReviewerReplacement(reviewerAssignmentId);
+      onDataChange();
     } catch (e: any) {
-      setNotifyEditorError(e.message || 'Failed to notify the Editor');
+      setRequestReplacementError({ id: reviewerAssignmentId, message: e.message || 'Failed to request a replacement' });
     } finally {
-      setNotifyingEditorFor(null);
+      setRequestingReplacementFor(null);
     }
   };
 
@@ -809,36 +768,38 @@ export function ReviewBoardTab({
             {reviewerAssignments.map((assignment, idx) => {
               const reviewer = profiles[assignment.reviewer_id];
               const isDeclined = assignment.status === 'DECLINED';
-              // At EDITOR_REVIEW, replacing is the Editor's job for the first
-              // 2 days after a decline (see ReviewerReplacementAlert.tsx) --
-              // the Coordinator only steps in as a fallback once that
-              // deadline has passed. At UNDER_REVIEW (peer review already
-              // started), the Coordinator could always replace immediately;
-              // unchanged from 0024.
-              const replacementDeadlinePassed = !!assignment.responded_at &&
-                Date.now() - new Date(assignment.responded_at).getTime() > REPLACEMENT_WINDOW_MS;
-              const canReplace = isDeclined && (
-                manuscript.status === 'UNDER_REVIEW' ||
-                (manuscript.status === 'EDITOR_REVIEW' && replacementDeadlinePassed)
-              );
-              const awaitingEditorReplacement = isDeclined && manuscript.status === 'EDITOR_REVIEW' && !replacementDeadlinePassed;
+              const displayStatus = getReviewerDisplayStatus(assignment);
+              const isOverdue = displayStatus === 'OVERDUE';
+              // Module 104: the Coordinator never picks a replacement
+              // reviewer directly anymore, for a decline OR an overdue
+              // reviewer -- the only action available is requesting one from
+              // the Editor, who always makes the actual selection (either
+              // via the auto-surfaced ReviewerReplacementAlert for a
+              // decline, or after this request unlocks it for an overdue
+              // row).
+              const needsReplacement = reviewerNeedsReplacement(assignment);
+              const replacementRequested = !!assignment.replacement_requested_at;
+              const statusColor = isDeclined ? 'text-red-700' : isOverdue ? 'text-red-700' : 'text-emerald-700';
               return (
-                <div key={assignment.id} className={`border rounded-lg p-4 ${isDeclined ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                <div key={assignment.id} className={`border rounded-lg p-4 ${isDeclined || isOverdue ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="font-semibold text-slate-900">{reviewer?.name}</p>
                       <p className="text-xs text-slate-600">{reviewer?.email}</p>
-                      <p className={`text-xs mt-1 font-bold ${isDeclined ? 'text-red-700' : 'text-emerald-700'}`}>Status: {assignment.status}</p>
+                      <p className={`text-xs mt-1 font-bold ${statusColor}`}>Status: {isOverdue ? '🔴 Overdue' : displayStatus}</p>
                       {isDeclined && assignment.decline_reason && (
                         <p className="text-xs text-slate-600 mt-1"><span className="font-bold text-red-700">Reason:</span> {assignment.decline_reason}</p>
                       )}
                     </div>
-                    {isDeclined ? <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" /> : <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />}
+                    {isDeclined || isOverdue ? <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" /> : <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />}
                   </div>
 
                   {/* Module 98 -- Review Timeline: the deadline set when this
                       reviewer's invitation was sent, plus a manual reminder,
-                      same pattern as the Editorial Timeline. */}
+                      same pattern as the Editorial Timeline. Still shown once
+                      Overdue -- the reminder has no restriction on when it
+                      can be sent, and stays available until the review is
+                      actually done. */}
                   {assignment.timeline_start_date && assignment.due_date && !isDeclined && (
                     <div className="mt-3 pt-3 border-t border-emerald-200 flex flex-wrap items-center justify-between gap-3">
                       <div>
@@ -864,91 +825,31 @@ export function ReviewBoardTab({
                   )}
                   {reminderError && <p className="mt-2 text-xs font-semibold text-red-600">{reminderError}</p>}
 
-                  {canReplace && (
-                    <div className="mt-3 pt-3 border-t border-red-200">
-                      {showReplaceDeclinedModal === assignment.id ? (
-                        <div className="space-y-2">
-                          <p className="text-xs font-bold text-slate-700">Select Replacement Reviewer:</p>
-                          <select
-                            value={declinedReplacementId || ''}
-                            onChange={(e) => setDeclinedReplacementId(e.target.value)}
-                            className="w-full text-xs px-2 py-1.5 border border-slate-300 rounded focus:outline-none focus:border-blue-500"
-                          >
-                            <option value="">-- Select a reviewer --</option>
-                            {availableReviewers
-                              .filter(r => !assignedReviewerIds.has(r.id))
-                              .map(r => (
-                                <option key={r.id} value={r.id}>{r.name} ({r.email})</option>
-                              ))}
-                          </select>
-                          <div className="flex items-center gap-2">
-                            <label className="text-xs font-bold text-slate-700 shrink-0">Review Timeline</label>
-                            <input
-                              type="date"
-                              value={declinedReplacementStart}
-                              onChange={(e) => setDeclinedReplacementStart(e.target.value)}
-                              title="Start date"
-                              className="border border-slate-300 rounded px-2 py-1.5 text-xs"
-                            />
-                            <span className="text-xs text-slate-500">to</span>
-                            <input
-                              type="date"
-                              value={declinedReplacementEnd}
-                              min={declinedReplacementStart || undefined}
-                              onChange={(e) => setDeclinedReplacementEnd(e.target.value)}
-                              title="End date (deadline)"
-                              className="border border-slate-300 rounded px-2 py-1.5 text-xs"
-                            />
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleReplaceDeclinedReviewer(assignment.id)}
-                              disabled={!declinedReplacementId || !declinedReplacementStart || !declinedReplacementEnd || processing === assignment.id}
-                              className="text-xs px-3 py-1 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 disabled:opacity-50"
-                            >
-                              {processing === assignment.id ? 'Replacing...' : 'Confirm Replacement'}
-                            </button>
-                            <button
-                              onClick={() => { setShowReplaceDeclinedModal(null); setDeclinedReplacementId(null); setDeclinedReplacementStart(''); setDeclinedReplacementEnd(''); }}
-                              className="text-xs px-3 py-1 border border-slate-300 text-slate-700 rounded font-bold hover:bg-slate-50"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setShowReplaceDeclinedModal(assignment.id)}
-                          className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 transition flex items-center gap-1"
-                        >
-                          <RefreshCw className="w-3 h-3" />
-                          Replace Reviewer
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {awaitingEditorReplacement && (
+                  {needsReplacement && (
                     <div className="mt-3 pt-3 border-t border-red-200 space-y-2">
                       <p className="text-xs text-amber-700">
-                        Awaiting the Editor to select a replacement (2-day window). You'll be able to assign one directly after that.
+                        {replacementRequested
+                          ? 'Awaiting the Editor to select a replacement.'
+                          : isDeclined
+                          ? 'The Editor has been alerted and can select a replacement at any time.'
+                          : 'This reviewer is overdue. Request a replacement from the Editor.'}
                       </p>
-                      {notifiedEditorFor === assignment.id ? (
+                      {replacementRequested ? (
                         <p className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
-                          <CheckCircle className="w-3.5 h-3.5" /> Editor notified.
+                          <CheckCircle className="w-3.5 h-3.5" /> Replacement requested.
                         </p>
                       ) : (
                         <button
                           type="button"
-                          onClick={() => handleNotifyEditorReviewerDeclined(assignment.id, reviewer?.name)}
-                          disabled={notifyingEditorFor === assignment.id}
+                          onClick={() => handleRequestReplacement(assignment.id)}
+                          disabled={requestingReplacementFor === assignment.id}
                           className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-40"
                         >
-                          {notifyingEditorFor === assignment.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bell className="w-3.5 h-3.5" />}
-                          {notifyingEditorFor === assignment.id ? 'Sending...' : 'Notify Editor'}
+                          {requestingReplacementFor === assignment.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bell className="w-3.5 h-3.5" />}
+                          {requestingReplacementFor === assignment.id ? 'Sending...' : isDeclined ? 'Notify Editor' : 'Request Replacement'}
                         </button>
                       )}
-                      {notifyEditorError && <p className="text-xs font-semibold text-red-600">{notifyEditorError}</p>}
+                      {requestReplacementError?.id === assignment.id && <p className="text-xs font-semibold text-red-600">{requestReplacementError.message}</p>}
                     </div>
                   )}
 
