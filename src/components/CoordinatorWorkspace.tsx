@@ -19,6 +19,7 @@ import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2, LayoutGrid, Cog, Inbox, Printer, PackageCheck, FileCheck2, MessageSquareWarning, Send } from 'lucide-react';
 import { NavGroup, NavItem } from './SidebarNavGroup';
 import { AssignmentConfirmationDialog } from './AssignmentConfirmationDialog';
+import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 import ProductionSection from './production/ProductionSection';
 import JournalTemplateSection from './production/JournalTemplateSection';
 
@@ -122,6 +123,19 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   // time the Coordinator lands on their dashboard.
   useEffect(() => {
     notifyExpiredReviewerReplacements().catch(() => {});
+  }, []);
+
+  // Clicking a manuscript-linked notification jumps straight to that
+  // manuscript, same pattern as EditorWorkspace.
+  useEffect(() => {
+    const onOpenManuscript = (e: Event) => {
+      const detail = (e as CustomEvent<JmsOpenManuscriptDetail>).detail;
+      if (!detail) return;
+      setActiveSection('MANUSCRIPT_QUEUE');
+      setSelectedId(detail.manuscriptId);
+    };
+    window.addEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
+    return () => window.removeEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
   }, []);
 
   const resetInviteForm = () => {

@@ -1,4 +1,4 @@
-import { useState, ReactNode } from 'react';
+import { useState, useEffect, ReactNode } from 'react';
 import { Settings, Printer, Inbox, PackageCheck, FileCheck2, MessageSquareWarning, Send, CheckCircle2, FileText, Globe } from 'lucide-react';
 import { Role } from '../types';
 import { NavGroup, NavItem } from './SidebarNavGroup';
@@ -6,6 +6,7 @@ import GDMemberProductionSection, { GDMemberProductionView } from './production/
 import GDMemberProductionDetail from './production/GDMemberProductionDetail';
 import GDMemberPublicationDetail from './production/GDMemberPublicationDetail';
 import JournalTemplateSection from './production/JournalTemplateSection';
+import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 
 interface GDMemberWorkspaceProps {
   currentUser?: { name: string; email: string; role: Role } | null;
@@ -29,6 +30,19 @@ export default function GDMemberWorkspace({ currentUser }: GDMemberWorkspaceProp
   const [publicationExpanded, setPublicationExpanded] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showTemplate, setShowTemplate] = useState(false);
+
+  // Clicking a manuscript-linked notification jumps straight to that
+  // manuscript, same pattern as EditorWorkspace.
+  useEffect(() => {
+    const onOpenManuscript = (e: Event) => {
+      const detail = (e as CustomEvent<JmsOpenManuscriptDetail>).detail;
+      if (!detail) return;
+      setShowTemplate(false);
+      setSelectedId(detail.manuscriptId);
+    };
+    window.addEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
+    return () => window.removeEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
+  }, []);
 
   const PRODUCTION_NAV_ITEMS: { key: GDMemberProductionView; label: string; icon: ReactNode }[] = [
     { key: 'QUEUE', label: 'Production Queue', icon: <Inbox className="w-4 h-4" /> },

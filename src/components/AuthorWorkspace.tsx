@@ -16,7 +16,7 @@ import { listProduction, subscribeToProduction } from '../lib/production';
 import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
 import ManuscriptDiscussion from './ManuscriptDiscussion';
-import NotificationBell from './NotificationBell';
+import NotificationBell, { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 import AuthorRevisionRequest from './AuthorRevisionRequest';
 import { NavGroup, NavItem } from './SidebarNavGroup';
 import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, AlertCircle, ChevronDown, Settings, Trash2, User, Send, Eye, Pencil, CheckCircle2, Newspaper } from 'lucide-react';
@@ -202,6 +202,19 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       .catch((e: any) => setError(e.message || 'Unable to load manuscript details.'))
       .finally(() => setDetailLoading(false));
   }, [selectedId, view]);
+
+  // Clicking a manuscript-linked notification jumps straight to that
+  // manuscript, same pattern as EditorWorkspace.
+  useEffect(() => {
+    const onOpenManuscript = (e: Event) => {
+      const detail = (e as CustomEvent<JmsOpenManuscriptDetail>).detail;
+      if (!detail) return;
+      setSelectedId(detail.manuscriptId);
+      setView('detail');
+    };
+    window.addEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
+    return () => window.removeEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
+  }, []);
 
   // Delete manuscript
   const handleDelete = async (manuscriptId: string, manuscript: ManuscriptRow) => {

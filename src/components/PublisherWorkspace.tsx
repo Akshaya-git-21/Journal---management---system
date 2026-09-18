@@ -8,6 +8,7 @@ import {
 } from '../lib/workflow';
 import { listProduction, subscribeToProduction, setPublisherTaskStatus, getProofs, ProductionRow } from '../lib/production';
 import { supabase } from '../lib/supabase';
+import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 import {
   FileText, CheckCircle2, XCircle, AlertTriangle, Hash, BookOpen, Settings, Users, CheckSquare,
   LayoutGrid, ClipboardList, Clock, History, Eye, ExternalLink, BarChart3, Download, ShieldAlert,
@@ -154,6 +155,18 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
     const unsubA = subscribeToManuscripts(load);
     const unsubB = subscribeToProduction(load);
     return () => { unsubA(); unsubB(); };
+  }, []);
+
+  // Clicking a manuscript-linked notification jumps straight to that
+  // manuscript, same pattern as EditorWorkspace.
+  useEffect(() => {
+    const onOpenManuscript = (e: Event) => {
+      const detail = (e as CustomEvent<JmsOpenManuscriptDetail>).detail;
+      if (!detail) return;
+      setFocusedId(detail.manuscriptId);
+    };
+    window.addEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
+    return () => window.removeEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
   }, []);
 
   // Module 83: being assigned a Publisher (send_to_publisher) only lands a

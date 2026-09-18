@@ -9,6 +9,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { getManuscriptStatusLabel } from '../lib/manuscriptStatusLabel';
 import { isReviewerOverdue } from '../lib/reviewerStatus';
+import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 import { formatTimelineDate } from '../lib/dateFormat';
 import { NavGroup, NavItem } from './SidebarNavGroup';
 import FilePreviewModal from './FilePreviewModal';
@@ -114,6 +115,18 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
     load();
     const unsubscribe = subscribeToManuscripts(load);
     return unsubscribe;
+  }, []);
+
+  // Clicking a manuscript-linked notification jumps straight to that
+  // manuscript, same pattern as EditorWorkspace.
+  useEffect(() => {
+    const onOpenManuscript = (e: Event) => {
+      const detail = (e as CustomEvent<JmsOpenManuscriptDetail>).detail;
+      if (!detail) return;
+      setSelectedManuscriptId(detail.manuscriptId);
+    };
+    window.addEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
+    return () => window.removeEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
   }, []);
 
   const selected = rows.find((r) => r.manuscript.id === selectedManuscriptId) || null;

@@ -1011,3 +1011,13 @@ export async function markNotificationRead(notificationId: string): Promise<void
   const { error } = await supabase.from('workflow_notifications').update({ read_at: new Date().toISOString() }).eq('id', notificationId);
   if (error) throw new Error(error.message);
 }
+
+/** Marks every currently-unread notification for the logged-in user as
+ * read in one write -- RLS (recipient_id = auth.uid()) scopes this to their
+ * own rows, so no explicit recipient filter is needed. Used when the bell
+ * dropdown is opened, so the unread badge clears as soon as the user has
+ * actually seen the list instead of requiring them to click each one. */
+export async function markAllNotificationsRead(): Promise<void> {
+  const { error } = await supabase.from('workflow_notifications').update({ read_at: new Date().toISOString() }).is('read_at', null);
+  if (error) throw new Error(error.message);
+}

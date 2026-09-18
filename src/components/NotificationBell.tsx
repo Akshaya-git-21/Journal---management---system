@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bell } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { getMyNotifications, markNotificationRead, NotificationRow } from '../lib/workflow';
+import { getMyNotifications, markNotificationRead, markAllNotificationsRead, NotificationRow } from '../lib/workflow';
 
 /** Fired on `window` when a notification naming a manuscript is clicked --
  * EditorWorkspace/CoordinatorWorkspace listen for this to jump straight to
@@ -69,7 +69,20 @@ export default function NotificationBell({ dark = true }: { dark?: boolean }) {
     <div ref={containerRef} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setOpen((v) => {
+            const next = !v;
+            // Opening the panel is "viewing" the notifications -- clear the
+            // unread badge immediately (optimistic) instead of requiring
+            // the user to click through each one individually.
+            if (next && unreadCount > 0) {
+              const seenAt = new Date().toISOString();
+              setNotifications((prev) => prev.map((row) => (row.read_at ? row : { ...row, read_at: seenAt })));
+              markAllNotificationsRead().catch(() => {});
+            }
+            return next;
+          });
+        }}
         className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition ${dark ? 'text-emerald-100/80 hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`}
         title="Notifications"
       >
