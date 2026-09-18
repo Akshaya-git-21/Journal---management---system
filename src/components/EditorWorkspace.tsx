@@ -4,11 +4,12 @@ import {
   ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, DiscussionRow, SuggestedReviewerRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getRevisions, subscribeToManuscripts,
   respondToEditorAssignment, submitEditorAssessment, submitEditorRecommendation, publishDecision,
-  getManuscript, getContributors, getDiscussions, getReviewerNeedingReplacement, getPendingEditorSuggestions
+  getManuscript, getContributors, getDiscussions, getReviewerNeedingReplacement, getPendingEditorSuggestions,
+  editorSelectReplacementReviewer, ProfileRow
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
 import { getManuscriptStatusLabel, getRoleAwareStatusLabel, getLatestRevision, getRevisionMeta, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
-import { isReviewerOverdue, getReviewerDisplayStatus } from '../lib/reviewerStatus';
+import { getEditorFacingReviewerStatus, editorSeesReplacementNeeded } from '../lib/reviewerStatus';
 import { formatTimelineDate } from '../lib/dateFormat';
 import {
   getEditorAssignedManuscripts,
@@ -33,7 +34,7 @@ import {
   formatDate,
   formatDateTime
 } from '../lib/editorWorkspace';
-import { Loader2, ArrowLeft, ArrowRight, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send } from 'lucide-react';
+import { Loader2, ArrowLeft, ArrowRight, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send, RefreshCw } from 'lucide-react';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
 import { EditorReviewerSelection, useEditorReviewerSelection, ReviewerSelectionList, ReviewerSelectionConfirmButton } from './EditorReviewerSelection';
@@ -119,6 +120,116 @@ function StatusBadge({ manuscript, latestRevision }: { manuscript: ManuscriptRow
   );
 }
 
+/** Module 104: inline replacement picker for a declined or overdue
+ * reviewer, shown directly on the Reviewers tab instead of relying solely
+ * on the floating ReviewerReplacementAlert widget (which is easy to miss/
+ * lose track of). Same underlying RPC and rules -- only usable once the
+ * assignment actually needs replacing, and for an overdue (not declined)
+ * row only once the Coordinator has explicitly requested a replacement. */
+function ReviewerReplacementInline({ assignment, excludedEmails, hasPendingReplacement, onReplaced }: { assignment: ReviewerAssignmentRow; excludedEmails: Set<string>; hasPendingReplacement: boolean; onReplaced: () => void }) {
+  const [choosing, setChoosing] = useState(false);
+  const [reviewers, setReviewers] = useState<ProfileRow[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!choosing) return;
+    supabase
+      .from('profiles')
+      .select('id, name, email, role, status')
+      .eq('role', 'REVIEWER')
+      .eq('status', 'ACTIVE')
+      .order('name')
+      .then(({ data }) => setReviewers((data || []) as ProfileRow[]));
+  }, [choosing]);
+
+  // Module 107: both declined and overdue only become visible/actionable to
+  // the Editor once the Coordinator has explicitly notified them (requested
+  // a replacement) -- see editor_select_replacement_reviewer() in
+  // 0107_decline_also_requires_coordinator_notify.sql, which enforces this
+  // same rule server-side.
+  if (!editorSeesReplacementNeeded(assignment)) return null;
+
+
+  const handleSubmit = async () => {
+    if (!selectedId) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await editorSelectReplacementReviewer(assignment.id, selectedId);
+      setChoosing(false);
+      setSelectedId(null);
+      onReplaced();
+    } catch (e: any) {
+      setError(e.message || 'Failed to select replacement reviewer');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-red-200 space-y-2">
+      {error && <p className="text-xs font-semibold text-red-600">{error}</p>}
+      {choosing ? (
+        <div className="space-y-2">
+          <p className="text-xs font-bold text-slate-700">Select Replacement Reviewer:</p>
+          <div className="max-h-40 overflow-y-auto space-y-1.5 border border-slate-200 rounded-lg p-2">
+            {reviewers.length === 0 ? (
+              <p className="text-xs text-slate-500 py-2 text-center">Loading Reviewer Board...</p>
+            ) : (
+              reviewers.filter(r => !excludedEmails.has(r.email.toLowerCase())).map(r => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => setSelectedId(r.id)}
+                  className={`w-full flex items-center justify-between p-2 rounded-lg text-left text-xs transition ${
+                    selectedId === r.id ? 'bg-emerald-50 border border-emerald-400' : 'hover:bg-slate-50 border border-transparent'
+                  }`}
+                >
+                  <span>
+                    <span className="font-semibold text-slate-900 block">{r.name}</span>
+                    <span className="text-slate-500">{r.email}</span>
+                  </span>
+                  {selectedId === r.id && <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                </button>
+              ))
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleSubmit}
+              disabled={!selectedId || submitting}
+              className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {submitting ? 'Selecting...' : 'Confirm Replacement'}
+            </button>
+            <button
+              onClick={() => { setChoosing(false); setSelectedId(null); }}
+              disabled={submitting}
+              className="text-xs px-3 py-1.5 border border-slate-300 text-slate-700 rounded font-bold hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : hasPendingReplacement ? (
+        <p className="text-xs text-slate-500 italic">A replacement reviewer has already been selected -- awaiting invitation.</p>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setChoosing(true)}
+          className="text-xs px-3 py-1.5 bg-amber-600 text-white rounded font-bold hover:bg-amber-700 transition flex items-center gap-1.5"
+        >
+          <RefreshCw className="w-3 h-3" />
+          Choose Replacement Reviewer
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   const [rows, setRows] = useState<EditorManuscriptDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,7 +257,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
     'in-submission-stage': { label: 'In Submission Stage', predicate: (r) => r.assignment.status === 'INVITED' },
     'awaiting-reviews': { label: 'Awaiting Reviews', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' && r.reviewers.some((rv) => rv.status !== 'SUBMITTED') },
     'reviews-submitted': { label: 'Reviews Submitted', predicate: (r) => r.reviewers.length > 0 && r.reviewers.every((rv) => rv.status === 'SUBMITTED') },
-    'reviews-overdue': { label: 'Reviews Overdue', predicate: (r) => r.reviewers.some((rv) => isReviewerOverdue(rv)) },
+    'reviews-overdue': { label: 'Reviews Overdue', predicate: (r) => r.reviewers.some((rv) => editorSeesReplacementNeeded(rv)) },
     'revisions-submitted': { label: 'Revisions Submitted', predicate: (r) => r.revisions.length > 0 },
     'in-review-stage': { label: 'In Review Stage', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' },
     // Copyediting/production sub-stage lives in manuscript_production,
@@ -299,14 +410,14 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   const rowsNeedingReplacement = rows
     .map(r => {
       const currentRound = r.reviewers.length > 0 ? Math.max(...r.reviewers.map(a => a.revision_number ?? 0)) : 0;
-      const pendingCount = getPendingEditorSuggestions(r.suggestedReviewers, r.editorReviewerActions, currentRound).length;
-      return { row: r, pendingCount };
+      const pendingSuggestions = getPendingEditorSuggestions(r.suggestedReviewers, r.editorReviewerActions, currentRound);
+      return { row: r, pendingCount: pendingSuggestions.length, pendingEmails: pendingSuggestions.map(s => s.email.toLowerCase()) };
     })
     .filter(({ row, pendingCount }) => !!getReviewerNeedingReplacement(row.reviewers, row.manuscript.status, pendingCount));
 
   return (
     <div className="w-full h-screen bg-slate-50 flex font-sans overflow-hidden">
-      {rowsNeedingReplacement.map(({ row: r, pendingCount }, idx) => (
+      {rowsNeedingReplacement.map(({ row: r, pendingCount, pendingEmails }, idx) => (
         <ReviewerReplacementAlert
           key={r.manuscript.id}
           manuscriptId={r.manuscript.id}
@@ -314,6 +425,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
           manuscriptStatus={r.manuscript.status}
           reviewerAssignments={r.reviewers}
           pendingReplacementCount={pendingCount}
+          pendingReplacementEmails={pendingEmails}
           onReplacementSelected={load}
           onOpenManuscript={() => setSelectedManuscriptId(r.manuscript.id)}
           stackIndex={idx}
@@ -1022,8 +1134,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
           details.suggestedReviewers || [], details.editorReviewerActions || [],
           reviewerAssignments.length > 0 ? Math.max(...reviewerAssignments.map(a => a.revision_number ?? 0)) : 0
         ).length}
+        pendingReplacementEmails={getPendingEditorSuggestions(
+          details.suggestedReviewers || [], details.editorReviewerActions || [],
+          reviewerAssignments.length > 0 ? Math.max(...reviewerAssignments.map(a => a.revision_number ?? 0)) : 0
+        ).map(s => s.email.toLowerCase())}
         onReplacementSelected={onChanged}
-        defaultLeftPx={344}
       />
 
       {/* LEFT SIDEBAR */}
@@ -1519,7 +1634,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                             {revNum > 0 ? `Revision ${revNum} Comments` : 'Original Review Comments'}
                           </h4>
                           {grouped.get(revNum)!.map((ra) => (
-                      <div key={ra.id} className="border border-slate-200 rounded-lg p-4">
+                      <div key={ra.id} className={`border rounded-lg p-4 ${
+                        (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                          ? 'border-slate-200 bg-slate-100 opacity-70'
+                          : 'border-slate-200'
+                      }`}>
                         <div className="flex items-start justify-between mb-3">
                           <div>
                             <p className="font-semibold text-slate-900">
@@ -1529,21 +1648,30 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                           </div>
                           <div className="text-right">
                             <span className={`inline-flex text-xs font-bold px-2 py-1 rounded ${
-                              getReviewerDisplayStatus(ra) === 'SUBMITTED'
+                              (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                                ? 'bg-slate-200 text-slate-600'
+                                : getEditorFacingReviewerStatus(ra) === 'SUBMITTED'
                                 ? 'bg-emerald-100 text-emerald-700'
-                                : getReviewerDisplayStatus(ra) === 'OVERDUE'
+                                : getEditorFacingReviewerStatus(ra) === 'OVERDUE'
                                 ? 'bg-red-100 text-red-700'
-                                : ra.status === 'ACCEPTED'
+                                : getEditorFacingReviewerStatus(ra) === 'ACCEPTED'
                                 ? 'bg-amber-100 text-amber-700'
                                 : 'bg-slate-100 text-slate-700'
                             }`}>
-                              {getReviewerDisplayStatus(ra) === 'OVERDUE' ? '🔴 Overdue' : (ra.status || 'Pending')}
+                              {(details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                                ? '↻ Replaced'
+                                : getEditorFacingReviewerStatus(ra) === 'OVERDUE' ? '🔴 Overdue' : (getEditorFacingReviewerStatus(ra) || 'Pending')}
                             </span>
                             {ra.submitted_at && (
                               <p className="text-xs text-slate-500 mt-1">{formatDate(ra.submitted_at)}</p>
                             )}
                           </div>
                         </div>
+
+                        <ReviewerReplacementInline assignment={ra} excludedEmails={new Set([
+                          ...(grouped.get(revNum) || []).map(a => details.profiles.get(a.reviewer_id)?.email?.toLowerCase()).filter((e): e is string => !!e),
+                          ...getPendingEditorSuggestions(details.suggestedReviewers || [], details.editorReviewerActions || [], revNum).map(sg => sg.email.toLowerCase())
+                        ])} hasPendingReplacement={getPendingEditorSuggestions(details.suggestedReviewers || [], details.editorReviewerActions || [], revNum).some(s => s.replaces_assignment_id === ra.id)} onReplaced={onChanged} />
 
                         {ra.status === 'SUBMITTED' && (
                           manuscript.reviews_released_at ? (
@@ -2369,7 +2497,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                             {revNum > 0 ? `Revision ${revNum} Comments` : 'Original Review Comments'}
                           </h4>
                           {grouped.get(revNum)!.map((ra) => (
-                      <div key={ra.id} className="border border-slate-200 rounded-lg p-4">
+                      <div key={ra.id} className={`border rounded-lg p-4 ${
+                        (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                          ? 'border-slate-200 bg-slate-100 opacity-70'
+                          : 'border-slate-200'
+                      }`}>
                         <div className="flex items-start justify-between mb-3">
                           <div>
                             <p className="font-semibold text-slate-900">
@@ -2379,21 +2511,30 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                           </div>
                           <div className="text-right">
                             <span className={`inline-flex text-xs font-bold px-2 py-1 rounded ${
-                              getReviewerDisplayStatus(ra) === 'SUBMITTED'
+                              (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                                ? 'bg-slate-200 text-slate-600'
+                                : getEditorFacingReviewerStatus(ra) === 'SUBMITTED'
                                 ? 'bg-emerald-100 text-emerald-700'
-                                : getReviewerDisplayStatus(ra) === 'OVERDUE'
+                                : getEditorFacingReviewerStatus(ra) === 'OVERDUE'
                                 ? 'bg-red-100 text-red-700'
-                                : ra.status === 'ACCEPTED'
+                                : getEditorFacingReviewerStatus(ra) === 'ACCEPTED'
                                 ? 'bg-amber-100 text-amber-700'
                                 : 'bg-slate-100 text-slate-700'
                             }`}>
-                              {getReviewerDisplayStatus(ra) === 'OVERDUE' ? '🔴 Overdue' : (ra.status || 'Pending')}
+                              {(details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                                ? '↻ Replaced'
+                                : getEditorFacingReviewerStatus(ra) === 'OVERDUE' ? '🔴 Overdue' : (getEditorFacingReviewerStatus(ra) || 'Pending')}
                             </span>
                             {ra.submitted_at && (
                               <p className="text-xs text-slate-500 mt-1">{formatDate(ra.submitted_at)}</p>
                             )}
                           </div>
                         </div>
+
+                        <ReviewerReplacementInline assignment={ra} excludedEmails={new Set([
+                          ...(grouped.get(revNum) || []).map(a => details.profiles.get(a.reviewer_id)?.email?.toLowerCase()).filter((e): e is string => !!e),
+                          ...getPendingEditorSuggestions(details.suggestedReviewers || [], details.editorReviewerActions || [], revNum).map(sg => sg.email.toLowerCase())
+                        ])} hasPendingReplacement={getPendingEditorSuggestions(details.suggestedReviewers || [], details.editorReviewerActions || [], revNum).some(s => s.replaces_assignment_id === ra.id)} onReplaced={onChanged} />
 
                         {ra.status === 'SUBMITTED' && (
                           manuscript.reviews_released_at ? (

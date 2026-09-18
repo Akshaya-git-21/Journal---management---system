@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, X, Loader2, CheckCircle, ExternalLink, GripVertical } from 'lucide-react';
 import { ReviewerAssignmentRow, ProfileRow, editorSelectReplacementReviewer, getReviewerNeedingReplacement } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
@@ -26,13 +27,17 @@ interface Props {
    * Coordinator invitation -- once this covers the open slot(s), the alert
    * hides itself (the Editor's part is done). */
   pendingReplacementCount?: number;
+  /** Emails already picked as a pending replacement for ANOTHER slot in
+   * this round -- excluded from the picker so the same reviewer can't be
+   * offered twice for two different open slots. */
+  pendingReplacementEmails?: string[];
 }
 
 const WIDGET_HEIGHT_PX = 260;
 
 export const ReviewerReplacementAlert: React.FC<Props> = ({
   manuscriptId, manuscriptTitle, manuscriptStatus, reviewerAssignments, onReplacementSelected,
-  onOpenManuscript, stackIndex = 0, defaultLeftPx = 24, pendingReplacementCount = 0,
+  onOpenManuscript, stackIndex = 0, defaultLeftPx = 24, pendingReplacementCount = 0, pendingReplacementEmails = [],
 }) => {
   const [dismissed, setDismissed] = useState(false);
   const [choosing, setChoosing] = useState(false);
@@ -51,11 +56,17 @@ export const ReviewerReplacementAlert: React.FC<Props> = ({
   const mostRecentDecline = getReviewerNeedingReplacement(reviewerAssignments, manuscriptStatus, pendingReplacementCount);
   const needsReplacement = !!mostRecentDecline;
 
-  // Never re-offer a reviewer who has already declined this manuscript --
-  // the picker was showing every active Reviewer Board account, including
-  // ones already known not to want it.
-  const declinedReviewerIds = new Set(reviewerAssignments.filter(r => r.status === 'DECLINED').map(r => r.reviewer_id));
-  const availableReviewers = reviewers.filter(r => !declinedReviewerIds.has(r.id));
+  // Never re-offer a reviewer already involved in this round for this
+  // manuscript, in ANY status -- still-pending INVITED, already-ACCEPTED,
+  // already-SUBMITTED, or previously DECLINED. Only genuinely uninvolved
+  // reviewers should be offered as a replacement.
+  const involvedReviewerIds = new Set(
+    reviewerAssignments
+      .filter(r => (r.revision_number ?? 0) === (mostRecentDecline?.revision_number ?? 0))
+      .map(r => r.reviewer_id)
+  );
+  const pendingEmailsSet = new Set(pendingReplacementEmails);
+  const availableReviewers = reviewers.filter(r => !involvedReviewerIds.has(r.id) && !pendingEmailsSet.has(r.email.toLowerCase()));
 
   useEffect(() => {
     if (mostRecentDecline) setDismissed(false);
@@ -121,6 +132,7 @@ export const ReviewerReplacementAlert: React.FC<Props> = ({
     : { left: defaultLeftPx, bottom: 24 + stackIndex * WIDGET_HEIGHT_PX };
 
   return (
+    createPortal(
     <div
       ref={containerRef}
       className={`fixed z-40 w-80 bg-white border-2 border-amber-300 rounded-2xl shadow-2xl overflow-hidden ${isDragging ? '' : 'animate-[slideIn_0.3s_ease-out]'}`}
@@ -217,6 +229,8 @@ export const ReviewerReplacementAlert: React.FC<Props> = ({
           </button>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
+    )
   );
 };

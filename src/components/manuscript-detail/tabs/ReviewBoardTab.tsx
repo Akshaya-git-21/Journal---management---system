@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ManuscriptRow, SuggestedReviewerRow, ReviewerAssignmentRow, ProfileRow } from '../../../lib/workflow';
 import {
-  coordinatorAcceptSuggestion, coordinatorDeclineSuggestion, coordinatorReplaceSuggestion,
+  coordinatorAcceptSuggestion,
   getEditorReviewerActions,
   coordinatorFinalizeReviewerSuggestion, approveUserRole, coordinatorReactivateReviewer,
   coordinatorSendReviewerInvitations,
@@ -46,8 +46,6 @@ export function ReviewBoardTab({
   const [success, setSuccess] = useState('');
   const [processing, setProcessing] = useState<string | null>(null);
   const [actions, setActions] = useState<ReviewerAction[]>([]);
-  const [showDeclineReason, setShowDeclineReason] = useState<string | null>(null);
-  const [declineReason, setDeclineReason] = useState('');
   // Module 102 -- Review Timeline required before "Accept & Assign"/"Add"
   // actually invites the reviewer, same as every other invitation path.
   // Shared between the direct-accept and needs-account flows so the dates
@@ -55,8 +53,6 @@ export function ReviewBoardTab({
   const [showAcceptTimeline, setShowAcceptTimeline] = useState<string | null>(null);
   const [acceptTimelineStart, setAcceptTimelineStart] = useState('');
   const [acceptTimelineEnd, setAcceptTimelineEnd] = useState('');
-  const [showReplaceModal, setShowReplaceModal] = useState<string | null>(null);
-  const [replacementReviewerId, setReplacementReviewerId] = useState<string | null>(null);
   const [sendingInvitations, setSendingInvitations] = useState(false);
 
   // The Coordinator no longer invites reviewers directly from this list --
@@ -167,6 +163,20 @@ export function ReviewBoardTab({
 
   // Get suggested reviewers that were actually persisted by editor
   const editorSuggestions = suggestedReviewers.filter(s => s.suggested_by === 'EDITOR');
+
+  // Module 106: once the Editor has picked an ACTUAL replacement FOR THIS
+  // SPECIFIC suggestion's assignment (matched precisely via
+  // replaces_assignment_id), that original slot is superseded. Show it as
+  // "Replaced" (grey) instead of its stale ACCEPTED/Invited/Declined badge,
+  // same treatment as the Editor's own "Reviewers Selected" card
+  // (EditorReviewerSelection.tsx). Matched precisely rather than guessed
+  // from a round-wide count -- a count breaks the moment two reviewers in
+  // the same round need replacing and only one has a pick so far.
+  const isSupersededByReplacement = (suggestion: SuggestedReviewerRow) => {
+    const ra = getReviewerAssignmentForSuggestion(suggestion);
+    if (!ra) return false;
+    return editorSuggestions.some(other => other.id !== suggestion.id && other.replaces_assignment_id === ra.id);
+  };
 
   // Handle accept suggestion -- called only once a Review Timeline has been
   // set (see the inline date picker triggered by "Accept & Assign"/"Add").
@@ -298,51 +308,6 @@ export function ReviewBoardTab({
       setError(e.message || 'Failed to create the reviewer account');
     } finally {
       setCreatingAccount(false);
-      setProcessing(null);
-    }
-  };
-
-  // Handle decline suggestion
-  const handleDecline = async (suggestionId: string) => {
-    setError('');
-    setProcessing(suggestionId);
-
-    try {
-      await coordinatorDeclineSuggestion(suggestionId, declineReason);
-      setActions(prev => [...prev, { suggestion_id: suggestionId, action: 'DECLINED' }]);
-      setShowDeclineReason(null);
-      setDeclineReason('');
-      setSuccess('Reviewer suggestion declined');
-      setTimeout(() => setSuccess(''), 3000);
-      onDataChange();
-    } catch (e: any) {
-      setError(e.message || 'Failed to decline suggestion');
-    } finally {
-      setProcessing(null);
-    }
-  };
-
-  // Handle replace suggestion
-  const handleReplace = async (suggestionId: string) => {
-    if (!replacementReviewerId) {
-      setError('Please select a replacement reviewer');
-      return;
-    }
-
-    setError('');
-    setProcessing(suggestionId);
-
-    try {
-      await coordinatorReplaceSuggestion(suggestionId, replacementReviewerId as any);
-      setActions(prev => [...prev, { suggestion_id: suggestionId, action: 'REPLACED', replacement_reviewer_id: replacementReviewerId }]);
-      setShowReplaceModal(null);
-      setReplacementReviewerId(null);
-      setSuccess('Reviewer suggestion replaced');
-      setTimeout(() => setSuccess(''), 3000);
-      onDataChange();
-    } catch (e: any) {
-      setError(e.message || 'Failed to replace suggestion');
-    } finally {
       setProcessing(null);
     }
   };
@@ -598,9 +563,14 @@ export function ReviewBoardTab({
               // themself accepts (or SUBMITTED/further, which implies accepted).
               const reviewerHasAccepted = reviewerAssignment ? reviewerAssignment.status !== 'INVITED' && reviewerAssignment.status !== 'DECLINED' : false;
               const reviewerDeclined = reviewerAssignment?.status === 'DECLINED';
+              // Module 104: this reviewer already had a replacement picked
+              // for them post-invitation (decline or overdue) -- takes
+              // priority over their stale ACCEPTED/Invited/Declined badge.
+              const superseded = isSupersededByReplacement(suggestion);
 
               return (
                 <div key={suggestion.id} className={`border rounded-lg p-4 ${
+                  superseded ? 'bg-slate-100 border-slate-200 opacity-70' :
                   status === 'ACCEPTED' ? (reviewerHasAccepted ? 'bg-emerald-50 border-emerald-200' : reviewerDeclined ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200') :
                   status === 'DECLINED' ? 'bg-red-50 border-red-200' :
                   status === 'REPLACED' ? 'bg-blue-50 border-blue-200' :
@@ -610,7 +580,9 @@ export function ReviewBoardTab({
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <p className="font-semibold text-slate-900">{suggestion.name}</p>
-                        {status === 'ACCEPTED' && (
+                        {superseded ? (
+                          <span className="text-xs px-2 py-0.5 bg-slate-200 text-slate-600 rounded-full font-bold">↻ Replaced</span>
+                        ) : status === 'ACCEPTED' ? (
                           reviewerHasAccepted ? (
                             <span className="text-xs px-2 py-0.5 bg-emerald-200 text-emerald-700 rounded-full font-bold">✓ Accepted</span>
                           ) : reviewerDeclined ? (
@@ -618,19 +590,22 @@ export function ReviewBoardTab({
                           ) : (
                             <span className="text-xs px-2 py-0.5 bg-amber-200 text-amber-800 rounded-full font-bold">⏳ Invited</span>
                           )
-                        )}
-                        {status === 'DECLINED' && (
+                        ) : status === 'DECLINED' ? (
                           <span className="text-xs px-2 py-0.5 bg-red-200 text-red-700 rounded-full font-bold">✕ Declined</span>
-                        )}
-                        {status === 'REPLACED' && (
+                        ) : status === 'REPLACED' ? (
                           <span className="text-xs px-2 py-0.5 bg-blue-200 text-blue-700 rounded-full font-bold">↻ Replaced</span>
-                        )}
+                        ) : null}
                       </div>
                       <p className="text-xs text-slate-600">{suggestion.email}</p>
                       {suggestion.note && <p className="text-xs text-slate-500 mt-1">Expertise: {suggestion.note}</p>}
                     </div>
                   </div>
 
+                  {/* Module 106: the Coordinator only ever sends the
+                      invitation for a reviewer the Editor already picked --
+                      declining or swapping in a different candidate is the
+                      Editor's call, same rule as every post-invitation
+                      replacement in this file. */}
                   {status === 'PENDING' && (
                     <div className="flex gap-2 flex-wrap">
                       {showAcceptTimeline !== suggestion.id && (
@@ -643,24 +618,6 @@ export function ReviewBoardTab({
                           Accept & Assign
                         </button>
                       )}
-
-                      <button
-                        onClick={() => setShowDeclineReason(suggestion.id)}
-                        disabled={processing === suggestion.id}
-                        className="text-xs px-3 py-1.5 bg-red-600 text-white rounded font-bold hover:bg-red-700 disabled:opacity-50 transition flex items-center gap-1"
-                      >
-                        {processing === suggestion.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
-                        Decline
-                      </button>
-
-                      <button
-                        onClick={() => setShowReplaceModal(suggestion.id)}
-                        disabled={processing === suggestion.id}
-                        className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 disabled:opacity-50 transition flex items-center gap-1"
-                      >
-                        {processing === suggestion.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                        Replace
-                      </button>
                     </div>
                   )}
 
@@ -680,74 +637,6 @@ export function ReviewBoardTab({
                       <button onClick={() => { setShowAcceptTimeline(null); setAcceptTimelineStart(''); setAcceptTimelineEnd(''); }} className="text-xs px-3 py-1.5 border border-slate-300 rounded font-bold text-slate-700 hover:bg-slate-50">
                         Cancel
                       </button>
-                    </div>
-                  )}
-
-                  {/* Decline reason modal */}
-                  {showDeclineReason === suggestion.id && (
-                    <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
-                      <textarea
-                        value={declineReason}
-                        onChange={(e) => setDeclineReason(e.target.value)}
-                        placeholder="Optional reason for declining (will not be shared with reviewer)"
-                        className="w-full text-xs px-2 py-1.5 border border-slate-300 rounded focus:outline-none focus:border-red-500"
-                        rows={2}
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleDecline(suggestion.id)}
-                          disabled={processing === suggestion.id}
-                          className="text-xs px-3 py-1 bg-red-600 text-white rounded font-bold hover:bg-red-700 disabled:opacity-50"
-                        >
-                          {processing === suggestion.id ? 'Declining...' : 'Confirm Decline'}
-                        </button>
-                        <button
-                          onClick={() => {
-                            setShowDeclineReason(null);
-                            setDeclineReason('');
-                          }}
-                          className="text-xs px-3 py-1 border border-slate-300 text-slate-700 rounded font-bold hover:bg-slate-50"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Replace modal */}
-                  {showReplaceModal === suggestion.id && (
-                    <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
-                      <p className="text-xs font-bold text-slate-700">Select Replacement Reviewer:</p>
-                      <select
-                        value={replacementReviewerId || ''}
-                        onChange={(e) => setReplacementReviewerId(e.target.value)}
-                        className="w-full text-xs px-2 py-1.5 border border-slate-300 rounded focus:outline-none focus:border-blue-500"
-                      >
-                        <option value="">-- Select a reviewer --</option>
-                        {availableReviewers
-                          .filter(r => !assignedReviewerIds.has(r.id) && r.email !== suggestion.email)
-                          .map(r => (
-                            <option key={r.id} value={r.id}>{r.name} ({r.email})</option>
-                          ))}
-                      </select>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleReplace(suggestion.id)}
-                          disabled={!replacementReviewerId || processing === suggestion.id}
-                          className="text-xs px-3 py-1 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 disabled:opacity-50"
-                        >
-                          {processing === suggestion.id ? 'Replacing...' : 'Confirm Replacement'}
-                        </button>
-                        <button
-                          onClick={() => {
-                            setShowReplaceModal(null);
-                            setReplacementReviewerId(null);
-                          }}
-                          className="text-xs px-3 py-1 border border-slate-300 text-slate-700 rounded font-bold hover:bg-slate-50"
-                        >
-                          Cancel
-                        </button>
-                      </div>
                     </div>
                   )}
                 </div>
@@ -770,6 +659,11 @@ export function ReviewBoardTab({
               const isDeclined = assignment.status === 'DECLINED';
               const displayStatus = getReviewerDisplayStatus(assignment);
               const isOverdue = displayStatus === 'OVERDUE';
+              // Module 106: a real replacement has actually been picked for
+              // THIS specific assignment (matched precisely via
+              // replaces_assignment_id) -- takes priority over the
+              // Declined/Overdue styling, greyed out as settled/history.
+              const isReplaced = suggestedReviewers.some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === assignment.id);
               // Module 104: the Coordinator never picks a replacement
               // reviewer directly anymore, for a decline OR an overdue
               // reviewer -- the only action available is requesting one from
@@ -777,21 +671,21 @@ export function ReviewBoardTab({
               // via the auto-surfaced ReviewerReplacementAlert for a
               // decline, or after this request unlocks it for an overdue
               // row).
-              const needsReplacement = reviewerNeedsReplacement(assignment);
+              const needsReplacement = reviewerNeedsReplacement(assignment) && !isReplaced;
               const replacementRequested = !!assignment.replacement_requested_at;
-              const statusColor = isDeclined ? 'text-red-700' : isOverdue ? 'text-red-700' : 'text-emerald-700';
+              const statusColor = isReplaced ? 'text-slate-500' : isDeclined ? 'text-red-700' : isOverdue ? 'text-red-700' : 'text-emerald-700';
               return (
-                <div key={assignment.id} className={`border rounded-lg p-4 ${isDeclined || isOverdue ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                <div key={assignment.id} className={`border rounded-lg p-4 ${isReplaced ? 'border-slate-200 bg-slate-100 opacity-70' : isDeclined || isOverdue ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="font-semibold text-slate-900">{reviewer?.name}</p>
                       <p className="text-xs text-slate-600">{reviewer?.email}</p>
-                      <p className={`text-xs mt-1 font-bold ${statusColor}`}>Status: {isOverdue ? '🔴 Overdue' : displayStatus}</p>
+                      <p className={`text-xs mt-1 font-bold ${statusColor}`}>Status: {isReplaced ? '↻ Replaced' : isOverdue ? '🔴 Overdue' : displayStatus}</p>
                       {isDeclined && assignment.decline_reason && (
                         <p className="text-xs text-slate-600 mt-1"><span className="font-bold text-red-700">Reason:</span> {assignment.decline_reason}</p>
                       )}
                     </div>
-                    {isDeclined || isOverdue ? <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" /> : <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />}
+                    {isReplaced ? <RefreshCw className="w-5 h-5 text-slate-400 flex-shrink-0" /> : isDeclined || isOverdue ? <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" /> : <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />}
                   </div>
 
                   {/* Module 98 -- Review Timeline: the deadline set when this
@@ -831,7 +725,7 @@ export function ReviewBoardTab({
                         {replacementRequested
                           ? 'Awaiting the Editor to select a replacement.'
                           : isDeclined
-                          ? 'The Editor has been alerted and can select a replacement at any time.'
+                          ? 'This reviewer declined. Notify the Editor to select a replacement.'
                           : 'This reviewer is overdue. Request a replacement from the Editor.'}
                       </p>
                       {replacementRequested ? (

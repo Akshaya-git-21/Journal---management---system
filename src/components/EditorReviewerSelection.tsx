@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Loader2, AlertCircle, CheckCircle, Users } from 'lucide-react';
 import { ProfileRow, SuggestedReviewerRow, ReviewerAssignmentRow, editorSelectReviewers, editorSelectAuthorSuggestion, getManuscriptReviewerPool } from '../lib/workflow';
+import { isReviewerOverdue, editorSeesReplacementNeeded } from '../lib/reviewerStatus';
 
 interface Props {
   manuscriptId: string;
@@ -58,16 +59,23 @@ export function useEditorReviewerSelection({ manuscriptId, suggestedReviewers, o
   // slot -- without this, the Editor was permanently stuck at "already
   // selected" (both names still listed as "Awaiting Invitation" forever)
   // the moment either reviewer declined, with no way to pick a replacement
-  // from here.
-  const emailToAssignmentStatus = new Map<string, ReviewerAssignmentRow['status']>();
+  // from here. Module 107: this only frees up once the Coordinator has
+  // explicitly notified the Editor (editorSeesReplacementNeeded) -- until
+  // then the slot still shows as occupied/"Awaiting Invitation", same as
+  // before the decline happened.
+  const emailToAssignment = new Map<string, ReviewerAssignmentRow>();
   if (profiles) {
     for (const a of reviewerAssignments) {
       const email = profiles.get(a.reviewer_id)?.email?.toLowerCase();
-      if (email) emailToAssignmentStatus.set(email, a.status);
+      if (email) emailToAssignment.set(email, a);
     }
   }
-  const selectionStatus = (s: SuggestedReviewerRow) => emailToAssignmentStatus.get(s.email.toLowerCase()) ?? null;
-  const declinedSelections = editorSelections.filter(s => selectionStatus(s) === 'DECLINED');
+  const selectionAssignment = (s: SuggestedReviewerRow) => emailToAssignment.get(s.email.toLowerCase()) ?? null;
+  const selectionStatus = (s: SuggestedReviewerRow) => selectionAssignment(s)?.status ?? null;
+  const declinedSelections = editorSelections.filter(s => {
+    const a = selectionAssignment(s);
+    return !!a && a.status === 'DECLINED' && editorSeesReplacementNeeded(a);
+  });
   const activeSelectionsCount = editorSelections.length - declinedSelections.length;
   const remainingSlots = Math.max(0, 2 - activeSelectionsCount);
   const alreadySelected = remainingSlots === 0;
@@ -78,7 +86,7 @@ export function useEditorReviewerSelection({ manuscriptId, suggestedReviewers, o
   // Never re-offer a reviewer who has already declined this manuscript --
   // the pool picker was showing every candidate the Coordinator ever added,
   // including ones already known not to want it.
-  const visibleReviewers = reviewers.filter(r => emailToAssignmentStatus.get(r.email.toLowerCase()) !== 'DECLINED');
+  const visibleReviewers = reviewers.filter(r => emailToAssignment.get(r.email.toLowerCase())?.status !== 'DECLINED');
 
   const togglePool = (id: string) => {
     setError('');
@@ -132,7 +140,7 @@ export function useEditorReviewerSelection({ manuscriptId, suggestedReviewers, o
     reviewers: visibleReviewers, loading, selectedPoolIds, togglePool,
     authorSuggestions, selectedSuggestionIds, toggleSuggestion, promotedFromIds, canPickMore,
     submitting, error, success, handleSubmit, alreadySelected, editorSelections, remainingSlots, totalTentative,
-    selectionStatus, hasDeclinedSelection, activeSelectionsCount
+    selectionStatus, selectionAssignment, hasDeclinedSelection, activeSelectionsCount
   };
 }
 
@@ -143,25 +151,56 @@ type SelectionState = ReturnType<typeof useEditorReviewerSelection>;
 // Coordinator has actually sent the invitations, so without this the
 // Editor's own selection would otherwise vanish from view entirely in
 // the gap between confirming it and the Coordinator inviting them.
-function ReviewersSelectedCard({ editorSelections, selectionStatus }: Pick<SelectionState, 'editorSelections' | 'selectionStatus'>) {
+function ReviewersSelectedCard({ editorSelections, selectionAssignment }: Pick<SelectionState, 'editorSelections' | 'selectionAssignment'>) {
+  // A slot's original holder only becomes "Replaced" once the Editor has
+  // picked an ACTUAL replacement FOR THAT SPECIFIC assignment -- matched
+  // precisely via replaces_assignment_id (Module 106), not guessed from a
+  // count. A count-based guess breaks the moment two reviewers in the same
+  // round need replacing and only one has a pick so far: the other, still
+  // genuinely un-replaced one would get wrongly marked "Replaced" too.
+  const isSuperseded = (r: SuggestedReviewerRow) => {
+    const a = selectionAssignment(r);
+    if (!a) return false;
+    return editorSelections.some(other => other.id !== r.id && other.replaces_assignment_id === a.id);
+  };
+  const activeCount = editorSelections.filter(r => !isSuperseded(r)).length;
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
       <div className="flex items-center gap-2">
         <Users className="w-5 h-5 text-slate-700" />
-        <h3 className="text-sm font-black text-slate-900">Reviewers Selected</h3>
+        <h3 className="text-sm font-black text-slate-900">Reviewers Selected ({activeCount})</h3>
       </div>
       <div className="space-y-2">
         {editorSelections.map((r) => {
-          const status = selectionStatus(r);
-          const isDeclined = status === 'DECLINED';
+          const a = selectionAssignment(r);
+          const superseded = isSuperseded(r);
+          // Module 107: a decline/overdue only becomes visible to the
+          // Editor once the Coordinator has explicitly notified them --
+          // until then this still shows as plain "Awaiting Invitation",
+          // same as before anything happened.
+          const revealed = !superseded && !!a && editorSeesReplacementNeeded(a);
+          const isDeclined = revealed && a?.status === 'DECLINED';
+          const isOverdue = revealed && isReviewerOverdue(a!);
+          const label = superseded ? 'Replaced' : isDeclined ? 'Declined' : isOverdue ? 'Overdue' : 'Awaiting Invitation';
+          const colorClass = superseded
+            ? 'border-slate-200 bg-slate-50'
+            : (isDeclined || isOverdue)
+            ? 'border-red-200 bg-red-50'
+            : 'border-emerald-200 bg-emerald-50';
+          const badgeClass = superseded
+            ? 'bg-slate-200 text-slate-600'
+            : (isDeclined || isOverdue)
+            ? 'bg-red-100 text-red-700'
+            : 'bg-amber-100 text-amber-700';
           return (
-            <div key={r.id} className={`flex items-center justify-between p-3 border rounded-lg ${isDeclined ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
+            <div key={r.id} className={`flex items-center justify-between p-3 border rounded-lg ${colorClass} ${superseded ? 'opacity-70' : ''}`}>
               <div>
                 <p className="text-sm font-semibold text-slate-900">{r.name}</p>
                 <p className="text-xs text-slate-600">{r.email}</p>
               </div>
-              <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full shrink-0 ${isDeclined ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                {isDeclined ? 'Declined' : 'Awaiting Invitation'}
+              <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full shrink-0 ${badgeClass}`}>
+                {label}
               </span>
             </div>
           );
@@ -175,17 +214,17 @@ function ReviewersSelectedCard({ editorSelections, selectionStatus }: Pick<Selec
  * place other content (e.g. the Author's suggested reviewers) between the
  * list and the Confirm button instead of them being stacked back-to-back. */
 export function ReviewerSelectionList(state: SelectionState) {
-  const { reviewers, loading, selectedPoolIds, togglePool, submitting, error, success, alreadySelected, editorSelections, remainingSlots, selectionStatus, hasDeclinedSelection } = state;
+  const { reviewers, loading, selectedPoolIds, togglePool, submitting, error, success, alreadySelected, editorSelections, remainingSlots, selectionStatus, selectionAssignment, hasDeclinedSelection } = state;
 
   // A declined reviewer stays visible above (with its real "Declined"
   // status) instead of silently disappearing, and the picker below reopens
   // for just the freed-up slot rather than the Editor being stuck at
   // "already selected" forever.
-  if (alreadySelected) return <ReviewersSelectedCard editorSelections={editorSelections} selectionStatus={selectionStatus} />;
+  if (alreadySelected) return <ReviewersSelectedCard editorSelections={editorSelections} selectionAssignment={selectionAssignment} />;
 
   return (
     <div className="space-y-4">
-      {editorSelections.length > 0 && <ReviewersSelectedCard editorSelections={editorSelections} selectionStatus={selectionStatus} />}
+      {editorSelections.length > 0 && <ReviewersSelectedCard editorSelections={editorSelections} selectionAssignment={selectionAssignment} />}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-slate-700" />

@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { ManuscriptStatus, ReviewerRecommendation } from '../types';
-import { isReviewerOverdue } from './reviewerStatus';
+import { editorSeesReplacementNeeded } from './reviewerStatus';
 export type { ReviewerRecommendation };
 
 /**
@@ -322,9 +322,20 @@ export const editorSelectReplacementReviewer = (declinedAssignmentId: string, re
  * automatic-after-N-days trigger, so an overdue row without that timestamp
  * doesn't qualify here even though it IS overdue.
  *
- * Returns the most recently actionable assignment in the current round
- * (declined, by responded_at; or overdue+requested, by
- * replacement_requested_at), or null if no replacement is needed. */
+ * The "already have 2 covered" short-circuit must NOT count an actionable
+ * row (declined, or overdue+requested) as covering a slot -- an overdue
+ * reviewer is still status INVITED/ACCEPTED, so counting it as "active"
+ * the same as a healthy assignment would permanently hide the alert from
+ * the Editor even though a replacement was explicitly requested.
+ *
+ * Module 107: a decline is no longer auto-visible to the Editor either --
+ * both a decline and an overdue reviewer stay hidden until the Coordinator
+ * has explicitly notified them (replacement_requested_at set), same rule,
+ * see editorSeesReplacementNeeded() in lib/reviewerStatus.ts.
+ *
+ * Returns the most recently actionable assignment in the current round (by
+ * replacement_requested_at, since that's now always the trigger for both
+ * cases), or null if no replacement is needed. */
 export function getReviewerNeedingReplacement(
   reviewerAssignments: ReviewerAssignmentRow[],
   manuscriptStatus: string,
@@ -334,16 +345,11 @@ export function getReviewerNeedingReplacement(
   if (reviewerAssignments.length === 0) return null;
   const currentRound = Math.max(...reviewerAssignments.map(r => r.revision_number ?? 0));
   const roundAssignments = reviewerAssignments.filter(r => (r.revision_number ?? 0) === currentRound);
-  const activeCount = roundAssignments.filter(r => r.status !== 'DECLINED').length;
-  if (activeCount + pendingReplacementCount >= 2) return null;
-  const isOverdueAndRequested = (r: ReviewerAssignmentRow) => isReviewerOverdue(r) && !!r.replacement_requested_at;
+  const healthyCount = roundAssignments.filter(r => !editorSeesReplacementNeeded(r)).length;
+  if (healthyCount + pendingReplacementCount >= 2) return null;
   const actionable = roundAssignments
-    .filter(r => (r.status === 'DECLINED' && r.responded_at) || isOverdueAndRequested(r))
-    .sort((a, b) => {
-      const aTime = new Date(a.status === 'DECLINED' ? a.responded_at! : a.replacement_requested_at!).getTime();
-      const bTime = new Date(b.status === 'DECLINED' ? b.responded_at! : b.replacement_requested_at!).getTime();
-      return bTime - aTime;
-    });
+    .filter(editorSeesReplacementNeeded)
+    .sort((a, b) => new Date(b.replacement_requested_at!).getTime() - new Date(a.replacement_requested_at!).getTime());
   return actionable[0] || null;
 }
 
@@ -688,6 +694,14 @@ export interface SuggestedReviewerRow {
    * -- points back at the AUTHOR suggestion it was promoted from, so the UI
    * can mark that original suggestion as already selected. */
   promoted_from?: string | null;
+  /** Module 106: set on an EDITOR suggestion created by
+   * editor_select_replacement_reviewer() -- points at the exact
+   * reviewer_assignments row this suggestion replaces, so the UI can tell
+   * precisely which declined/overdue reviewer has actually been replaced
+   * instead of guessing from a count (wrong the moment two reviewers in the
+   * same round need replacing and only one has a pick so far). Null for
+   * every ordinary (non-replacement) suggestion. */
+  replaces_assignment_id?: string | null;
 }
 
 export interface DiscussionRow {

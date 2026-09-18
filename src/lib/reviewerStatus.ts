@@ -35,7 +35,30 @@ export function getReviewerDisplayStatus(assignment: Pick<ReviewerAssignmentRow,
 /** True once this reviewer needs replacing -- either they declined, or
  * they've gone overdue. Doesn't gate on whether a replacement has actually
  * been requested/selected yet -- callers that need that distinction check
- * replacement_requested_at separately. */
+ * replacement_requested_at separately. This is the Coordinator-facing
+ * check -- the Coordinator sees a decline/overdue immediately, regardless
+ * of whether they've notified the Editor yet. */
 export function reviewerNeedsReplacement(assignment: Pick<ReviewerAssignmentRow, 'status' | 'due_date'>): boolean {
   return assignment.status === 'DECLINED' || isReviewerOverdue(assignment);
+}
+
+/** Module 107: whether the EDITOR is allowed to see that this reviewer
+ * needs replacing -- both a decline and an overdue reviewer are hidden
+ * from the Editor as an undifferentiated "still pending" until the
+ * Coordinator explicitly clicks Notify Editor / Request Replacement. The
+ * flow is always: reviewer declines or goes overdue -> Coordinator sees it
+ * right away and decides when to notify -> only then does the Editor see
+ * anything changed and get to pick a replacement. */
+export function editorSeesReplacementNeeded(assignment: Pick<ReviewerAssignmentRow, 'status' | 'due_date' | 'replacement_requested_at'>): boolean {
+  return !!assignment.replacement_requested_at && reviewerNeedsReplacement(assignment);
+}
+
+/** The status label the EDITOR specifically should see -- masks a
+ * declined/overdue reviewer as still "INVITED" until the Coordinator has
+ * notified them (editorSeesReplacementNeeded), per the flow above. Use
+ * getReviewerDisplayStatus() instead for the Coordinator's own view, which
+ * always shows the real status immediately. */
+export function getEditorFacingReviewerStatus(assignment: Pick<ReviewerAssignmentRow, 'status' | 'due_date' | 'replacement_requested_at'>): ReviewerDisplayStatus {
+  if (!editorSeesReplacementNeeded(assignment) && reviewerNeedsReplacement(assignment)) return 'INVITED';
+  return getReviewerDisplayStatus(assignment);
 }
