@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getManuscriptStatusLabel, getManuscriptStatusMeta, getLatestRevision, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
+import { getRoleAwareStatusLabel, getManuscriptStatusMeta, getLatestRevision, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
 import FilePreviewModal from './FilePreviewModal';
 import SubmissionSidebar from './SubmissionSidebar';
 import AuthorProductionPanel from './production/AuthorProductionPanel';
@@ -944,7 +944,7 @@ export default function OjsSubmissionDetail({
                           <td className="px-4 py-4 whitespace-nowrap align-middle">
                             {(() => {
                               const statusLabel = manuscriptDetails?.manuscript
-                                ? getManuscriptStatusLabel(manuscriptDetails.manuscript, getLatestRevision(manuscriptDetails.revisions), productionStatus)
+                                ? getRoleAwareStatusLabel(manuscriptDetails.manuscript, 'AUTHOR', getLatestRevision(manuscriptDetails.revisions), productionStatus)
                                 : (paper.raw?.status || 'SUBMITTED').replace(/_/g, ' ');
                               const colorClass = STANDARD_STATUS_COLORS[statusLabel as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.SUBMITTED;
                               return (

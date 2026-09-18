@@ -87,7 +87,7 @@ export function buildDecisionHistory(
         id: `editor-${a.id}`,
         actorRole: 'EDITOR',
         actorName: profiles[a.editor_id]?.name || 'Editor',
-        decision: (a.recommendation as string).replace(/_/g, ' '),
+        decision: a.recommendation === 'ADDITIONAL_REVIEW' ? 'Peer Review 2' : (a.recommendation as string).replace(/_/g, ' '),
         createdAt: a.recommendation_submitted_at as string,
       });
     });

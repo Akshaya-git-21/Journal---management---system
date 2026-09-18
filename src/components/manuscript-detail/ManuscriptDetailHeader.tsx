@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ManuscriptRow, RevisionRow } from '../../lib/workflow';
 import { Download, MoreVertical, RefreshCw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { getManuscriptStatusLabel, getRevisionMeta, STANDARD_STATUS_COLORS } from '../../lib/manuscriptStatusLabel';
+import { getRoleAwareStatusLabel, getRevisionMeta, STANDARD_STATUS_COLORS } from '../../lib/manuscriptStatusLabel';
 import { getProduction, subscribeToProduction } from '../../lib/production';
 
 interface Props {
@@ -33,7 +33,10 @@ export default function ManuscriptDetailHeader({ manuscript, onRefresh, latestRe
     if (!date) return '--';
     return new Date(date).toLocaleString();
   };
-  const statusLabel = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
+  // Only Coordinator/Editor detail pages render this header (never the
+  // Author's), so the non-Author branch of getRoleAwareStatusLabel always
+  // applies here -- both want the same "PEER REVIEW 2" label.
+  const statusLabel = getRoleAwareStatusLabel(manuscript, 'EDITOR', latestRevision, productionStatus);
   const revisionMeta = getRevisionMeta(latestRevision);
 
   return (

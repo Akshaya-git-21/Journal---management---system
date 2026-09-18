@@ -21,12 +21,13 @@ export type StandardStatus = typeof STANDARD_STATUSES[number];
 
 /** Shared badge coloring so every workspace renders the same status the
  * same way -- no more per-workspace STATUS_STYLES duplicates. */
-export const STANDARD_STATUS_COLORS: Record<StandardStatus | 'DRAFT' | 'PRODUCTION PREPARATION' | 'EDITOR ASSIGNED' | 'IN PUBLISH', string> = {
+export const STANDARD_STATUS_COLORS: Record<StandardStatus | 'DRAFT' | 'PRODUCTION PREPARATION' | 'EDITOR ASSIGNED' | 'IN PUBLISH' | 'PEER REVIEW 2', string> = {
   DRAFT: 'bg-slate-100 text-slate-600 border-slate-200',
   SUBMITTED: 'bg-amber-50 text-amber-700 border-amber-200',
   'EDITORIAL REVIEW': 'bg-blue-50 text-blue-700 border-blue-200',
   'IN REVISION': 'bg-orange-50 text-orange-700 border-orange-200',
   'PEER REVIEW': 'bg-purple-50 text-purple-700 border-purple-200',
+  'PEER REVIEW 2': 'bg-purple-50 text-purple-700 border-purple-200',
   ACCEPTED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   REJECTED: 'bg-red-50 text-red-700 border-red-200',
   PROOFREADING: 'bg-sky-50 text-sky-700 border-sky-200',
@@ -118,8 +119,37 @@ export function getManuscriptStatusLabel(manuscript: ManuscriptStatusLike, lates
   return status.replace(/_/g, ' ');
 }
 
-export function getManuscriptStatusMeta(manuscript: ManuscriptStatusLike, latestRevision?: RevisionRow | null, productionStatus?: string | null): { label: string; nextStep: string } {
+/** True once the manuscript has re-entered peer review for a second round --
+ * the Editor sent it back to reviewers (ADDITIONAL_REVIEW) after the first
+ * round's reports came in, which re-uses the same UNDER_REVIEW status as the
+ * first round (see 0043_editor_initiated_reviewer_recheck.sql). Distinguished
+ * from the first round by the presence of a PEER_REVIEW-origin revision,
+ * which only exists once the Editor has made that call. */
+export function isPeerReviewRound2(manuscript: ManuscriptStatusLike, latestRevision?: RevisionRow | null): boolean {
+  return manuscript.status === 'UNDER_REVIEW' && !!latestRevision && latestRevision.origin === 'PEER_REVIEW';
+}
+
+/**
+ * Role-specific spin on getManuscriptStatusLabel() for the second peer-review
+ * round only -- every other status is identical across roles. Editor/
+ * Coordinator (and anyone else not the Author) see "PEER REVIEW 2" so they
+ * know reviewers are re-checking; the Author -- who never sees a second
+ * "Peer Review" label appear out of nowhere for a stage they experience as
+ * their revision being re-examined -- sees "IN REVISION" instead.
+ */
+export function getRoleAwareStatusLabel(
+  manuscript: ManuscriptStatusLike,
+  role: 'AUTHOR' | 'EDITOR' | 'COORDINATOR' | 'REVIEWER',
+  latestRevision?: RevisionRow | null,
+  productionStatus?: string | null
+): string {
   const label = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
+  if (label !== 'PEER REVIEW' || !isPeerReviewRound2(manuscript, latestRevision)) return label;
+  return role === 'AUTHOR' ? 'IN REVISION' : 'PEER REVIEW 2';
+}
+
+export function getManuscriptStatusMeta(manuscript: ManuscriptStatusLike, latestRevision?: RevisionRow | null, productionStatus?: string | null, labelOverride?: string): { label: string; nextStep: string } {
+  const label = labelOverride ?? getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
   if (label === 'PRODUCTION PREPARATION') return { label, nextStep: '' };
   if (label === 'ACCEPTED') return { label, nextStep: 'Production' };
   if (label === 'IN REVISION') {
@@ -150,7 +180,7 @@ export function getCoordinatorStatusLabel(
   latestRevision?: RevisionRow | null,
   productionStatus?: string | null
 ): string {
-  const label = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
+  const label = getRoleAwareStatusLabel(manuscript, 'COORDINATOR', latestRevision, productionStatus);
   if (label !== 'EDITORIAL REVIEW' || !editorAssignments || editorAssignments.length === 0) return label;
   const activeEditor = editorAssignments.find((a) => a.status === 'ACCEPTED') || editorAssignments[0];
   return activeEditor.status === 'ACCEPTED' ? label : 'EDITOR ASSIGNED';
@@ -164,7 +194,7 @@ export function getCoordinatorStatusMeta(
 ): { label: string; nextStep: string } {
   const label = getCoordinatorStatusLabel(manuscript, editorAssignments, latestRevision, productionStatus);
   if (label === 'EDITOR ASSIGNED') return { label, nextStep: 'Waiting for the editor to accept the assignment' };
-  return getManuscriptStatusMeta(manuscript, latestRevision, productionStatus);
+  return getManuscriptStatusMeta(manuscript, latestRevision, productionStatus, label);
 }
 
 /** Picks the most recent manuscript_revisions row (by revision_number). */

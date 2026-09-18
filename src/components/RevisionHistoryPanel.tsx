@@ -184,7 +184,7 @@ export default function RevisionHistoryPanel({ manuscriptId, profiles = {} }: Pr
                   <p className="text-sm font-bold text-slate-900">
                     {rev.origin === 'EDITOR_SCREENING'
                       ? (rev.editor_decision === 'REJECT' ? 'Reject Submission' : rev.editor_decision === 'ACCEPT' ? 'Move to Next Stage' : 'Return to Author')
-                      : rev.editor_decision.replace(/_/g, ' ')}
+                      : rev.editor_decision === 'ADDITIONAL_REVIEW' ? 'Peer Review 2' : rev.editor_decision.replace(/_/g, ' ')}
                   </p>
                 </div>
               )}

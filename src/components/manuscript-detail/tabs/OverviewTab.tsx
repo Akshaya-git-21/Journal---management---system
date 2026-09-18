@@ -259,7 +259,7 @@ export function OverviewTab({
                   ? (activeEditor.recommendation === 'REJECT' ? 'Reject Submission'
                     : activeEditor.recommendation === 'ACCEPT' ? 'Move to Next Stage'
                     : 'Return to Author')
-                  : activeEditor.recommendation.replace(/_/g, ' ')}
+                  : activeEditor.recommendation === 'ADDITIONAL_REVIEW' ? 'Peer Review 2' : activeEditor.recommendation.replace(/_/g, ' ')}
               </p>
             </div>
           </div>

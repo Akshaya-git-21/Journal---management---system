@@ -292,12 +292,6 @@ export default function EditorEvaluationSidebar({
             label: 'Decision',
             icon: CheckCircle2,
             badge: decisionBadge
-          },
-          {
-            id: 'suggestions',
-            label: 'Reviewer Selection',
-            icon: Users,
-            badge: suggestionsBadge
           }
         ]}
       />

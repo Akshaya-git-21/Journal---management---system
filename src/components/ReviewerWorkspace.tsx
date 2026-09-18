@@ -663,11 +663,11 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
         <div className="bg-white border border-slate-200 rounded-xl p-6">
           <h3 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-1.5"><ClipboardCheck className="w-4 h-4" /> Accept or Decline Review Invitation</h3>
           <p className="text-xs text-slate-600 mb-4">Do you accept this peer review invitation? You can decline if this manuscript is outside your area of expertise or you have a conflict of interest. The manuscript PDF and review questionnaire unlock once you accept.</p>
-          <div className="flex gap-3">
-            <button disabled={busy} onClick={accept} className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-5 py-3 rounded-lg cursor-pointer disabled:opacity-50 transition-all flex-1">
-              <Check className="w-4 h-4" /> ACCEPT REVIEW INVITATION
+          <div className="flex gap-2">
+            <button disabled={busy} onClick={accept} className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-3 py-2 rounded-lg cursor-pointer disabled:opacity-50 transition-all">
+              <Check className="w-4 h-4" /> ACCEPT
             </button>
-            <button disabled={busy} onClick={() => setShowDeclineModal(true)} className="flex items-center gap-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold px-4 py-2.5 rounded-lg cursor-pointer disabled:opacity-50 transition-all">
+            <button disabled={busy} onClick={() => setShowDeclineModal(true)} className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded-lg cursor-pointer disabled:opacity-50 transition-all">
               <XIcon className="w-4 h-4" /> DECLINE
             </button>
           </div>
@@ -852,8 +852,8 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
   }, [assignmentId]);
 
   const handleUploadAttachment = async (file: File) => {
-    if (file.type !== 'application/pdf') {
-      setAttachmentError('Only PDF files can be attached.');
+    if (!/\.(docx?)$/i.test(file.name)) {
+      setAttachmentError('Only Microsoft Word documents (.doc, .docx) are accepted.');
       return;
     }
     setAttachmentError('');
@@ -867,7 +867,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('manuscript-files')
-        .upload(fileKey, file, { cacheControl: '3600', upsert: false, contentType: 'application/pdf' });
+        .upload(fileKey, file, { cacheControl: '3600', upsert: false, contentType: file.type || 'application/octet-stream' });
       if (uploadError) throw new Error(uploadError.message);
 
       const { data: urlData } = supabase.storage.from('manuscript-files').getPublicUrl(uploadData.path);
@@ -980,7 +980,8 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
 
   const validateForm = (): string | null => {
     if (!questionnaireComplete) return 'Please answer all 10 questions and provide a reason for each.';
-    if (!commentsToAuthor.trim()) return 'Comments to Author is required.';
+    if (!isReReview && !commentsToAuthor.trim()) return 'Comments to Author is required.';
+    if (isReReview && recommendation === 'REJECT' && !commentsToAuthor.trim()) return 'A reason is required when rejecting.';
     if (!recommendation) return 'Please select a recommendation.';
     return null;
   };
@@ -1152,23 +1153,27 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
             </div>
           )}
 
-          {/* Comments to Author */}
-          <div className="border-t border-slate-200 pt-6">
-            <p className="text-xs font-bold text-slate-900 mb-1">Comments to Author <span className="text-red-600">*</span></p>
-            <p className="text-[11px] text-slate-500 mb-2">This is your detailed feedback that will eventually be shared with the Author through the Coordinator.</p>
-            <textarea
-              value={commentsToAuthor}
-              onChange={(e) => setCommentsToAuthor(e.target.value)}
-              rows={5}
-              placeholder="Provide detailed feedback for the author..."
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
-            />
-          </div>
+          {/* Comments to Author -- re-review rounds capture this inline
+              next to the Accept/Reject choice instead (see below), where
+              it's clearly tied to the reason for rejecting. */}
+          {!isReReview && (
+            <div className="border-t border-slate-200 pt-6">
+              <p className="text-xs font-bold text-slate-900 mb-1">Comments to Author <span className="text-red-600">*</span></p>
+              <p className="text-[11px] text-slate-500 mb-2">This is your detailed feedback that will eventually be shared with the Author through the Coordinator.</p>
+              <textarea
+                value={commentsToAuthor}
+                onChange={(e) => setCommentsToAuthor(e.target.value)}
+                rows={5}
+                placeholder="Provide detailed feedback for the author..."
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
+              />
+            </div>
+          )}
 
-          {/* Upload PDF */}
+          {/* Upload Document */}
           <div className="border-t border-slate-200 pt-6">
-            <p className="text-xs font-bold text-slate-900 mb-1">Attach a PDF</p>
-            <p className="text-[11px] text-slate-500 mb-2">Optionally upload an annotated copy of the manuscript or other supporting PDF alongside your review.</p>
+            <p className="text-xs font-bold text-slate-900 mb-1">Attach a Document</p>
+            <p className="text-[11px] text-slate-500 mb-2">Optionally upload an annotated copy of the manuscript or other supporting document (.doc, .docx) alongside your review.</p>
 
             {attachmentError && (
               <p className="text-xs text-red-600 font-semibold mb-2">{attachmentError}</p>
@@ -1204,10 +1209,10 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
               uploadingAttachment ? 'opacity-50 pointer-events-none' : 'hover:bg-slate-50 text-slate-700'
             }`}>
               {uploadingAttachment ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              {uploadingAttachment ? 'Uploading...' : 'Upload PDF'}
+              {uploadingAttachment ? 'Uploading...' : 'Upload Document'}
               <input
                 type="file"
-                accept="application/pdf"
+                accept=".doc,.docx"
                 className="hidden"
                 disabled={uploadingAttachment}
                 onChange={(e) => {
@@ -1224,15 +1229,24 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
             <h3 className="font-black text-sm text-slate-900 mb-4">RECOMMENDATION</h3>
             <p className="text-xs text-slate-600 mb-4">Please select only one recommendation for this manuscript.</p>
             <div className="grid grid-cols-1 gap-3">
-              {[
-                { value: 'ACCEPT', label: 'Accept', desc: 'Suitable for immediate publication as is', dot: 'bg-emerald-500' },
-                { value: 'MINOR_REVISION', label: 'Accept with Minor Revision', desc: 'Requires minor refinements or polishing', dot: 'bg-amber-500' },
-                { value: 'MAJOR_REVISION', label: 'Accept with Major Revision', desc: 'Requires substantial conceptual refinements', dot: 'bg-orange-500' },
-                // Reject only applies to the original round -- a re-review
-                // round is purely "did this revision address what I flagged",
-                // so only Accept/Minor/Major make sense there.
-                ...(isReReview ? [] : [{ value: 'REJECT', label: 'Reject', desc: 'Not suitable for presentation or publication', dot: 'bg-red-500' }]),
-              ].map((option) => (
+              {(
+                // A re-review round is purely "did this revision address
+                // what I flagged" -- Minor/Major Revision don't make sense
+                // as an outcome of re-checking, so it's a straight
+                // accept/reject call (reject requires a reason, captured via
+                // the Comments to Author field below).
+                isReReview
+                  ? [
+                      { value: 'ACCEPT', label: 'Accept', desc: 'The revision addresses my concerns', dot: 'bg-emerald-500' },
+                      { value: 'REJECT', label: 'Reject', desc: 'The revision does not address my concerns -- reason required below', dot: 'bg-red-500' },
+                    ]
+                  : [
+                      { value: 'ACCEPT', label: 'Accept', desc: 'Suitable for immediate publication as is', dot: 'bg-emerald-500' },
+                      { value: 'MINOR_REVISION', label: 'Accept with Minor Revision', desc: 'Requires minor refinements or polishing', dot: 'bg-amber-500' },
+                      { value: 'MAJOR_REVISION', label: 'Accept with Major Revision', desc: 'Requires substantial conceptual refinements', dot: 'bg-orange-500' },
+                      { value: 'REJECT', label: 'Reject', desc: 'Not suitable for presentation or publication', dot: 'bg-red-500' },
+                    ]
+              ).map((option) => (
                 <label key={option.value} className={`flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all ${
                   recommendation === option.value
                     ? `border-[#008751] bg-emerald-50`
@@ -1243,7 +1257,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
                     name="recommendation"
                     value={option.value}
                     checked={recommendation === option.value}
-                    onChange={(e) => setRecommendation(e.target.value as ReviewerRecommendation)}
+                    onChange={(e) => { setRecommendation(e.target.value as ReviewerRecommendation); setError(''); }}
                     className="w-4 h-4 mt-0.5 accent-[#008751]"
                   />
                   <div className="flex-1">
@@ -1253,6 +1267,25 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
                 </label>
               ))}
             </div>
+
+            {isReReview && (
+              <div className="mt-4">
+                <p className="text-xs font-bold text-slate-900 mb-1">
+                  {recommendation === 'REJECT' ? 'Reason for Rejection' : 'Comments to Author'} {recommendation === 'REJECT' && <span className="text-red-600">*</span>}
+                </p>
+                <p className="text-[11px] text-slate-500 mb-2">
+                  {recommendation === 'REJECT' ? 'Explain what still needs to be addressed -- this is shared with the Author through the Coordinator.' : 'Optional feedback for the Author, shared through the Coordinator.'}
+                </p>
+                <textarea
+                  value={commentsToAuthor}
+                  onChange={(e) => setCommentsToAuthor(e.target.value)}
+                  rows={4}
+                  placeholder={recommendation === 'REJECT' ? 'Explain why this revision does not address your concerns...' : 'Optional comments for the author...'}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-sans focus:border-[#008751] focus:outline-none"
+                />
+              </div>
+            )}
+
             <p className="text-xs text-slate-500 italic mt-3">Your recommendation and review comments will be forwarded to the Editor for final editorial assessment.</p>
           </div>
 

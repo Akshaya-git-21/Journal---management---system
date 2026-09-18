@@ -7,7 +7,7 @@ import {
   getManuscript, getContributors, getDiscussions, getReviewerNeedingReplacement, getPendingEditorSuggestions
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
-import { getManuscriptStatusLabel, getLatestRevision, getRevisionMeta, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
+import { getManuscriptStatusLabel, getRoleAwareStatusLabel, getLatestRevision, getRevisionMeta, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
 import {
   getEditorAssignedManuscripts,
   subscribeToEditorAssignments,
@@ -108,7 +108,7 @@ const STATUS_STYLES: Record<ManuscriptStatus, string> = {
 };
 
 function StatusBadge({ manuscript, latestRevision }: { manuscript: ManuscriptRow; latestRevision?: RevisionRow | null }) {
-  const label = getManuscriptStatusLabel(manuscript, latestRevision);
+  const label = getRoleAwareStatusLabel(manuscript, 'EDITOR', latestRevision);
   const revisionMeta = getRevisionMeta(latestRevision);
   const style = STANDARD_STATUS_COLORS[label as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT;
   return (
@@ -1109,8 +1109,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                     { id: 'files', label: 'Files for Review (1)' },
                     { id: 'evaluation', label: 'Editor Evaluation (2)' },
                     { id: 'reviews', label: 'Reviewers (3)' },
-                    { id: 'revisions', label: 'Revisions (4)' },
-                    { id: 'comments', label: 'Collaboration (5)' }
+                    { id: 'revisions', label: 'Revisions (4)' }
                   ].map((tab) => (
                     <button
                       key={tab.id}
@@ -1274,8 +1273,10 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                             {editorHasSuggestedReviewers && manuscript.status === 'EDITOR_REVIEW'
                               ? 'PEER REVIEW'
                               : recommendationIsCurrent && ['EDITOR_REVIEW', 'AWAITING_DECISION'].includes(manuscript.status)
-                              ? `Decision Submitted: ${assignment.recommendation?.replace(/_/g, ' ')}`
-                              : getManuscriptStatusLabel(manuscript, latestRevisionForReview, production?.production_status)}
+                              ? assignment.recommendation === 'ADDITIONAL_REVIEW'
+                                ? 'Decision Submitted: Peer Review 2'
+                                : `Decision Submitted: ${assignment.recommendation?.replace(/_/g, ' ')}`
+                              : getRoleAwareStatusLabel(manuscript, 'EDITOR', latestRevisionForReview, production?.production_status)}
                           </p>
                           {revisionN != null && (
                             <p className="text-xs font-bold text-slate-500 mt-1">Revision: {revisionN}</p>
@@ -1879,12 +1880,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                       {recommendationIsCurrent && !redeciding ? (
                         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
                           <p className="text-sm font-bold text-emerald-900">
-                            Editor Decision: {assignment.recommendation!.replace(/_/g, ' ')}
+                            Editor Decision: {assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Peer Review 2' : assignment.recommendation!.replace(/_/g, ' ')}
                           </p>
                           {assignment.recommendation_submitted_at && (
                             <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
                           )}
-                          <p className="text-xs text-slate-500 mt-3">Your recommendation is with the Coordinator for review.</p>
                         </div>
                       ) : !evaluationSubmitted && !isRevisionDecision && !isPeerReviewRound ? (
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
@@ -2608,12 +2608,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                       {recommendationIsCurrent && !redeciding ? (
                         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
                           <p className="text-sm font-bold text-emerald-900">
-                            Editor Decision: {assignment.recommendation!.replace(/_/g, ' ')}
+                            Editor Decision: {assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Peer Review 2' : assignment.recommendation!.replace(/_/g, ' ')}
                           </p>
                           {assignment.recommendation_submitted_at && (
                             <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
                           )}
-                          <p className="text-xs text-slate-500 mt-3">Your recommendation is with the Coordinator for review.</p>
                         </div>
                       ) : !evaluationSubmitted && !isRevisionDecision && !isPeerReviewRound ? (
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
@@ -2897,7 +2896,6 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                       return (
                         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
                           <p className="text-xs font-semibold text-emerald-700 text-center">✓ Decision Submitted</p>
-                          <p className="text-xs text-emerald-600 text-center mt-1">Awaiting coordinator action</p>
                         </div>
                       );
                     }
@@ -2912,7 +2910,6 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                     return (
                       <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
                         <p className="text-xs font-semibold text-emerald-700 text-center">✓ Evaluation Submitted</p>
-                        <p className="text-xs text-emerald-600 text-center mt-1">Awaiting coordinator action</p>
                       </div>
                     );
                   })()}
@@ -2924,7 +2921,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                     <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
                       Editor Decision
                     </h3>
-                    <p className="text-sm font-bold text-slate-900">{assignment.recommendation.replace(/_/g, ' ')}</p>
+                    <p className="text-sm font-bold text-slate-900">{assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Peer Review 2' : assignment.recommendation.replace(/_/g, ' ')}</p>
                     <p className="text-xs text-slate-500">Recommendation submitted</p>
                   </div>
                 )}

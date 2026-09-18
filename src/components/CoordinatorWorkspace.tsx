@@ -10,7 +10,7 @@ import {
   getRecentStatusHistory, getOverdueReviewerAssignments, OverdueReviewRow, getRecentAuditLog,
   notifyExpiredReviewerReplacements
 } from '../lib/workflow';
-import { getManuscriptStatusLabel, getLatestRevision, getRevisionMeta, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
+import { getManuscriptStatusLabel, getRoleAwareStatusLabel, getLatestRevision, getRevisionMeta, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
 import { listProduction, subscribeToProduction } from '../lib/production';
 import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
@@ -44,7 +44,7 @@ const STAGE_TABS: { key: string; label: string; predicate: (m: ManuscriptRow) =>
 ];
 
 function StatusBadge({ manuscript, latestRevision, productionStatus }: { manuscript: ManuscriptRow; latestRevision?: RevisionRow | null; productionStatus?: string | null }) {
-  const label = getManuscriptStatusLabel(manuscript, latestRevision, productionStatus);
+  const label = getRoleAwareStatusLabel(manuscript, 'COORDINATOR', latestRevision, productionStatus);
   const revisionMeta = getRevisionMeta(latestRevision);
   const style = STANDARD_STATUS_COLORS[label as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT;
   return (

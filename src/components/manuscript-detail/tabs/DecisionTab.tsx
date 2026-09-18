@@ -47,6 +47,7 @@ const DECISION_LABELS: Record<string, string> = {
   MAJOR_REVISION: 'Major Revision',
   REJECT: 'Reject',
   SPLIT: 'Split decision',
+  ADDITIONAL_REVIEW: 'Peer Review 2',
 };
 
 // Screening-stage Editor decision: only Reject Submission / Return to
