@@ -1,5 +1,5 @@
 import { useState, useEffect, ReactNode } from 'react';
-import { Settings, Printer, Inbox, PackageCheck, FileCheck2, MessageSquareWarning, Send, CheckCircle2, FileText, Globe } from 'lucide-react';
+import { Printer, Inbox, PackageCheck, FileCheck2, MessageSquareWarning, Send, CheckCircle2, FileText, Globe } from 'lucide-react';
 import { Role } from '../types';
 import { NavGroup, NavItem } from './SidebarNavGroup';
 import GDMemberProductionSection, { GDMemberProductionView } from './production/GDMemberProductionSection';
@@ -66,16 +66,6 @@ export default function GDMemberWorkspace({ currentUser }: GDMemberWorkspaceProp
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
         <aside className="w-full md:w-64 bg-[#00170f] border-r border-[#002116] p-4 shrink-0 text-white overflow-y-auto">
           <div className="space-y-3">
-            <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-4 text-sm text-emerald-100">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.24em] text-emerald-300 font-bold">
-                <Settings className="w-3.5 h-3.5" /> Production Team
-              </div>
-              <p className="mt-3 text-[12px] text-emerald-200 leading-relaxed">
-                Welcome{currentUser?.name ? `, ${currentUser.name}` : ''}. This account is separate from Coordinator, Editor,
-                Reviewer, and Publisher accounts and has no Coordinator permissions.
-              </p>
-            </div>
-
             <NavGroup title="Production" icon={<Printer className="w-4 h-4" />} expanded={expanded} onToggle={() => setExpanded((v) => !v)}>
               {PRODUCTION_NAV_ITEMS.map((item) => (
                 <NavItem

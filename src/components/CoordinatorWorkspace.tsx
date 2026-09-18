@@ -495,12 +495,6 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
         <aside className="w-full md:w-64 bg-[#00170f] border-r border-[#002116] p-4 shrink-0 text-white overflow-y-auto">
           <div className="space-y-3">
-            <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-4 text-sm text-emerald-100">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.24em] text-emerald-300 font-bold">
-                <Settings className="w-3.5 h-3.5" /> Coordinator Hub
-              </div>
-              <p className="mt-3 text-[12px] text-emerald-200 leading-relaxed">Manage the editorial pipeline, approvals, and reviewer assignments from one central control panel.</p>
-            </div>
             <NavGroup title="Workspace" icon={<LayoutGrid className="w-4 h-4" />} expanded={expandedNavGroups.workspace} onToggle={() => toggleNavGroup('workspace')}>
               <NavItem icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" active={isDashboardSection} onClick={() => { setActiveSection('DASHBOARD'); setSelectedId(null); }} />
               <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Manuscript Queue" active={isManuscriptQueueSection} onClick={() => { setActiveSection('MANUSCRIPT_QUEUE'); setSelectedId(null); }} />
