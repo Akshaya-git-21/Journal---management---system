@@ -33,7 +33,7 @@ type Tab =
   | 'JOURNAL_SETTINGS' | 'EDITORIAL_BOARD' | 'JOURNAL_POLICIES' | 'JOURNAL_SECTIONS'
   | 'ROLES' | 'BACKUP';
 
-const WIZARD_STEPS = ['Final Article PDF', 'PDF Validation', 'Website Preview', 'Final Publication Check'] as const;
+const WIZARD_STEPS = ['Approved Proof', 'PDF Validation', 'Website Preview', 'Final Publication Check'] as const;
 
 interface PublishedDetails {
   editors: EditorAssignmentRow[];
@@ -209,8 +209,8 @@ export default function PublisherWorkspace({ currentUser, onSignOut }: Publisher
       // The manuscript already has an editorially-approved final proof from
       // the GD/Editor/Author loop -- once the Publisher has proceeded on it,
       // there's no reason to ask them to upload it again from scratch here.
-      // Pull it in as the Final Article PDF automatically and skip straight
-      // to PDF Validation.
+      // Pull it in automatically as step 1 (Approved Proof); the Publisher
+      // then moves on to PDF Validation as step 2.
       getProofs(m.id).then(async (proofs) => {
         const approved = proofs[0];
         if (cancelled || !approved?.public_url) return;
@@ -225,7 +225,6 @@ export default function PublisherWorkspace({ currentUser, onSignOut }: Publisher
           setPdfAnalysis(analysis);
           setUploadedUrl(approved.public_url);
           setUploadedFileMeta({ name: approved.file_name, sizeLabel: formatBytes(blob.size) });
-          setWizardStep(1);
         } catch {
           // Fall back to the manual upload step -- the Publisher can still
           // upload it themselves if the approved proof can't be fetched.
@@ -758,8 +757,12 @@ export default function PublisherWorkspace({ currentUser, onSignOut }: Publisher
                     {/* STEP 1: FINAL PDF UPLOAD */}
                     {wizardStep === 0 && (
                       <div className="bg-white border-2 border-slate-200 rounded-2xl p-6 shadow-sm">
-                        <p className="text-xs uppercase tracking-[0.2em] text-[#008751] font-bold">Final Article PDF</p>
-                        <p className="mt-1 text-sm text-slate-500">Upload the final manufactured PDF that will be made available to readers.</p>
+                        <p className="text-xs uppercase tracking-[0.2em] text-[#008751] font-bold">Approved Proof</p>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {uploadedFileMeta
+                            ? 'The approved final proof from production. This is the PDF that will be made available to readers.'
+                            : 'Upload the final manufactured PDF that will be made available to readers.'}
+                        </p>
 
                         {!uploadedFileMeta ? (
                           <div className="mt-4 space-y-3">
@@ -814,7 +817,6 @@ export default function PublisherWorkspace({ currentUser, onSignOut }: Publisher
                             </div>
                             <div className="flex gap-2 shrink-0">
                               <button onClick={() => window.open(uploadedUrl!, '_blank')} className="border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-[11px] font-semibold px-3 py-2 rounded-xl">Preview PDF</button>
-                              <button onClick={handleReplacePdf} className="border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-[11px] font-semibold px-3 py-2 rounded-xl flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Replace PDF</button>
                             </div>
                           </div>
                         )}

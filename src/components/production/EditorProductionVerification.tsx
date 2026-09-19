@@ -338,7 +338,7 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
 
       {awaitingAuthorCorrectionsReview && (
         <div className="rounded-2xl border-2 border-slate-900 bg-slate-50 p-4 space-y-3">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Author's Correction Request</p>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Editor Correction Request</p>
           {error && <p className="text-xs text-red-600">{error}</p>}
           <textarea
             value={authorCorrectionsDraft}
