@@ -862,7 +862,6 @@ export function ReviewBoardTab({
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 text-center">
           <CheckCircle className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
           <p className="font-bold text-emerald-700">Reviewer Board Finalized</p>
-          <p className="text-sm text-emerald-600 mt-1">This manuscript has moved to Peer Review status</p>
         </div>
       )}
 

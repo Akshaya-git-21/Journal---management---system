@@ -174,6 +174,8 @@ export function getManuscriptStatusMeta(manuscript: ManuscriptStatusLike, latest
  * relabeling of the same EDITORIAL REVIEW state, so Author/Editor/Reviewer
  * views are unaffected.
  */
+export const EDITOR_DECLINED_LABEL = 'Editor Declined – Choose Another Editor';
+
 export function getCoordinatorStatusLabel(
   manuscript: ManuscriptStatusLike,
   editorAssignments: EditorAssignmentStatusLike[] | undefined | null,
@@ -181,6 +183,13 @@ export function getCoordinatorStatusLabel(
   productionStatus?: string | null
 ): string {
   const label = getRoleAwareStatusLabel(manuscript, 'COORDINATOR', latestRevision, productionStatus);
+  // The assigned Editor declined and nobody else has been invited yet
+  // (respond_to_editor_assignment reopens the manuscript to SUBMITTED).
+  if (
+    manuscript.status === 'SUBMITTED' && editorAssignments && editorAssignments.length > 0 &&
+    editorAssignments.some((a) => a.status === 'DECLINED') &&
+    !editorAssignments.some((a) => a.status === 'INVITED' || a.status === 'ACCEPTED')
+  ) return EDITOR_DECLINED_LABEL;
   if (label !== 'EDITORIAL REVIEW' || !editorAssignments || editorAssignments.length === 0) return label;
   const activeEditor = editorAssignments.find((a) => a.status === 'ACCEPTED') || editorAssignments[0];
   return activeEditor.status === 'ACCEPTED' ? label : 'EDITOR ASSIGNED';
@@ -194,6 +203,7 @@ export function getCoordinatorStatusMeta(
 ): { label: string; nextStep: string } {
   const label = getCoordinatorStatusLabel(manuscript, editorAssignments, latestRevision, productionStatus);
   if (label === 'EDITOR ASSIGNED') return { label, nextStep: 'Waiting for the editor to accept the assignment' };
+  if (label === EDITOR_DECLINED_LABEL) return { label, nextStep: 'Assign another editor' };
   return getManuscriptStatusMeta(manuscript, latestRevision, productionStatus, label);
 }
 

@@ -24,17 +24,34 @@ export default function NotificationBell({ dark = true }: { dark?: boolean }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Only the most recently started fetch may write state -- marking N
+  // notifications read fires N realtime events, and an older, slower fetch
+  // finishing last would otherwise put already-read items (and the unread
+  // badge) back.
+  const loadSeq = useRef(0);
   const load = () => {
-    getMyNotifications().then(setNotifications).catch(() => {});
+    const seq = ++loadSeq.current;
+    getMyNotifications()
+      .then((rows) => { if (seq === loadSeq.current) setNotifications(rows); })
+      .catch(() => {});
   };
 
   useEffect(() => {
     load();
+    // Realtime events for one action arrive in a burst -- refetch once.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleLoad = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(load, 150);
+    };
     const channel = supabase
       .channel('workflow-notifications-bell')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'workflow_notifications' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'workflow_notifications' }, scheduleLoad)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {
@@ -89,7 +106,7 @@ export default function NotificationBell({ dark = true }: { dark?: boolean }) {
         <Bell className="w-4 h-4" />
         {unreadCount > 0 && (
           <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-            {unreadCount > 9 ? '9+' : unreadCount}
+            {unreadCount}
           </span>
         )}
       </button>

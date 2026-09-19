@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Role, ManuscriptStatus, ReviewerRecommendation } from '../types';
 import {
   ManuscriptRow, ReviewerAssignmentRow, ManuscriptFileRow, ScreeningResponse, RevisionRow, ReviewerReviewAttachmentRow,
@@ -61,7 +61,14 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
   const [expandedNavGroups, setExpandedNavGroups] = useState<Record<string, boolean>>({ assignments: true, status: true, modules: true });
   const toggleNavGroup = (key: string) => setExpandedNavGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
+  // Every realtime event fires load(), and it fetches per-manuscript, so
+  // several can be in flight at once. Only the most recently STARTED load
+  // may write rows -- otherwise an older, slower one finishes last and
+  // restores stale assignment statuses (e.g. INVITED after an accept).
+  const loadSeq = useRef(0);
+
   const load = async () => {
+    const seq = ++loadSeq.current;
     try {
       const { data } = await supabase.auth.getUser();
       const manuscripts = await listManuscripts();
@@ -77,9 +84,9 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
           .sort((a, b) => b.revision_number - a.revision_number);
         if (mine.length > 0) withAssignments.push({ manuscript: m, assignment: mine[0], priorRounds: mine.slice(1) });
       }
-      setRows(withAssignments);
+      if (seq === loadSeq.current) setRows(withAssignments);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   };
 
@@ -544,7 +551,7 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
   const accept = async () => {
     setBusy(true); setError('');
     try { await respondToReviewInvite(assignment.id, true); onChanged(); }
-    catch (e: any) { setError(e.message); }
+    catch (e: any) { setError(e.message); onChanged(); }
     finally { setBusy(false); }
   };
 
@@ -555,7 +562,7 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
       await respondToReviewInvite(assignment.id, false, declineReason.trim());
       setShowDeclineModal(false);
       onChanged();
-    } catch (e: any) { setError(e.message); }
+    } catch (e: any) { setError(e.message); onChanged(); }
     finally { setBusy(false); }
   };
 

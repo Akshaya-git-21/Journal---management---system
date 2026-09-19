@@ -59,7 +59,35 @@ export interface ProfileData {
   role?: string;
 }
 
-export async function getEditorAssignedManuscripts(editorId: string): Promise<EditorManuscriptDetails[]> {
+// A single Editor action fires several realtime events (editor_assignments,
+// manuscripts, manuscript_status_history, ...) and the action handler also
+// calls a manual refresh -- each used to run its own full refetch (~10
+// queries per manuscript) in parallel, which multiplied the load and made the
+// UI slow to reflect a just-submitted action. Coalesce them: at most one fetch
+// in flight per editor, plus ONE queued follow-up that starts after it (so a
+// caller that asked after a write never gets data fetched before it).
+type EditorFetchState = { running: Promise<EditorManuscriptDetails[]>; queued: Promise<EditorManuscriptDetails[]> | null };
+const editorFetchStates = new Map<string, EditorFetchState>();
+
+function startEditorFetch(editorId: string): Promise<EditorManuscriptDetails[]> {
+  const running = fetchEditorAssignedManuscripts(editorId);
+  const state: EditorFetchState = { running, queued: null };
+  editorFetchStates.set(editorId, state);
+  const clear = () => { if (editorFetchStates.get(editorId) === state) editorFetchStates.delete(editorId); };
+  running.then(clear, clear);
+  return running;
+}
+
+export function getEditorAssignedManuscripts(editorId: string): Promise<EditorManuscriptDetails[]> {
+  const state = editorFetchStates.get(editorId);
+  if (!state) return startEditorFetch(editorId);
+  if (!state.queued) {
+    state.queued = state.running.then(() => undefined, () => undefined).then(() => startEditorFetch(editorId));
+  }
+  return state.queued;
+}
+
+async function fetchEditorAssignedManuscripts(editorId: string): Promise<EditorManuscriptDetails[]> {
   try {
     const { data: assignments, error: assignError } = await supabase
       .from('editor_assignments')
@@ -98,32 +126,36 @@ export async function getEditorAssignedManuscripts(editorId: string): Promise<Ed
     // write had already succeeded and a refetch was already in flight.
     const settled = await Promise.all(dedupedAssignments.map(async (assignment): Promise<EditorManuscriptDetails | null> => {
       try {
-        const manuscript = await getManuscript(assignment.manuscript_id);
-        if (!manuscript) return null;
-
+        // manuscript + the rest + files are all independent lookups by
+        // manuscript_id, so run them in one round trip instead of three
+        // sequential ones (profiles below genuinely needs their results).
         const [
+          manuscript,
           contributors,
           discussions,
           reviewers,
           statusHistory,
           revisions,
           suggestedReviewers,
-          editorReviewerActions
+          editorReviewerActions,
+          filesResult
         ] = await Promise.all([
+          getManuscript(assignment.manuscript_id),
           getContributors(assignment.manuscript_id),
           getDiscussions(assignment.manuscript_id),
           getReviewerAssignments(assignment.manuscript_id),
           getStatusHistory(assignment.manuscript_id),
           getRevisions(assignment.manuscript_id),
           getSuggestedReviewers(assignment.manuscript_id),
-          getEditorReviewerActions(assignment.manuscript_id)
+          getEditorReviewerActions(assignment.manuscript_id),
+          supabase
+            .from('manuscript_files')
+            .select('*')
+            .eq('manuscript_id', assignment.manuscript_id)
+            .order('uploaded_at', { ascending: false })
         ]);
-
-        const { data: filesData } = await supabase
-          .from('manuscript_files')
-          .select('*')
-          .eq('manuscript_id', assignment.manuscript_id)
-          .order('uploaded_at', { ascending: false });
+        if (!manuscript) return null;
+        const filesData = filesResult.data;
 
         const userIds = new Set<string>();
         userIds.add(manuscript.author_id);

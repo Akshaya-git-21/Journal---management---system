@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, assignEditor, getEditorReviewerActions, getPendingEditorSuggestions, coordinatorSendEditorReminder, getManuscriptReviewerPool } from '../../../lib/workflow';
-import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision } from '../../../lib/manuscriptStatusLabel';
+import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision, EDITOR_DECLINED_LABEL } from '../../../lib/manuscriptStatusLabel';
 import { getReviewerDisplayStatus } from '../../../lib/reviewerStatus';
 import { formatTimelineDate } from '../../../lib/dateFormat';
 import { getProduction, subscribeToProduction } from '../../../lib/production';
@@ -40,6 +40,23 @@ export function OverviewTab({
 
   const activeEditor = editorAssignments.find(a => a.status === 'ACCEPTED') || editorAssignments[0];
   const evaluationSubmitted = activeEditor?.assessment_status === 'SUBMITTED';
+  // editorAssignments is newest-first. A DECLINED row is history, not the
+  // current Editor: the card below tracks the live (invited/accepted)
+  // assignment, and declined ones are listed alongside it.
+  const currentEditor = activeEditor && activeEditor.status !== 'DECLINED' ? activeEditor : null;
+  const declinedEditors = editorAssignments.filter((a) => a.status === 'DECLINED');
+  const declinedEditorRows = declinedEditors.map((a) => (
+    <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-slate-900">{profiles[a.editor_id]?.name || 'Unknown'}</p>
+        <p className="text-xs text-slate-600 truncate">{profiles[a.editor_id]?.email}</p>
+      </div>
+      <div className="text-right">
+        <span className="inline-block rounded-full bg-red-50 border border-red-200 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-red-700">Declined</span>
+        {a.responded_at && <p className="text-[11px] text-slate-500 mt-1">{formatTimelineDate(a.responded_at)}</p>}
+      </div>
+    </div>
+  ));
   // Coordinator-only distinction: the editor has just been assigned but
   // hasn't accepted yet -- see getCoordinatorStatusLabel() for why this
   // stays separate from the shared EDITORIAL REVIEW status everyone else sees.
@@ -93,14 +110,23 @@ export function OverviewTab({
   // (from the Review Board tab) -- once they have, "Next Action Required"
   // has nothing left for the Coordinator to do until the Editor picks their
   // 2, so the card should stop nagging them to send it again.
-  const [reviewerPoolSent, setReviewerPoolSent] = useState(false);
-  const awaitingReviewerPoolSend = manuscript.status === 'EDITOR_REVIEW' && !!activeEditor && activeEditor.status === 'ACCEPTED'
-    && evaluationSubmitted && !readyToInviteReviewers;
+  // null = not known yet. Not gated on the Editor's evaluation being
+  // SUBMITTED: a revision-round accept leaves assessment_status NOT_STARTED
+  // (0045), which used to keep this card showing after the pool was sent.
+  const [reviewerPoolSent, setReviewerPoolSent] = useState<boolean | null>(null);
+  // The Coordinator can send the pool from the Review Board tab as soon as
+  // an Editor is assigned -- including while the assignment is still
+  // INVITED (Editor hasn't accepted yet) -- so this must not require ACCEPTED.
+  const awaitingReviewerPoolSend = manuscript.status === 'EDITOR_REVIEW' && !!activeEditor && activeEditor.status !== 'DECLINED'
+    && !readyToInviteReviewers;
   useEffect(() => {
-    if (!awaitingReviewerPoolSend) return;
-    getManuscriptReviewerPool(manuscript.id).then((pool) => setReviewerPoolSent(pool.length > 0)).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manuscript.id, awaitingReviewerPoolSend]);
+    if (!awaitingReviewerPoolSend) { setReviewerPoolSent(null); return; }
+    let cancelled = false;
+    getManuscriptReviewerPool(manuscript.id)
+      .then((pool) => { if (!cancelled) setReviewerPoolSent(pool.length > 0); })
+      .catch(() => { if (!cancelled) setReviewerPoolSent(false); });
+    return () => { cancelled = true; };
+  }, [manuscript.id, awaitingReviewerPoolSend, activeEditor?.id]);
 
   // Assign Editor (SUBMITTED -> EDITOR_REVIEW)
   const [availableEditors, setAvailableEditors] = useState<ProfileRow[]>([]);
@@ -185,6 +211,9 @@ export function OverviewTab({
         ? `Editor selected reviewers for Revision ${revisionN} -- invite them to start peer review`
         : 'Editor selected reviewers -- invite them to start peer review';
     }
+    if (awaitingReviewerPoolSend && reviewerPoolSent) {
+      return 'Available reviewers have been sent to the Editor -- waiting for the Editor to select reviewers';
+    }
     if (manuscript.status === 'EDITOR_REVIEW' && evaluationSubmitted) {
       return revisionN
         ? `Revision ${revisionN} editor evaluation complete. Ready for peer review assignment.`
@@ -221,8 +250,19 @@ export function OverviewTab({
 
   return (
     <div className="space-y-6">
+      {/* The assigned Editor declined and no one has been invited yet: say so
+          and keep the declined Editor visible until the Coordinator picks
+          another (the Assign Editor card below is what does that). */}
+      {declinedEditors.length > 0 && !currentEditor && (
+        <div className="bg-white border border-red-200 rounded-2xl p-6">
+          <h3 className="text-sm font-black text-slate-900 mb-3">Editor Assignment</h3>
+          <p className="text-sm font-bold text-red-700 mb-3">{EDITOR_DECLINED_LABEL}</p>
+          <div className="space-y-2">{declinedEditorRows}</div>
+        </div>
+      )}
+
       {/* Editor Assignment & Recommendation Card */}
-      {activeEditor && (
+      {currentEditor && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6">
           <h3 className="text-sm font-black text-slate-900 mb-4">Editor Assignment & Recommendation</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -288,6 +328,13 @@ export function OverviewTab({
                 </button>
                 {reminderError && <p className="mt-1.5 text-xs font-semibold text-red-600">{reminderError}</p>}
               </div>
+            </div>
+          )}
+
+          {declinedEditors.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Previously Declined</p>
+              <div className="space-y-2">{declinedEditorRows}</div>
             </div>
           )}
         </div>
@@ -453,12 +500,16 @@ export function OverviewTab({
       {/* Next Action Required Card -- hidden once the Coordinator has
           already sent the reviewer pool to the Editor; nothing is left for
           the Coordinator to do until the Editor picks their 2. */}
-      {!(awaitingReviewerPoolSend && reviewerPoolSent) && (
+      {!(awaitingReviewerPoolSend && reviewerPoolSent !== false) && (
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6">
         <h3 className="text-sm font-black text-blue-900 mb-3">Next Action Required</h3>
-        <p className="text-sm text-blue-800 mb-4">
-          {getNextAction(manuscript.status, activeEditor, reviewerAssignments, evaluationSubmitted, readyToInviteReviewers)}
-        </p>
+        {manuscript.status === 'SUBMITTED' && declinedEditors.length > 0 && !currentEditor ? (
+          <p className="text-sm font-bold text-blue-900 mb-4">Choose another editor</p>
+        ) : (
+          <p className="text-sm text-blue-800 mb-4">
+            {getNextAction(manuscript.status, activeEditor, reviewerAssignments, evaluationSubmitted, readyToInviteReviewers)}
+          </p>
+        )}
 
         {manuscript.status === 'SUBMITTED' ? (
           <div>

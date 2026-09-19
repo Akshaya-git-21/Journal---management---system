@@ -202,7 +202,10 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
 
       {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700 flex items-center gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /> {error}</div>}
 
-      {acceptedFiles.length > 0 && (
+      {/* Only once the Coordinator has clicked "Move to Production"
+          (start_production -> IN_PRODUCTION): until then production is
+          NOT_STARTED / absent and the manuscript isn't eligible for it. */}
+      {production && production.production_status !== 'NOT_STARTED' && acceptedFiles.length > 0 && (
         <div className="rounded-lg border border-slate-200 p-4">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Final Accepted Manuscript</p>
           <div className="space-y-2">
