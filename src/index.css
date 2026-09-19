@@ -38,3 +38,14 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Workspace pages: light off-white surfaces (a faint green cast instead of
+   pure white) for cards, tables and rows, with soft green-grey lines. Scoped to
+   <main class="role-tint"> so nothing outside the role workspaces is affected. */
+.role-tint .bg-white { background-color: #fbfdfb; }
+.role-tint .bg-slate-50 { background-color: #f1f7f2; }
+.role-tint .hover\:bg-slate-50:hover { background-color: #eaf3ec; }
+.role-tint .border-slate-200,
+.role-tint .border-slate-100 { border-color: #dbe8de; }
+.role-tint .divide-slate-100 > :not(:last-child),
+.role-tint .divide-slate-200 > :not(:last-child) { border-color: #dbe8de; }

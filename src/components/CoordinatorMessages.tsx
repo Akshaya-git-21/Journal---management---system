@@ -190,7 +190,7 @@ export default function CoordinatorMessages({ coordinatorName = 'Coordinator', o
           {selectedMessage ? (
             <>
               {/* Message Header */}
-              <div className="p-4 border-b border-slate-200 bg-gradient-to-r from-[#008751] to-[#047857] text-white">
+              <div className="p-4 border-b border-slate-200 bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] text-white">
                 <h3 className="font-bold text-lg">{selectedMessage.authorName}</h3>
                 <p className="text-sm text-emerald-100">{selectedMessage.authorEmail}</p>
                 <p className="text-xs text-emerald-200 mt-1">📋 {selectedMessage.manuscriptTitle}</p>

@@ -967,19 +967,19 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
   };
 
   return (
-    <div id="new-submission-module-layout" className="w-full flex flex-col md:flex-row gap-8 text-left font-sans text-slate-800">
+    <div id="new-submission-module-layout" className="w-full flex flex-col md:flex-row gap-0 text-left font-sans text-slate-800">
       
       {/* ======================= SIDEBAR ACCORDION WORKFLOW STEPPER ======================= */}
-      <aside id="new-submission-sidebar-stepper" className="w-full md:w-72 bg-gradient-to-b from-slate-50 to-white border border-[#cfdde5] rounded-xl p-5 shadow-xs shrink-0 self-start">
+      <aside id="new-submission-sidebar-stepper" className="w-full md:w-72 bg-gradient-to-b from-[#def2ec] via-[#f4f3e8] to-[#e4eedd] border border-[#d9dccb] rounded-xl md:rounded-r-none md:border-r-0 p-5 shadow-xs shrink-0 md:self-stretch">
         
         <div className="mb-4">
-          <span className="text-[10px] font-mono font-bold tracking-widest text-[#005c7a] uppercase block">
+          <span className="text-xs font-mono font-bold tracking-widest text-[#2f7d55] uppercase block">
             Submission Steps
           </span>
-          <h3 className="text-base font-bold text-slate-900 mt-1">
+          <h3 className="text-lg font-bold text-slate-900 mt-1">
             Publishing Process
           </h3>
-          <p className="text-[11px] text-gray-500 mt-1">
+          <p className="text-[13px] text-gray-500 mt-1">
             Progress autosaves dynamically. You can click on previous completed steps to review inputs.
           </p>
         </div>
@@ -1000,16 +1000,16 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                 disabled={!isClickable}
                 className={`w-full flex items-start gap-3.5 p-3 rounded-lg text-left transition duration-150 relative ${
                   isCurrent
-                    ? 'bg-emerald-50 border border-emerald-200/60 text-slate-900 shadow-sm font-semibold'
+                    ? 'bg-[#4b8b62] border border-[#4b8b62] text-white shadow-sm font-semibold'
                     : isCompleted
-                    ? 'hover:bg-slate-50 text-slate-700 cursor-pointer'
+                    ? 'hover:bg-[#dcebe0]/70 text-slate-700 cursor-pointer'
                     : 'text-slate-400 cursor-not-allowed opacity-75'
                 }`}
               >
                 {/* Visual Step Marker State */}
                 <div className="mt-0.5 shrink-0">
                   {isCurrent ? (
-                    <div className="h-5 w-5 rounded-full bg-[#008751] text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                    <div className="h-5 w-5 rounded-full bg-white text-[#2f7d55] flex items-center justify-center font-bold text-xs shadow-xs">
                       {step.number}
                     </div>
                   ) : isCompleted ? (
@@ -1024,10 +1024,10 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                 </div>
 
                 <div className="leading-tight">
-                  <span className={`block text-xs font-bold ${isCurrent ? 'text-[#008751] font-black' : 'text-slate-800'}`}>
+                  <span className={`block text-sm font-bold ${isCurrent ? 'text-white font-black' : 'text-slate-800'}`}>
                     {step.label}
                   </span>
-                  <span className={`block text-[10px] ${isCurrent ? 'text-emerald-700 font-semibold' : 'text-slate-400'}`}>
+                  <span className={`block text-xs ${isCurrent ? 'text-white/85 font-semibold' : 'text-slate-500'}`}>
                     {step.desc}
                   </span>
                 </div>
@@ -1035,7 +1035,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                 {/* Left Active border bar indicator */}
                 {isCurrent && (
                   <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                    <ChevronRight className="w-4 h-4 text-[#008751]" />
+                    <ChevronRight className="w-4 h-4 text-white" />
                   </div>
                 )}
               </button>
@@ -1044,7 +1044,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
         </div>
 
         {/* Informational Help Box */}
-        <div className="mt-6 bg-emerald-50/45 border border-dashed border-emerald-200/60 rounded-xl p-4 text-[11px] leading-relaxed text-slate-550">
+        <div className="mt-6 bg-[#dcebe0]/60 border border-dashed border-[#a8c6b1] rounded-xl p-4 text-[13px] leading-relaxed text-slate-550">
           <h4 className="font-bold text-[#008751] flex items-center gap-1.5 mb-1.5 text-xs">
             <Info className="w-3.5 h-3.5 text-[#008751]" />
             Double-Blind Standard
@@ -1057,10 +1057,10 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
       </aside>
 
       {/* ======================= MAIN WORKING PANE CARD ======================= */}
-      <main id="new-submission-panel-card" className="flex-grow bg-white border border-[#e2e8f0] rounded-xl shadow-xs overflow-hidden flex flex-col min-h-[580px]">
+      <main id="new-submission-panel-card" className="flex-grow bg-white border border-[#dbe8de] rounded-xl md:rounded-l-none shadow-xs overflow-hidden flex flex-col min-h-[580px]">
         
         {/* Header Indicator Header Banner */}
-        <div className="bg-gradient-to-r from-[#004d2b] to-[#008751] text-white px-6 py-6.5 flex items-center justify-between border-b border-emerald-800/20 relative overflow-hidden">
+        <div className="bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] text-white px-6 py-6.5 flex items-center justify-between border-b border-emerald-800/20 relative overflow-hidden">
 
           {/* Subtle grid backdrop decoration */}
           <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:16px_16px] opacity-10 pointer-events-none" />
@@ -1443,7 +1443,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     <div className="flex flex-col items-center justify-center space-y-2">
                       <Upload className="w-8 h-8 text-slate-400 stroke-[1.5]" />
                       <p className="text-slate-700 font-bold text-xs">
-                        Drag & drop Title Page here, or <span className="text-[#008751] underline hover:text-[#005c7a]">browse files</span>
+                        Drag & drop Title Page here, or <span className="text-[#008751] underline hover:text-[#2f7d55]">browse files</span>
                       </p>
                     </div>
                   </div>
@@ -1537,7 +1537,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     <div className="flex flex-col items-center justify-center space-y-2">
                       <Upload className="w-8 h-8 text-slate-400 stroke-[1.5]" />
                       <p className="text-slate-700 font-bold text-xs">
-                        Drag & drop Blind Manuscript here, or <span className="text-[#008751] underline hover:text-[#005c7a]">browse files</span>
+                        Drag & drop Blind Manuscript here, or <span className="text-[#008751] underline hover:text-[#2f7d55]">browse files</span>
                       </p>
                     </div>
                   </div>
@@ -1646,7 +1646,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     <div className="flex flex-col items-center justify-center space-y-2">
                       <Upload className="w-8 h-8 text-slate-400 stroke-[1.5]" />
                       <p className="text-slate-700 font-bold text-xs">
-                        Drag & drop Signed Form here, or <span className="text-[#008751] underline hover:text-[#005c7a]">browse files</span>
+                        Drag & drop Signed Form here, or <span className="text-[#008751] underline hover:text-[#2f7d55]">browse files</span>
                       </p>
                     </div>
                   </div>
@@ -1739,7 +1739,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     <div className="flex flex-col items-center justify-center space-y-2">
                       <Upload className="w-8 h-8 text-slate-400 stroke-[1.5]" />
                       <p className="text-slate-700 font-bold text-xs">
-                        Drag & drop Ethical Certificate here, or <span className="text-[#008751] underline hover:text-[#005c7a]">browse files</span>
+                        Drag & drop Ethical Certificate here, or <span className="text-[#008751] underline hover:text-[#2f7d55]">browse files</span>
                       </p>
                     </div>
                   </div>
@@ -2174,7 +2174,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-1.5 bg-[#005c7a] hover:bg-[#00415a] rounded-md transition font-bold text-white cursor-pointer"
+                      className="px-4 py-1.5 bg-[#2f7d55] hover:bg-[#00415a] rounded-md transition font-bold text-white cursor-pointer"
                     >
                       Save Author Changes
                     </button>
@@ -3184,7 +3184,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     
                     {/* Node 1 */}
                     <div className="flex gap-4 items-start relative">
-                      <div className="w-0.5 bg-[#cfdde5] absolute left-[7px] top-4 bottom-[-14px]"></div>
+                      <div className="w-0.5 bg-[#d9dccb] absolute left-[7px] top-4 bottom-[-14px]"></div>
                       <div className="h-5 w-5 rounded-full bg-emerald-500 border border-emerald-300 flex items-center justify-center text-white text-xs mt-0.5 shrink-0">
                         ✓
                       </div>
@@ -3196,7 +3196,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
 
                     {/* Node 2 */}
                     <div className="flex gap-4 items-start relative">
-                      <div className="w-0.5 bg-[#cfdde5] absolute left-[7px] top-4 bottom-[-14px]"></div>
+                      <div className="w-0.5 bg-[#d9dccb] absolute left-[7px] top-4 bottom-[-14px]"></div>
                       <div className="h-5 w-5 rounded-full bg-emerald-50 text-[#008751] border border-emerald-300 flex items-center justify-center text-xs mt-0.5 shrink-0 font-mono font-bold">
                         2
                       </div>
@@ -3233,7 +3233,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                 </div>
 
                 <div className="pt-4 border-t border-slate-100 text-center font-mono text-[10px] text-slate-500">
-                  A verification confirmation receipt has been dispatched to: <strong className="text-[#005c7a] block mt-0.5">{currentUser?.email || 'your-address@publishing.net'}</strong>
+                  A verification confirmation receipt has been dispatched to: <strong className="text-[#2f7d55] block mt-0.5">{currentUser?.email || 'your-address@publishing.net'}</strong>
                 </div>
 
               </div>
@@ -3246,7 +3246,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
 
         {/* ======================= COMPONENT ACTION STEER PATHS (FOOTER) ======================= */}
         {currentStep < 9 && (
-          <div className="bg-[#f8fafc] border-t border-[#e2e8f0] px-6 py-4 flex items-center justify-between">
+          <div className="bg-[#f8fafc] border-t border-[#dbe8de] px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-4">
               <button
                 onClick={handleSaveDraft}
@@ -3316,7 +3316,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
 
         {/* Step 9 Complete Footer Button */}
         {currentStep === 9 && (
-          <div className="bg-[#f5f8fa] border-t border-[#cfdde5] px-6 py-4 text-center">
+          <div className="bg-[#f1f7f2] border-t border-[#d9dccb] px-6 py-4 text-center">
             <button
               type="button"
               onClick={onCancel}

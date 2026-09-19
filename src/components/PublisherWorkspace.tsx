@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavGroup, NavItem } from './SidebarNavGroup';
+import { SidebarBrand, SidebarDecoration, TopBar } from './RoleChrome';
+import { SidebarThemeContext, LIGHT_SIDEBAR_SURFACE, LIGHT_PAGE_SURFACE } from './sidebarTheme';
 import {
   listManuscripts, subscribeToManuscripts, markPublished, uploadPublishedGalley, getContributors,
   getEditorAssignments, getReviewerAssignments, getRevisions, getProfilesByIds, listActiveProfilesByRole,
@@ -18,6 +20,7 @@ import {
 
 interface PublisherWorkspaceProps {
   currentUser?: { name: string; email: string } | null;
+  onSignOut?: () => void;
 }
 
 const JOURNAL_NAME = 'Journal of Molecular Sciences';
@@ -76,7 +79,7 @@ async function analyzePdf(file: File): Promise<PdfAnalysis> {
   return { header, eof, pages, fonts };
 }
 
-export default function PublisherWorkspace({ currentUser }: PublisherWorkspaceProps) {
+export default function PublisherWorkspace({ currentUser, onSignOut }: PublisherWorkspaceProps) {
   const [manuscripts, setManuscripts] = useState<ManuscriptRow[]>([]);
   // Needed to scope Scheduled Publications / Publication Queue to manuscripts
   // actually assigned to THIS Publisher -- without it, every active
@@ -372,31 +375,18 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
   };
 
   return (
-    <div id="publisher-workspace" className="flex-1 min-h-0 bg-[#00170f] text-[#111827] flex flex-col font-sans">
+    <div id="publisher-workspace" className="flex-1 min-h-0 bg-[#f6fbf9] text-[#111827] flex flex-col font-sans">
       {/* Same application-shell structure as CoordinatorWorkspace.tsx /
           GDMemberWorkspace.tsx -- a full-height flex row with a fixed-width
           sidebar and a rounded white <main> panel, so the sidebar always
           extends the full viewport height instead of being a content-sized
-          card. The shared RoleSelector bar (logo, notifications, log out)
-          renders above this from App.tsx, same as every other role. */}
+          card. The top bar (notifications, user menu / log out) is
+          rendered here by TopBar, same as every other role. */}
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
-        <aside className="w-full md:w-64 bg-[#00170f] border-r border-[#002116] p-4 shrink-0 text-white overflow-y-auto">
-          <div className="space-y-3">
-            <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-4 space-y-4">
-              <div className="flex items-center gap-3">
-                <span className="p-2 bg-[#008751]/15 border border-[#008751]/30 text-emerald-300 rounded-lg">
-                  <BookOpen className="w-5 h-5" />
-                </span>
-                <div className="min-w-0">
-                  <strong className="block text-sm font-bold text-white truncate">{currentUser?.name || 'Publisher'}</strong>
-                  <span className="block text-[11px] text-emerald-300">Publisher Office</span>
-                </div>
-              </div>
-              <div className="pt-3 border-t border-white/10 flex justify-between items-center text-[11px] text-emerald-100/60">
-                <span>Catalog Node:</span>
-                <span className="text-emerald-400 font-semibold">Main Server</span>
-              </div>
-            </div>
+        <aside className={`w-full md:w-[270px] ${LIGHT_SIDEBAR_SURFACE} shrink-0 overflow-y-auto flex flex-col`}>
+          <SidebarThemeContext.Provider value="light">
+          <SidebarBrand />
+          <div className="px-3 pb-6 space-y-3">
 
             <nav className="space-y-3">
               {/* Publisher access is restricted to Publication Management
@@ -411,10 +401,13 @@ export default function PublisherWorkspace({ currentUser }: PublisherWorkspacePr
               </NavGroup>
             </nav>
           </div>
+          <SidebarDecoration />
+          </SidebarThemeContext.Provider>
         </aside>
 
-        <div className="flex-1 bg-[#00170f] md:p-3 overflow-hidden flex flex-col min-h-0">
-          <main className="flex-1 bg-slate-50 md:rounded-3xl border border-[#002b1d]/20 p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
+        <div className={`flex-1 min-w-0 ${LIGHT_PAGE_SURFACE} overflow-hidden flex flex-col min-h-0`}>
+          <TopBar user={currentUser ? { name: currentUser.name, role: 'PUBLISHER' } : null} onSignOut={onSignOut} tinted />
+          <main className="role-tint flex-1 p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
             {banner && (
               <div className={`rounded-2xl p-3.5 text-xs font-medium flex items-center justify-between shadow-sm ${banner.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-50 border border-red-200 text-red-700'}`}>
                 <div className="flex items-center gap-2">

@@ -34,6 +34,9 @@ import {
   formatDate,
   formatDateTime
 } from '../lib/editorWorkspace';
+import { SidebarBrand, SidebarDecoration, TopBar } from './RoleChrome';
+import { StatusStatCard } from './StatusStatCard';
+import { SidebarThemeContext, LIGHT_SIDEBAR_SURFACE, LIGHT_PAGE_SURFACE } from './sidebarTheme';
 import { Loader2, ArrowLeft, ArrowRight, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send, RefreshCw } from 'lucide-react';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
@@ -88,6 +91,7 @@ interface EditorWorkspaceProps {
   onUpdateManuscript?: (m: any) => void;
   onDeleteManuscript?: (id: string) => void;
   currentUser?: { name: string; email: string; role: Role } | null;
+  onSignOut?: () => void;
 }
 
 const STATUS_STYLES: Record<ManuscriptStatus, string> = {
@@ -230,7 +234,7 @@ function ReviewerReplacementInline({ assignment, excludedEmails, hasPendingRepla
   );
 }
 
-export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
+export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorkspaceProps) {
   const [rows, setRows] = useState<EditorManuscriptDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
@@ -345,6 +349,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   }, []);
 
   const selected = rows.find((r) => r.manuscript.id === selectedManuscriptId) || null;
+  const topBar = <TopBar user={currentUser ? { name: currentUser.name, role: 'EDITOR' } : null} onSignOut={onSignOut} tinted />;
   const toggleSection = (section: string) => {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
@@ -352,6 +357,8 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   // Show accept/decline modal if assignment is INVITED
   if (selected && selected.assignment.status === 'INVITED' && showAcceptModal) {
     return (
+      <>
+      {topBar}
       <AcceptDeclineModal
         details={selected}
         onAccept={async () => {
@@ -379,9 +386,14 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             setDecliningAssignment(false);
           }
         }}
+        onBack={() => {
+          setSelectedManuscriptId(null);
+          setShowAcceptModal(false);
+        }}
         isAcceptLoading={acceptingAssignment}
         isDeclineLoading={decliningAssignment}
       />
+      </>
     );
   }
 
@@ -390,7 +402,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   }
 
   if (selected && selected.assignment.status === 'ACCEPTED') {
-    return <AssignmentDetail
+    return <>{topBar}<AssignmentDetail
       details={selected}
       onBack={() => {
         setSelectedManuscriptId(null);
@@ -400,7 +412,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
       currentUser={currentUser}
       initialTab={pendingTab}
       onInitialTabConsumed={() => setPendingTab(null)}
-    />;
+    /></>;
   }
 
   // Dashboard-wide replacement alerts -- surfaced the moment the Editor logs
@@ -416,7 +428,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
     .filter(({ row, pendingCount }) => !!getReviewerNeedingReplacement(row.reviewers, row.manuscript.status, pendingCount));
 
   return (
-    <div className="w-full h-screen bg-slate-50 flex font-sans overflow-hidden">
+    <div className={`w-full h-screen ${LIGHT_PAGE_SURFACE} role-tint flex font-sans overflow-hidden`}>
       {rowsNeedingReplacement.map(({ row: r, pendingCount, pendingEmails }, idx) => (
         <ReviewerReplacementAlert
           key={r.manuscript.id}
@@ -432,30 +444,15 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
         />
       ))}
 
-      <aside className="w-80 bg-[#00170f] text-white flex flex-col shrink-0 border-r border-[#002116]">
-        <div className="p-4 shrink-0">
-          <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-5">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-[#008751]/15 border border-[#008751]/30 flex items-center justify-center shrink-0">
-                <Settings className="w-5 h-5 text-emerald-400" />
-              </div>
-              <div>
-                <h3 className="font-black text-sm text-white">{currentUser?.name || 'Editor'}</h3>
-                <p className="text-xs text-emerald-300 font-bold uppercase tracking-wide">Managing Editor</p>
-              </div>
-            </div>
-            <div className="border-t border-white/10 pt-3">
-              <p className="text-emerald-100/60 text-[11px] uppercase tracking-wider font-semibold">Core Jurisdiction:</p>
-              <p className="text-emerald-300 font-bold mt-1">Unrestricted</p>
-            </div>
-          </div>
-        </div>
+      <aside className={`w-[270px] ${LIGHT_SIDEBAR_SURFACE} flex flex-col shrink-0`}>
+        <SidebarThemeContext.Provider value="light">
+        <SidebarBrand />
 
-        <nav className="flex-1 p-4 pt-0 space-y-3 overflow-y-auto">
-          <div className="border border-white/10 rounded-2xl overflow-hidden">
+        <nav className="flex-1 px-3 pb-6 overflow-y-auto">
+          <div className="border-t border-[#d9dccb] first:border-t-0 py-3">
             <button
               onClick={() => toggleSection('submissions')}
-              className="w-full bg-white/5 hover:bg-white/10 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
+              className="w-full flex items-center justify-between rounded-xl bg-[#dcebe0] hover:bg-[#d2e5d7] px-3 py-2.5 text-xs font-bold uppercase tracking-wider text-[#1f4d3a] transition"
             >
               <span className="flex items-center gap-2">
                 <Clock className="w-4 h-4" />
@@ -464,7 +461,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
               <ChevronDown className={`w-4 h-4 transition ${expandedSections.submissions ? 'rotate-180' : ''}`} />
             </button>
             {expandedSections.submissions && (
-              <div className="p-1.5 space-y-1">
+              <div className="mt-2 space-y-1">
                 {(['active-submissions', 'needs-editor', 'in-submission-stage'] as const).map((id) => {
                   const isActive = sectionFilter === id;
                   const count = rows.filter(SECTION_FILTERS[id].predicate).length;
@@ -473,11 +470,11 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
                       key={id}
                       onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
                       className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition flex items-center justify-between cursor-pointer ${
-                        isActive ? 'bg-[#008751] text-white font-black' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
+                        isActive ? 'bg-[#4b8b62] text-white font-bold' : 'text-[#1f3b30] font-medium hover:bg-[#dcebe0]/70'
                       }`}
                     >
                       <span>{SECTION_FILTERS[id].label}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{count}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/25 text-white' : 'bg-[#dcebe0] text-[#1f4d3a]'}`}>{count}</span>
                     </button>
                   );
                 })}
@@ -485,10 +482,10 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             )}
           </div>
 
-          <div className="border border-white/10 rounded-2xl overflow-hidden">
+          <div className="border-t border-[#d9dccb] first:border-t-0 py-3">
             <button
               onClick={() => toggleSection('reviewStages')}
-              className="w-full bg-white/5 hover:bg-white/10 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
+              className="w-full flex items-center justify-between rounded-xl bg-[#dcebe0] hover:bg-[#d2e5d7] px-3 py-2.5 text-xs font-bold uppercase tracking-wider text-[#1f4d3a] transition"
             >
               <span className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4" />
@@ -497,7 +494,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
               <ChevronDown className={`w-4 h-4 transition ${expandedSections.reviewStages ? 'rotate-180' : ''}`} />
             </button>
             {expandedSections.reviewStages && (
-              <div className="p-1.5 space-y-1">
+              <div className="mt-2 space-y-1">
                 {(['awaiting-reviews', 'reviews-submitted', 'reviews-overdue', 'revisions-submitted', 'in-review-stage'] as const).map((id) => {
                   const isActive = sectionFilter === id;
                   const count = rows.filter(SECTION_FILTERS[id].predicate).length;
@@ -506,11 +503,11 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
                       key={id}
                       onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
                       className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition flex items-center justify-between cursor-pointer ${
-                        isActive ? 'bg-[#008751] text-white font-black' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
+                        isActive ? 'bg-[#4b8b62] text-white font-bold' : 'text-[#1f3b30] font-medium hover:bg-[#dcebe0]/70'
                       }`}
                     >
                       <span>{SECTION_FILTERS[id].label}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{count}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/25 text-white' : 'bg-[#dcebe0] text-[#1f4d3a]'}`}>{count}</span>
                     </button>
                   );
                 })}
@@ -518,10 +515,10 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             )}
           </div>
 
-          <div className="border border-white/10 rounded-2xl overflow-hidden">
+          <div className="border-t border-[#d9dccb] first:border-t-0 py-3">
             <button
               onClick={() => toggleSection('copyedit')}
-              className="w-full bg-white/5 hover:bg-white/10 px-4 py-3 flex items-center justify-between text-xs font-bold text-emerald-300 uppercase tracking-wider transition"
+              className="w-full flex items-center justify-between rounded-xl bg-[#dcebe0] hover:bg-[#d2e5d7] px-3 py-2.5 text-xs font-bold uppercase tracking-wider text-[#1f4d3a] transition"
             >
               <span className="flex items-center gap-2">
                 <Archive className="w-4 h-4" />
@@ -530,7 +527,7 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
               <ChevronDown className={`w-4 h-4 transition ${expandedSections.copyedit ? 'rotate-180' : ''}`} />
             </button>
             {expandedSections.copyedit && (
-              <div className="p-1.5 space-y-1">
+              <div className="mt-2 space-y-1">
                 {(['copyediting-stage', 'in-production-stage', 'scheduled-articles', 'published-articles', 'declined-rejected'] as const).map((id) => {
                   const isActive = sectionFilter === id;
                   const count = rows.filter(SECTION_FILTERS[id].predicate).length;
@@ -539,11 +536,11 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
                       key={id}
                       onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
                       className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition flex items-center justify-between cursor-pointer ${
-                        isActive ? 'bg-[#008751] text-white font-black' : 'text-emerald-100/70 hover:bg-white/5 hover:text-white'
+                        isActive ? 'bg-[#4b8b62] text-white font-bold' : 'text-[#1f3b30] font-medium hover:bg-[#dcebe0]/70'
                       }`}
                     >
                       <span>{SECTION_FILTERS[id].label}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/20 text-white' : 'bg-white/10 text-emerald-200'}`}>{count}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/25 text-white' : 'bg-[#dcebe0] text-[#1f4d3a]'}`}>{count}</span>
                     </button>
                   );
                 })}
@@ -551,9 +548,12 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
             )}
           </div>
         </nav>
+        <SidebarDecoration />
+        </SidebarThemeContext.Provider>
       </aside>
 
       <main className="flex-1 flex flex-col overflow-hidden">
+        {topBar}
         <div className="bg-white border-b border-slate-200 px-8 py-5 shrink-0">
           <div className="flex items-center justify-end">
             <div className="relative w-64">
@@ -568,27 +568,11 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-8">
-          <div className="grid grid-cols-4 gap-4 mb-6">
-            <div className="bg-white border-2 border-emerald-200/50 rounded-2xl p-4">
-              <Clock className="w-6 h-6 text-emerald-500 mb-2" />
-              <p className="text-2xl font-black text-slate-900">{assignmentCounts.accepted}</p>
-              <p className="text-xs text-slate-500 font-semibold mt-1">Active Submissions</p>
-            </div>
-            <div className="bg-white border-2 border-amber-200/50 rounded-2xl p-4">
-              <AlertCircle className="w-6 h-6 text-amber-500 mb-2" />
-              <p className="text-2xl font-black text-slate-900">{assignmentCounts.pending}</p>
-              <p className="text-xs text-slate-500 font-semibold mt-1">Needs Editor</p>
-            </div>
-            <div className="bg-white border-2 border-teal-200/50 rounded-2xl p-4">
-              <Archive className="w-6 h-6 text-teal-500 mb-2" />
-              <p className="text-2xl font-black text-slate-900">0</p>
-              <p className="text-xs text-slate-500 font-semibold mt-1">In Submission</p>
-            </div>
-            <div className="bg-white border-2 border-slate-200 rounded-2xl p-4">
-              <FileText className="w-6 h-6 text-slate-600 mb-2" />
-              <p className="text-2xl font-black text-slate-900">0</p>
-              <p className="text-xs text-slate-500 font-semibold mt-1">System Pipeline</p>
-            </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <StatusStatCard title="Active Submissions" value={assignmentCounts.accepted} icon={<Clock className="w-5 h-5" />} tone="emerald" />
+            <StatusStatCard title="Needs Editor" value={assignmentCounts.pending} icon={<AlertCircle className="w-5 h-5" />} tone="amber" />
+            <StatusStatCard title="In Submission" value={0} icon={<Archive className="w-5 h-5" />} tone="sky" />
+            <StatusStatCard title="System Pipeline" value={0} icon={<FileText className="w-5 h-5" />} tone="violet" />
           </div>
 
 
@@ -3189,12 +3173,15 @@ function AcceptDeclineModal({
   details,
   onAccept,
   onDecline,
+  onBack,
   isAcceptLoading,
   isDeclineLoading
 }: {
   details: EditorManuscriptDetails;
   onAccept: () => Promise<void>;
   onDecline: () => Promise<void>;
+  /** Leaves the invitation unanswered and returns to the dashboard list. */
+  onBack: () => void;
   isAcceptLoading?: boolean;
   isDeclineLoading?: boolean;
 }) {
@@ -3202,7 +3189,15 @@ function AcceptDeclineModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-emerald-700 to-emerald-800 text-white p-6 rounded-t-2xl shrink-0">
+        <div className="bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] text-white p-6 rounded-t-2xl shrink-0">
+          <button
+            type="button"
+            onClick={onBack}
+            disabled={isAcceptLoading || isDeclineLoading}
+            className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-100 hover:text-white disabled:opacity-50 cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" /> Back to dashboard
+          </button>
           <h2 className="text-2xl font-black">Editorial Assignment</h2>
           <p className="text-emerald-100 text-sm mt-1">You have been invited to evaluate a manuscript</p>
         </div>

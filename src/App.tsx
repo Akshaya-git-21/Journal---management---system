@@ -5,7 +5,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { Role } from './types';
-import RoleSelector from './components/RoleSelector';
 import TuliticsLogo from './components/TuliticsLogo';
 import RequireRole from './components/RequireRole';
 import AuthorWorkspace from './components/AuthorWorkspace';
@@ -356,18 +355,6 @@ export default function App() {
         const shellClass = isShell ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-grow flex flex-col';
         return (
         <div className={shellClass}>
-          {/* Workspace chrome for every role except Author (whose workspace has its own header); the Coordinator's shell renders its own top bar too */}
-          {loggedInUser && loggedInUser.role !== 'AUTHOR' && loggedInUser.role !== 'COORDINATOR' && (
-            <RoleSelector
-              activeRole={loggedInUser.role}
-              unassignedCount={0}
-              inReviewCount={0}
-              inProductionCount={0}
-              loggedInUser={loggedInUser}
-              onSignOut={handleSignOut}
-            />
-          )}
-
           <main id="jms-workspace-main" className={shellClass}>
             <div className={`animate-fade-in duration-300 ${shellClass}`}>
               {/* The workspace rendered is always exactly the authenticated
@@ -378,15 +365,15 @@ export default function App() {
                 )}
 
                 {loggedInUser?.role === 'EDITOR' && (
-                  <EditorWorkspace currentUser={loggedInUser} />
+                  <EditorWorkspace currentUser={loggedInUser} onSignOut={handleSignOut} />
                 )}
 
                 {loggedInUser?.role === 'REVIEWER' && (
-                  <ReviewerWorkspace currentUser={loggedInUser} />
+                  <ReviewerWorkspace currentUser={loggedInUser} onSignOut={handleSignOut} />
                 )}
 
                 {loggedInUser?.role === 'PUBLISHER' && (
-                  <PublisherWorkspace currentUser={loggedInUser} />
+                  <PublisherWorkspace currentUser={loggedInUser} onSignOut={handleSignOut} />
                 )}
 
                 {loggedInUser?.role === 'COORDINATOR' && (
@@ -394,7 +381,7 @@ export default function App() {
                 )}
 
                 {loggedInUser?.role === 'GD_MEMBER' && (
-                  <GDMemberWorkspace currentUser={loggedInUser} />
+                  <GDMemberWorkspace currentUser={loggedInUser} onSignOut={handleSignOut} />
                 )}
               </RequireRole>
             </div>

@@ -8,7 +8,7 @@ import { getMyNotifications, markNotificationRead, markAllNotificationsRead, Not
  * that manuscript (and, where the notification type implies one, a specific
  * tab) instead of leaving the user to hunt for it in their queue. Kept as a
  * plain window event rather than prop-drilling because NotificationBell is
- * mounted by RoleSelector as a sibling of the role workspace, not a parent
+ * mounted by each workspace's top bar, not by a shared parent
  * -- there's no shared state to lift this into without a larger refactor. */
 export const JMS_OPEN_MANUSCRIPT_EVENT = 'jms:open-manuscript';
 export interface JmsOpenManuscriptDetail { manuscriptId: string; notificationType: string }
@@ -19,6 +19,11 @@ export interface JmsOpenManuscriptDetail { manuscriptId: string; notificationTyp
  * what getMyNotifications()/markNotificationRead() already expose, scoped by
  * the existing RLS (recipient_id = auth.uid()).
  */
+// Each mounted bell gets its own realtime channel: a workspace that switches
+// between views remounts its bell, and reusing one topic name while the old
+// channel is still closing makes supabase-js throw on `.on()` after subscribe.
+let bellChannelSeq = 0;
+
 export default function NotificationBell({ dark = true, badgeClassName = 'bg-red-500' }: { dark?: boolean; badgeClassName?: string }) {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [open, setOpen] = useState(false);
@@ -45,7 +50,7 @@ export default function NotificationBell({ dark = true, badgeClassName = 'bg-red
       timer = setTimeout(load, 150);
     };
     const channel = supabase
-      .channel('workflow-notifications-bell')
+      .channel(`workflow-notifications-bell-${++bellChannelSeq}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'workflow_notifications' }, scheduleLoad)
       .subscribe();
     return () => {

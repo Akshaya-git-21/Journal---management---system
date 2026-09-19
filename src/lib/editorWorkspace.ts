@@ -87,6 +87,12 @@ export function getEditorAssignedManuscripts(editorId: string): Promise<EditorMa
   return state.queued;
 }
 
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
 async function fetchEditorAssignedManuscripts(editorId: string): Promise<EditorManuscriptDetails[]> {
   try {
     const { data: assignments, error: assignError } = await supabase
@@ -118,89 +124,97 @@ async function fetchEditorAssignedManuscripts(editorId: string): Promise<EditorM
     }
     const dedupedAssignments = Array.from(latestByManuscript.values());
 
-    // Each assignment's own data is independent of every other assignment's,
-    // so fetch them all concurrently instead of one at a time -- with a
-    // couple dozen assignments (each doing ~8 queries), the old sequential
-    // for-loop took several seconds per refresh, which made the UI look
-    // stuck on the old screen after a successful action even though the
-    // write had already succeeded and a refetch was already in flight.
-    const settled = await Promise.all(dedupedAssignments.map(async (assignment): Promise<EditorManuscriptDetails | null> => {
-      try {
-        // manuscript + the rest + files are all independent lookups by
-        // manuscript_id, so run them in one round trip instead of three
-        // sequential ones (profiles below genuinely needs their results).
-        const [
-          manuscript,
-          contributors,
-          discussions,
-          reviewers,
-          statusHistory,
-          revisions,
-          suggestedReviewers,
-          editorReviewerActions,
-          filesResult
-        ] = await Promise.all([
-          getManuscript(assignment.manuscript_id),
-          getContributors(assignment.manuscript_id),
-          getDiscussions(assignment.manuscript_id),
-          getReviewerAssignments(assignment.manuscript_id),
-          getStatusHistory(assignment.manuscript_id),
-          getRevisions(assignment.manuscript_id),
-          getSuggestedReviewers(assignment.manuscript_id),
-          getEditorReviewerActions(assignment.manuscript_id),
-          supabase
-            .from('manuscript_files')
-            .select('*')
-            .eq('manuscript_id', assignment.manuscript_id)
-            .order('uploaded_at', { ascending: false })
-        ]);
-        if (!manuscript) return null;
-        const filesData = filesResult.data;
-
-        const userIds = new Set<string>();
-        userIds.add(manuscript.author_id);
-        userIds.add(assignment.editor_id);
-        discussions.forEach(d => userIds.add(d.sender_id));
-        reviewers.forEach(r => userIds.add(r.reviewer_id));
-        statusHistory.forEach(s => s.actor_id && userIds.add(s.actor_id));
-
-        const { data: profilesData } = await supabase
-          .from('profiles')
-          .select('id, name, email, role')
-          .in('id', Array.from(userIds));
-
-        const profiles = new Map<string, ProfileData>();
-        if (profilesData) {
-          profilesData.forEach((p: any) => {
-            profiles.set(p.id, {
-              id: p.id,
-              name: p.name,
-              email: p.email,
-              role: p.role
-            });
-          });
-        }
-
-        return {
-          manuscript,
-          assignment: assignment as EditorAssignmentRow,
-          contributors,
-          discussions,
-          reviewers,
-          statusHistory,
-          revisions,
-          suggestedReviewers,
-          editorReviewerActions,
-          files: (filesData || []) as ManuscriptFileRow[],
-          profiles
-        };
-      } catch (error) {
-        console.error(`Error fetching details for manuscript ${assignment.manuscript_id}:`, error);
-        return null;
+    // Fetch everything for ALL of this editor's manuscripts in a handful of
+    // bulk queries (one per table, split into small id chunks that run in
+    // parallel) instead of ~10 queries per manuscript. With dozens of
+    // assignments the per-manuscript approach meant hundreds of round trips
+    // on every load and after every realtime event, which is what made the
+    // Editor's content area slow to appear.
+    const ids = dedupedAssignments.map((a) => a.manuscript_id);
+    const byManuscript = <T extends { manuscript_id: string }>(rows: T[]) => {
+      const m = new Map<string, T[]>();
+      for (const r of rows) {
+        const list = m.get(r.manuscript_id);
+        if (list) list.push(r); else m.set(r.manuscript_id, [r]);
       }
-    }));
+      return m;
+    };
+    // Rows come back in the requested order, so grouping preserves each
+    // manuscript's own ordering (same as the old per-manuscript queries).
+    const fetchIn = async <T extends { manuscript_id: string }>(table: string, order: string, select = '*'): Promise<Map<string, T[]>> => {
+      const chunks = chunkArray(ids, 20);
+      const results = await Promise.all(chunks.map(async (chunk) => {
+        const { data, error } = await supabase.from(table).select(select).in('manuscript_id', chunk).order(order, { ascending: order !== 'uploaded_at' });
+        if (error) throw new Error(error.message);
+        return (data ?? []) as unknown as T[];
+      }));
+      return byManuscript(results.flat());
+    };
 
-    return settled.filter((d): d is EditorManuscriptDetails => d !== null);
+    const [manuscriptRows, contributorsBy, discussionsBy, reviewersBy, historyBy, revisionsBy, suggestedBy, actionsBy, filesBy] = await Promise.all([
+      Promise.all(chunkArray(ids, 20).map(async (chunk) => {
+        const { data, error } = await supabase.from('manuscripts').select('*, display_status').in('id', chunk);
+        if (error) throw new Error(error.message);
+        return (data ?? []) as ManuscriptRow[];
+      })).then((r) => r.flat()),
+      fetchIn<ContributorRow>('manuscript_contributors', 'position'),
+      fetchIn<DiscussionRow>('manuscript_discussions', 'created_at'),
+      fetchIn<ReviewerAssignmentRow>('reviewer_assignments', 'invited_at'),
+      fetchIn<StatusHistoryRow>('manuscript_status_history', 'created_at'),
+      fetchIn<RevisionRow>('manuscript_revisions', 'revision_number'),
+      fetchIn<SuggestedReviewerRow>('manuscript_suggested_reviewers', 'created_at'),
+      fetchIn<EditorReviewerActionRow>('editor_reviewer_actions', 'created_at'),
+      fetchIn<ManuscriptFileRow>('manuscript_files', 'uploaded_at'),
+    ]);
+    const manuscriptsById = new Map(manuscriptRows.map((m) => [m.id, m]));
+
+    // One profiles lookup for every user referenced by any manuscript.
+    const allUserIds = new Set<string>();
+    for (const a of dedupedAssignments) {
+      const m = manuscriptsById.get(a.manuscript_id);
+      if (m) allUserIds.add(m.author_id);
+      allUserIds.add(a.editor_id);
+      (discussionsBy.get(a.manuscript_id) ?? []).forEach((d) => allUserIds.add(d.sender_id));
+      (reviewersBy.get(a.manuscript_id) ?? []).forEach((r) => allUserIds.add(r.reviewer_id));
+      (historyBy.get(a.manuscript_id) ?? []).forEach((s) => s.actor_id && allUserIds.add(s.actor_id));
+    }
+    const profileRows = (await Promise.all(chunkArray(Array.from(allUserIds), 50).map(async (chunk) => {
+      const { data } = await supabase.from('profiles').select('id, name, email, role').in('id', chunk);
+      return (data ?? []) as any[];
+    }))).flat();
+    const profileById = new Map<string, ProfileData>(profileRows.map((p) => [p.id, { id: p.id, name: p.name, email: p.email, role: p.role }]));
+
+    const details: EditorManuscriptDetails[] = [];
+    for (const assignment of dedupedAssignments) {
+      const manuscript = manuscriptsById.get(assignment.manuscript_id);
+      if (!manuscript) continue;
+      const contributors = contributorsBy.get(assignment.manuscript_id) ?? [];
+      const discussions = discussionsBy.get(assignment.manuscript_id) ?? [];
+      const reviewers = reviewersBy.get(assignment.manuscript_id) ?? [];
+      const statusHistory = historyBy.get(assignment.manuscript_id) ?? [];
+
+      const userIds = new Set<string>([manuscript.author_id, assignment.editor_id]);
+      discussions.forEach((d) => userIds.add(d.sender_id));
+      reviewers.forEach((r) => userIds.add(r.reviewer_id));
+      statusHistory.forEach((s) => s.actor_id && userIds.add(s.actor_id));
+      const profiles = new Map<string, ProfileData>();
+      userIds.forEach((id) => { const p = profileById.get(id); if (p) profiles.set(id, p); });
+
+      details.push({
+        manuscript,
+        assignment: assignment as EditorAssignmentRow,
+        contributors,
+        discussions,
+        reviewers,
+        statusHistory,
+        revisions: revisionsBy.get(assignment.manuscript_id) ?? [],
+        suggestedReviewers: suggestedBy.get(assignment.manuscript_id) ?? [],
+        editorReviewerActions: actionsBy.get(assignment.manuscript_id) ?? [],
+        files: filesBy.get(assignment.manuscript_id) ?? [],
+        profiles,
+      });
+    }
+    return details;
   } catch (error) {
     console.error('Error fetching editor manuscripts:', error);
     throw error;

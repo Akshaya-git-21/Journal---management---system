@@ -822,7 +822,7 @@ export default function OjsSubmissionDetail({
               <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full lg:min-w-0">
                 
                 {/* Manuscript Detail Banner */}
-                <div className="bg-gradient-to-br from-[#022c22] via-[#047857] to-[#065f46] border border-[#047857]/40 rounded-xl p-4 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm text-white">
+                <div className="bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] border border-[#2f7d55]/40 rounded-xl p-4 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm text-white">
                   {/* Decorative background radial glow */}
                   <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none -mr-16 -mt-16" />
 
@@ -1374,7 +1374,7 @@ export default function OjsSubmissionDetail({
                       <div id="discussions-card" className="bg-[#fafdfb] border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
                         
                         {/* Elegant Academic Header Bar */}
-                        <div className="bg-gradient-to-r from-[#004d2e] to-[#047857] text-white px-4 py-3.5 flex items-center justify-between shrink-0 shadow-sm z-10">
+                        <div className="bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] text-white px-4 py-3.5 flex items-center justify-between shrink-0 shadow-sm z-10">
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => setActiveThreadId(null)}
@@ -1941,7 +1941,7 @@ export default function OjsSubmissionDetail({
         ) : (
           /* ======================= ORIGINAL DEFAULT WORKFLOW LAYOUT ======================= */
           <>
-        <div id="ojs-hero-panel-banner" className="bg-[#005c35] bg-gradient-to-r from-[#005230] to-[#007043] rounded-2xl p-6 text-white relative overflow-hidden flex flex-col md:flex-row md:items-center md:justify-between shadow-sm min-h-[110px]">
+        <div id="ojs-hero-panel-banner" className="bg-[#2f7d55] bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] rounded-2xl p-6 text-white relative overflow-hidden flex flex-col md:flex-row md:items-center md:justify-between shadow-sm min-h-[110px]">
           
           {/* Wave Curve Abstract SVG Background overlay matching screenshot */}
           <div className="absolute right-0 top-0 h-full w-2/3 pointer-events-none opacity-30 select-none">

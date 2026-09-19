@@ -19,6 +19,9 @@ import ManuscriptDiscussion from './ManuscriptDiscussion';
 import NotificationBell, { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 import AuthorRevisionRequest from './AuthorRevisionRequest';
 import { NavGroup, NavItem } from './SidebarNavGroup';
+import { SidebarBrand, SidebarDecoration, TopBar } from './RoleChrome';
+import { StatusStatCard } from './StatusStatCard';
+import { SidebarThemeContext, LIGHT_SIDEBAR_SURFACE, LIGHT_PAGE_SURFACE } from './sidebarTheme';
 import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, AlertCircle, ChevronDown, Settings, Trash2, User, Send, Eye, Pencil, CheckCircle2, Newspaper } from 'lucide-react';
 
 interface AuthorWorkspaceProps {
@@ -551,12 +554,14 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
   if (view === 'new') {
     return (
-      <NewSubmissionFlow
-        currentUser={currentUser ?? null}
-        onCancel={() => { setView('list'); load(); }}
-        onSubmit={handleNewSubmission}
-        onSaveDraft={handleSaveDraft}
-      />
+      <div className={`w-full min-h-screen ${LIGHT_PAGE_SURFACE} role-tint`}>
+        <NewSubmissionFlow
+          currentUser={currentUser ?? null}
+          onCancel={() => { setView('list'); load(); }}
+          onSubmit={handleNewSubmission}
+          onSaveDraft={handleSaveDraft}
+        />
+      </div>
     );
   }
 
@@ -590,28 +595,13 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   }
 
   return (
-    <div className="w-full min-h-screen bg-slate-100 flex flex-col md:flex-row font-sans">
+    <div className={`w-full min-h-screen ${LIGHT_PAGE_SURFACE} role-tint flex flex-col md:flex-row font-sans`}>
       {/* Dark Green Sidebar */}
       {view === 'list' && (
-        <div className="w-full md:w-64 bg-[#00170f] md:border-r border-[#002116] p-4 md:min-h-screen md:sticky md:top-0 md:max-h-screen md:overflow-y-auto shrink-0">
-          {/* Profile Card */}
-          <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-5 mb-6">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-[#008751]/15 border border-[#008751]/30 flex items-center justify-center">
-                <User className="w-5 h-5 text-emerald-400" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-black text-sm leading-tight text-white">{currentUser?.name || 'Author'}</h3>
-                <p className="text-emerald-300 text-xs font-bold uppercase tracking-wide">AUTHOR</p>
-              </div>
-            </div>
-            <div className="space-y-3 border-t border-white/10 pt-3">
-              <div>
-                <p className="text-emerald-100/60 text-[11px] uppercase tracking-wider font-semibold mb-1">Active Submissions:</p>
-                <p className="text-2xl font-black text-emerald-300">{items.length}</p>
-              </div>
-            </div>
-          </div>
+        <div className={`w-full md:w-[270px] ${LIGHT_SIDEBAR_SURFACE} md:min-h-screen md:sticky md:top-0 md:max-h-screen md:overflow-y-auto shrink-0 flex flex-col`}>
+          <SidebarThemeContext.Provider value="light">
+          <SidebarBrand />
+          <div className="px-3 pb-6">
 
           {/* Menu */}
           <div className="space-y-3">
@@ -645,35 +635,37 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               + New Submission
             </button>
           </div>
+          </div>
+          <SidebarDecoration />
+          </SidebarThemeContext.Provider>
         </div>
       )}
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="bg-white border-b border-slate-200 px-6 md:px-8 py-3 flex items-center justify-between sticky top-0 z-30 flex-shrink-0">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">My Manuscripts</h1>
-            <p className="text-xs text-slate-500 font-medium mt-0.5">{currentUser?.name} • {currentUser?.email}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            {view !== 'new' && (
-              <button
-                onClick={() => setView('new')}
-                className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer"
-              >
-                <Plus className="w-4 h-4" /> New Submission
-              </button>
-            )}
-            <NotificationBell dark={false} />
-            <button onClick={onSignOut} className="text-sm font-semibold text-red-600 hover:text-red-700 px-3 py-1.5 cursor-pointer">
-              Log Out
+        <TopBar
+          user={currentUser ? { name: currentUser.name, role: 'AUTHOR' } : null}
+          onSignOut={onSignOut}
+          tinted
+          left={
+            <div>
+              <h1 className="text-xl font-bold leading-tight text-[#0a2e22]">My Manuscripts</h1>
+              <p className="text-xs text-slate-500 font-medium">{currentUser?.name} • {currentUser?.email}</p>
+            </div>
+          }
+          leading={view !== 'new' ? (
+            <button
+              onClick={() => setView('new')}
+              className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" /> New Submission
             </button>
-          </div>
-        </header>
+          ) : undefined}
+        />
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto bg-slate-100">
+        <main className="flex-1 overflow-y-auto">
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4 m-6 mb-4">
               {error}
@@ -695,15 +687,12 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               {/* Stats Cards */}
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
                 {[
-                  { label: 'Submitted', count: statusCounts.submitted },
-                  { label: 'Editorial Review', count: statusCounts.editorialReview },
-                  { label: 'Peer Review', count: statusCounts.peerReview },
-                  { label: 'In Revision', count: statusCounts.revisionRequested }
+                  { label: 'Submitted', count: statusCounts.submitted, icon: <Send className="w-5 h-5" />, tone: 'emerald' as const },
+                  { label: 'Editorial Review', count: statusCounts.editorialReview, icon: <FileText className="w-5 h-5" />, tone: 'amber' as const },
+                  { label: 'Peer Review', count: statusCounts.peerReview, icon: <Eye className="w-5 h-5" />, tone: 'sky' as const },
+                  { label: 'In Revision', count: statusCounts.revisionRequested, icon: <Pencil className="w-5 h-5" />, tone: 'violet' as const }
                 ].map((item) => (
-                  <div key={item.label} className="rounded-lg bg-white border border-slate-200 p-4 shadow-sm">
-                    <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">{item.label}</p>
-                    <p className="mt-2 text-2xl font-bold text-slate-900">{item.count}</p>
-                  </div>
+                  <StatusStatCard key={item.label} title={item.label} value={item.count} icon={item.icon} tone={item.tone} />
                 ))}
               </div>
 

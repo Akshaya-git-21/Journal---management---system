@@ -17,7 +17,10 @@ import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2, LayoutGrid, Cog, Inbox, Printer, PackageCheck, FileCheck2, MessageSquareWarning, Send, Monitor, GraduationCap, CloudUpload, CalendarDays, Bell } from 'lucide-react';
-import { CoordinatorBrand, CNavGroup as NavGroup, CNavItem as NavItem, CoordinatorTopBar } from './CoordinatorChrome';
+import { SidebarBrand, SidebarDecoration, TopBar } from './RoleChrome';
+import { StatusStatCard } from './StatusStatCard';
+import { SidebarThemeContext } from './sidebarTheme';
+import { NavGroup, NavItem } from './SidebarNavGroup';
 import { AssignmentConfirmationDialog } from './AssignmentConfirmationDialog';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 import ProductionSection from './production/ProductionSection';
@@ -495,8 +498,9 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
   return (
     <div id="coordinator-workspace" className="flex-1 min-h-0 bg-[#f6fbf9] text-[#111827] flex flex-col font-sans">
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
-        <aside className="w-full md:w-[270px] bg-[#032b22] shrink-0 text-white overflow-y-auto">
-          <CoordinatorBrand />
+        <aside className="w-full md:w-[270px] bg-gradient-to-b from-[#def2ec] via-[#f4f3e8] to-[#e4eedd] border-r border-[#d9dccb] shrink-0 text-[#1f3b30] overflow-y-auto flex flex-col">
+          <SidebarThemeContext.Provider value="light">
+          <SidebarBrand />
           <div className="px-3 pb-6">
             <NavGroup title="Workspace" icon={<LayoutGrid className="w-4 h-4" />} hasActive={isDashboardSection || isManuscriptQueueSection || isPendingApprovalsSection} expanded={expandedNavGroups.workspace} onToggle={() => toggleNavGroup('workspace')}>
               <NavItem icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" active={isDashboardSection} onClick={() => { setActiveSection('DASHBOARD'); setSelectedId(null); }} />
@@ -518,11 +522,13 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
               <NavItem icon={<Activity className="w-4 h-4" />} label="Audit Trail" active={isAuditTrailSection} onClick={() => { setActiveSection('AUDIT_TRAIL'); setSelectedId(null); }} />
             </NavGroup>
           </div>
+          <SidebarDecoration />
+          </SidebarThemeContext.Provider>
         </aside>
 
-        <div className="flex-1 min-w-0 bg-[#f6fbf9] overflow-hidden flex flex-col min-h-0">
-          <CoordinatorTopBar user={currentUser} onSignOut={onSignOut} />
-          <main className="flex-1 bg-[#f6fbf9] p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
+        <div className="flex-1 min-w-0 bg-gradient-to-b from-[#eaf6f1] via-[#f7f6ec] to-[#eaf2e3] overflow-hidden flex flex-col min-h-0">
+          <TopBar user={currentUser} onSignOut={onSignOut} tinted />
+          <main className="role-tint flex-1 p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
             {isDashboardSection ? (
               <DashboardOverviewScreen
                 items={items}
@@ -1343,16 +1349,11 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
   const hasSlaWarnings = overdueReviews.length > 0 || overdueSubmissions.length > 0;
 
   const stageCards = [
-    { key: 'submitted', label: 'Current queue', title: 'Submitted', value: stageCounts.submitted, note: 'Awaiting technical screening check.', factor: 4, icon: <FileText className="w-5 h-5" />,
-      card: 'border-emerald-200 bg-gradient-to-br from-emerald-50 to-white', tile: 'bg-emerald-700', labelC: 'text-emerald-800', noteC: 'text-emerald-700', track: 'bg-emerald-200', fill: 'bg-emerald-700' },
-    { key: 'screening', label: 'Desk phase', title: 'Screening', value: screeningCount, note: 'Initial technical vetting.', factor: 8, icon: <Monitor className="w-5 h-5" />,
-      card: 'border-amber-200 bg-gradient-to-br from-amber-50 to-white', tile: 'bg-amber-500', labelC: 'text-amber-700', noteC: 'text-amber-700', track: 'bg-amber-200', fill: 'bg-[#e16e06]' },
-    { key: 'peer', label: 'Peer vetting', title: 'Under review', value: stageCounts.underReview, note: 'Active external review reports.', factor: 8, icon: <Users className="w-5 h-5" />,
-      card: 'border-sky-200 bg-gradient-to-br from-sky-50 to-white', tile: 'bg-sky-600', labelC: 'text-sky-800', noteC: 'text-sky-700', track: 'bg-sky-200', fill: 'bg-sky-600' },
-    { key: 'decision', label: 'Academic gate', title: 'Decision', value: stageCounts.awaitingDecision, note: 'Awaiting editorial judgment.', factor: 8, icon: <GraduationCap className="w-5 h-5" />,
-      card: 'border-violet-200 bg-gradient-to-br from-violet-50 to-white', tile: 'bg-violet-600', labelC: 'text-violet-800', noteC: 'text-violet-700', track: 'bg-violet-200', fill: 'bg-violet-600' },
-    { key: 'production', label: 'Archiving phase', title: 'Production', value: productionCount, note: 'Injecting DOI variables.', factor: 8, icon: <CloudUpload className="w-5 h-5" />,
-      card: 'border-emerald-200 bg-gradient-to-br from-emerald-50 to-white', tile: 'bg-emerald-700', labelC: 'text-emerald-800', noteC: 'text-emerald-700', track: 'bg-emerald-200', fill: 'bg-emerald-700' },
+    { key: 'submitted', title: 'Submitted', value: stageCounts.submitted, note: 'Awaiting technical screening check.', factor: 4, icon: <FileText className="w-5 h-5" />, tone: 'emerald' as const },
+    { key: 'screening', title: 'Screening', value: screeningCount, note: 'Initial technical vetting.', factor: 8, icon: <Monitor className="w-5 h-5" />, tone: 'amber' as const },
+    { key: 'peer', title: 'Under review', value: stageCounts.underReview, note: 'Active external review reports.', factor: 8, icon: <Users className="w-5 h-5" />, tone: 'sky' as const },
+    { key: 'decision', title: 'Decision', value: stageCounts.awaitingDecision, note: 'Awaiting editorial judgment.', factor: 8, icon: <GraduationCap className="w-5 h-5" />, tone: 'violet' as const },
+    { key: 'production', title: 'Production', value: productionCount, note: 'Injecting DOI variables.', factor: 8, icon: <CloudUpload className="w-5 h-5" />, tone: 'emerald' as const },
   ];
 
   // Icon tile per pipeline event -- purely presentational.
@@ -1381,18 +1382,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {stageCards.map((c) => (
-          <div key={c.key} className={`rounded-2xl border p-5 shadow-sm ${c.card}`}>
-            <div className="flex items-center gap-3">
-              <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white ${c.tile}`}>{c.icon}</span>
-              <p className={`text-[11px] uppercase tracking-[0.2em] font-bold ${c.labelC}`}>{c.label}</p>
-            </div>
-            <h2 className="mt-5 text-2xl font-black text-slate-900">{c.title}</h2>
-            <p className="mt-1 text-3xl font-black text-slate-900">{c.value}</p>
-            <p className={`mt-2 text-sm ${c.noteC}`}>{c.note}</p>
-            <div className={`mt-4 h-1.5 rounded-full ${c.track}`}>
-              <div className={`h-1.5 rounded-full ${c.fill}`} style={{ width: `${Math.min(100, c.value * c.factor)}%` }} />
-            </div>
-          </div>
+          <StatusStatCard key={c.key} title={c.title} value={c.value} note={c.note} icon={c.icon} tone={c.tone} progress={c.value * c.factor} />
         ))}
       </div>
 

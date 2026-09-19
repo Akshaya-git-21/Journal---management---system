@@ -75,7 +75,7 @@ export default function EditorDetailsModal({ editor, onClose }: EditorDetailsMod
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="sticky top-0 bg-gradient-to-r from-[#004d2b] to-[#008751] text-white px-6 py-4 flex items-center justify-between border-b">
+        <div className="sticky top-0 bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] text-white px-6 py-4 flex items-center justify-between border-b">
           <h2 className="text-lg font-bold">{editor.role === 'REVIEWER' ? 'Reviewer' : editor.role === 'PUBLISHER' ? 'Publisher' : 'Editor'} Details</h2>
           <button onClick={onClose} className="text-white hover:bg-white/20 p-1 rounded transition">
             <X className="w-5 h-5" />

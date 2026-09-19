@@ -12,6 +12,8 @@ import { isReviewerOverdue } from '../lib/reviewerStatus';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 import { formatTimelineDate } from '../lib/dateFormat';
 import { NavGroup, NavItem } from './SidebarNavGroup';
+import { SidebarBrand, SidebarDecoration, TopBar } from './RoleChrome';
+import { SidebarThemeContext, LIGHT_SIDEBAR_SURFACE, LIGHT_PAGE_SURFACE } from './sidebarTheme';
 import FilePreviewModal from './FilePreviewModal';
 import {
   Loader2, Check, X as XIcon, ChevronDown, User, AlertTriangle, ClipboardList, CheckCircle2, XCircle,
@@ -36,6 +38,7 @@ interface ReviewerWorkspaceProps {
   manuscripts?: any[];
   onUpdateManuscript?: (m: any) => void;
   currentUser?: { name: string; email: string; role: Role } | null;
+  onSignOut?: () => void;
 }
 
 interface Row { manuscript: ManuscriptRow; assignment: ReviewerAssignmentRow; priorRounds: ReviewerAssignmentRow[]; }
@@ -53,7 +56,7 @@ const TAB_META: Record<string, { title: string; subtitle: string }> = {
   PERFORMANCE: { title: 'Performance Score', subtitle: 'Your review activity, computed from your real assignment history.' },
 };
 
-export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProps) {
+export default function ReviewerWorkspace({ currentUser, onSignOut }: ReviewerWorkspaceProps) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
@@ -148,34 +151,12 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
   ];
 
   return (
-    <div className="w-full min-h-screen bg-slate-100 flex flex-col md:flex-row font-sans">
+    <div className={`w-full min-h-screen ${LIGHT_PAGE_SURFACE} role-tint flex flex-col md:flex-row font-sans`}>
       {/* Left Sidebar */}
-      <div className="w-full md:w-64 bg-[#00170f] md:border-r border-[#002116] p-4 md:min-h-screen md:sticky md:top-0 md:max-h-screen md:overflow-y-auto shrink-0">
-        {/* Profile Card */}
-        <div className="rounded-3xl border border-[#00311f] bg-[#001d14] p-5 mb-6">
-          <div className="flex items-start gap-3 mb-4">
-            <div className="w-10 h-10 rounded-lg bg-[#008751]/15 border border-[#008751]/30 flex items-center justify-center">
-              <User className="w-5 h-5 text-emerald-400" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-black text-sm leading-tight text-white">{currentUser?.name || 'Reviewer'}</h3>
-              <p className="text-emerald-300 text-xs font-bold uppercase tracking-wide">ASSIGNED VALIDATOR</p>
-            </div>
-          </div>
-          <div className="space-y-3 border-t border-white/10 pt-3">
-            <div>
-              <p className="text-emerald-100/60 text-[11px] uppercase tracking-wider font-semibold mb-1">Active Dummy Reviewer Persona:</p>
-              <div className="flex items-center gap-2 bg-white/5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-100">
-                <span>{currentUser?.name || 'Reviewer'}</span>
-                <ChevronDown className="w-3.5 h-3.5 ml-auto" />
-              </div>
-            </div>
-            <div className="pt-2 border-t border-white/10">
-              <p className="text-emerald-100/60 text-[11px] uppercase tracking-wider font-semibold mb-1">Reviews Filed:</p>
-              <p className="text-2xl font-black text-emerald-300">{counts.completed} <span className="text-xs text-emerald-200/70 font-semibold">Complete</span></p>
-            </div>
-          </div>
-        </div>
+      <div className={`w-full md:w-[270px] ${LIGHT_SIDEBAR_SURFACE} md:min-h-screen md:sticky md:top-0 md:max-h-screen md:overflow-y-auto shrink-0 flex flex-col`}>
+        <SidebarThemeContext.Provider value="light">
+        <SidebarBrand />
+        <div className="px-3 pb-6">
 
         {/* Menu */}
         <div className="space-y-3">
@@ -202,9 +183,14 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
             ))}
           </NavGroup>
         </div>
+        </div>
+        <SidebarDecoration />
+        </SidebarThemeContext.Provider>
       </div>
 
       {/* Main Content */}
+      <div className="flex-1 min-w-0 flex flex-col">
+      <TopBar user={currentUser ? { name: currentUser.name, role: 'REVIEWER' } : null} onSignOut={onSignOut} tinted />
       <div className="flex-1 p-6 md:p-8 overflow-y-auto">
         <div className="max-w-none">
           <h1 className="text-2xl font-black text-slate-900 mb-1">{TAB_META[activeTab].title}</h1>
@@ -241,6 +227,7 @@ export default function ReviewerWorkspace({ currentUser }: ReviewerWorkspaceProp
             <ManuscriptList rows={filteredRows} onOpen={setSelectedManuscriptId} />
           )}
         </div>
+      </div>
       </div>
     </div>
   );
@@ -1040,7 +1027,7 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Modal Header */}
-        <div className="bg-gradient-to-r from-[#1a4038] to-[#0f2e2a] text-white p-5 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] text-white p-5 flex items-center justify-between">
           <div>
             <h2 className="font-black text-base">REVIEWER EVALUATION WORKSPACE</h2>
             <p className="text-xs text-emerald-100 mt-1">

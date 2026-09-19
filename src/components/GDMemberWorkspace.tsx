@@ -2,6 +2,8 @@ import { useState, useEffect, ReactNode } from 'react';
 import { Printer, Inbox, PackageCheck, FileCheck2, MessageSquareWarning, Send, CheckCircle2, FileText, Globe } from 'lucide-react';
 import { Role } from '../types';
 import { NavGroup, NavItem } from './SidebarNavGroup';
+import { SidebarBrand, SidebarDecoration, TopBar } from './RoleChrome';
+import { SidebarThemeContext, LIGHT_SIDEBAR_SURFACE, LIGHT_PAGE_SURFACE } from './sidebarTheme';
 import GDMemberProductionSection, { GDMemberProductionView } from './production/GDMemberProductionSection';
 import GDMemberProductionDetail from './production/GDMemberProductionDetail';
 import GDMemberPublicationDetail from './production/GDMemberPublicationDetail';
@@ -10,6 +12,7 @@ import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './Notificati
 
 interface GDMemberWorkspaceProps {
   currentUser?: { name: string; email: string; role: Role } | null;
+  onSignOut?: () => void;
 }
 
 /**
@@ -24,7 +27,7 @@ interface GDMemberWorkspaceProps {
  * every Production write RPC still hard-checks is_active_coordinator(), and
  * GD_MEMBER's table grants are SELECT-only (0050_gd_member_production_read_access.sql).
  */
-export default function GDMemberWorkspace({ currentUser }: GDMemberWorkspaceProps) {
+export default function GDMemberWorkspace({ currentUser, onSignOut }: GDMemberWorkspaceProps) {
   const [activeView, setActiveView] = useState<GDMemberProductionView>('QUEUE');
   const [expanded, setExpanded] = useState(true);
   const [publicationExpanded, setPublicationExpanded] = useState(true);
@@ -62,10 +65,12 @@ export default function GDMemberWorkspace({ currentUser }: GDMemberWorkspaceProp
   ];
 
   return (
-    <div id="gd-member-workspace" className="flex-1 min-h-0 bg-[#00170f] text-[#111827] flex flex-col font-sans">
+    <div id="gd-member-workspace" className="flex-1 min-h-0 bg-[#f6fbf9] text-[#111827] flex flex-col font-sans">
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
-        <aside className="w-full md:w-64 bg-[#00170f] border-r border-[#002116] p-4 shrink-0 text-white overflow-y-auto">
-          <div className="space-y-3">
+        <aside className={`w-full md:w-[270px] ${LIGHT_SIDEBAR_SURFACE} shrink-0 overflow-y-auto flex flex-col`}>
+          <SidebarThemeContext.Provider value="light">
+          <SidebarBrand />
+          <div className="px-3 pb-6">
             <NavGroup title="Production" icon={<Printer className="w-4 h-4" />} expanded={expanded} onToggle={() => setExpanded((v) => !v)}>
               {PRODUCTION_NAV_ITEMS.map((item) => (
                 <NavItem
@@ -96,10 +101,13 @@ export default function GDMemberWorkspace({ currentUser }: GDMemberWorkspaceProp
               ))}
             </NavGroup>
           </div>
+          <SidebarDecoration />
+          </SidebarThemeContext.Provider>
         </aside>
 
-        <div className="flex-1 bg-[#00170f] md:p-3 overflow-hidden flex flex-col min-h-0">
-          <main className="flex-1 bg-slate-50 md:rounded-3xl border border-[#002b1d]/20 p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
+        <div className={`flex-1 min-w-0 ${LIGHT_PAGE_SURFACE} overflow-hidden flex flex-col min-h-0`}>
+          <TopBar user={currentUser ? { name: currentUser.name, role: 'GD_MEMBER' } : null} onSignOut={onSignOut} tinted />
+          <main className="role-tint flex-1 p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
             {showTemplate ? (
               <JournalTemplateSection canUpload />
             ) : selectedId && (activeView === 'READY' || activeView === 'PUBLISHED') ? (
