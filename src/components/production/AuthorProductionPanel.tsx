@@ -89,7 +89,27 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
   if (loading) return <div className="flex items-center justify-center py-16 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading production status...</div>;
 
   const status = production?.production_status;
-  const latestProof = proofs[0];
+  // The Author only sees a proof version once it has actually been sent to
+  // them. A newer version the GD Member has uploaded (or that is still with
+  // the Coordinator / Editor) stays hidden -- the Author keeps seeing the
+  // version they were last given (e.g. v2) until the next one is sent.
+  // Not every "send" path stamps sent_to_author_at (the final-review send
+  // doesn't), so a version also counts as delivered if the Author has
+  // approved / reviewed / raised corrections on it, or if it is the latest
+  // proof while the manuscript is in a stage where it sits with the Author.
+  const WITH_AUTHOR_STATUSES = [
+    'PROOF_SENT_TO_AUTHOR', 'AUTHOR_PROOF_REVIEW', 'PROOF_SENT_TO_AUTHOR_FINAL', 'AUTHOR_APPROVED',
+    'AUTHOR_FINAL_APPROVED', 'AUTHOR_FINAL_APPROVED_UNDER_EDITOR_REVIEW', 'READY_FOR_PUBLICATION', 'PUBLISHED',
+  ];
+  const authorSeenVersions = new Set<number>([
+    ...corrections.map((c) => c.proof_version),
+    ...reviews.filter((r) => r.reviewer_role === 'AUTHOR_FIRST' || r.reviewer_role === 'AUTHOR_FINAL').map((r) => r.proof_version),
+  ]);
+  const visibleProofs = proofs.filter((p, i) =>
+    !!p.sent_to_author_at || !!p.approved_at || authorSeenVersions.has(p.version) ||
+    (i === 0 && WITH_AUTHOR_STATUSES.includes(status ?? ''))
+  );
+  const latestProof = visibleProofs[0];
   const awaitingReview = status === 'AUTHOR_PROOF_REVIEW' || status === 'PROOF_SENT_TO_AUTHOR';
   // Module 69 -- Final Review is a distinct step from the first-round
   // review above: it only appears once the Editor has approved a version,

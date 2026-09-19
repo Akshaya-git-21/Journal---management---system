@@ -74,23 +74,44 @@ export default function ReviewerWorkspace({ currentUser, onSignOut }: ReviewerWo
     const seq = ++loadSeq.current;
     try {
       const { data } = await supabase.auth.getUser();
-      const manuscripts = await listManuscripts();
+      // The reviewer's own assignments come back in ONE query (this used to be
+      // one request per manuscript, run one after another -- with a few dozen
+      // manuscripts a reload took many seconds, during which the Accept /
+      // Decline card of an invitation that had just been answered stayed
+      // on screen and could be clicked a second time).
+      const [manuscripts, assignmentsResult] = await Promise.all([
+        listManuscripts(),
+        supabase.from('reviewer_assignments').select('*').eq('reviewer_id', data.user?.id ?? '').order('invited_at', { ascending: true }),
+      ]);
+      if (assignmentsResult.error) throw new Error(assignmentsResult.error.message);
+      const assignmentsByManuscript = new Map<string, ReviewerAssignmentRow[]>();
+      for (const a of (assignmentsResult.data ?? []) as ReviewerAssignmentRow[]) {
+        const list = assignmentsByManuscript.get(a.manuscript_id);
+        if (list) list.push(a); else assignmentsByManuscript.set(a.manuscript_id, [a]);
+      }
       const withAssignments: Row[] = [];
       for (const m of manuscripts) {
-        const assignments = await getReviewerAssignments(m.id);
         // A re-review round (Phase 2 Checkpoint C) creates a new
         // reviewer_assignments row per manuscript_revisions cycle -- the
         // most recent one (highest revision_number) is the one the reviewer
         // should act on; earlier rounds are kept as read-only context.
-        const mine = assignments
-          .filter((a) => a.reviewer_id === data.user?.id)
-          .sort((a, b) => b.revision_number - a.revision_number);
+        const mine = [...(assignmentsByManuscript.get(m.id) ?? [])].sort((a, b) => b.revision_number - a.revision_number);
         if (mine.length > 0) withAssignments.push({ manuscript: m, assignment: mine[0], priorRounds: mine.slice(1) });
       }
       if (seq === loadSeq.current) setRows(withAssignments);
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
+  };
+
+  // Reflect an accepted/declined invitation on screen right away, before the
+  // reload finishes, so the Accept/Decline card can't be clicked twice.
+  const markAssignmentStatus = (assignmentId: string, status: 'ACCEPTED' | 'DECLINED') => {
+    setRows((prev) => prev.map((r) => (
+      r.assignment.id === assignmentId
+        ? { ...r, assignment: { ...r.assignment, status, responded_at: new Date().toISOString() } }
+        : r
+    )));
   };
 
   const counts = {
@@ -205,6 +226,7 @@ export default function ReviewerWorkspace({ currentUser, onSignOut }: ReviewerWo
               row={selected}
               onBack={() => setSelectedManuscriptId(null)}
               onChanged={load}
+              onAssignmentResponded={markAssignmentStatus}
               onReviewSubmitted={() => {
                 // After submitting, "Back to assignments" should land
                 // somewhere that actually shows the just-completed review
@@ -492,7 +514,7 @@ function PriorRoundsContext({ priorRounds }: { priorRounds: ReviewerAssignmentRo
   );
 }
 
-function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: Row; onBack: () => void; onChanged: () => void; onReviewSubmitted: () => void }) {
+function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted, onAssignmentResponded }: { row: Row; onBack: () => void; onChanged: () => void; onReviewSubmitted: () => void; onAssignmentResponded: (assignmentId: string, status: 'ACCEPTED' | 'DECLINED') => void }) {
   const { manuscript, assignment, priorRounds } = row;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -537,7 +559,7 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
 
   const accept = async () => {
     setBusy(true); setError('');
-    try { await respondToReviewInvite(assignment.id, true); onChanged(); }
+    try { await respondToReviewInvite(assignment.id, true); onAssignmentResponded(assignment.id, 'ACCEPTED'); onChanged(); }
     catch (e: any) { setError(e.message); onChanged(); }
     finally { setBusy(false); }
   };
@@ -547,6 +569,7 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted }: { row: 
     setBusy(true); setError('');
     try {
       await respondToReviewInvite(assignment.id, false, declineReason.trim());
+      onAssignmentResponded(assignment.id, 'DECLINED');
       setShowDeclineModal(false);
       onChanged();
     } catch (e: any) { setError(e.message); onChanged(); }

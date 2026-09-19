@@ -4,7 +4,7 @@ import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision, EDITOR_D
 import { getReviewerDisplayStatus } from '../../../lib/reviewerStatus';
 import { formatTimelineDate } from '../../../lib/dateFormat';
 import { getProduction, subscribeToProduction } from '../../../lib/production';
-import { CheckCircle2, Circle, AlertCircle, FileText, Loader2, Bell } from 'lucide-react';
+import { CheckCircle2, Circle, AlertCircle, FileText, Loader2, Bell, RefreshCw } from 'lucide-react';
 import { AssignmentConfirmationDialog } from '../../AssignmentConfirmationDialog';
 
 interface Props {
@@ -478,18 +478,23 @@ export function OverviewTab({
             {reviewerAssignments.map((assignment, idx) => {
               const profile = profiles[assignment.reviewer_id];
               const displayStatus = getReviewerDisplayStatus(assignment);
+              // Once the Editor has picked a replacement for THIS assignment
+              // (replaces_assignment_id, Module 106) it is superseded --
+              // show it as Replaced, same as the Review Board tab does.
+              const isReplaced = suggestedReviewers.some((s) => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === assignment.id);
               return (
                 <div key={assignment.id} className="flex items-center gap-2 p-2 bg-slate-50 rounded">
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-slate-900 truncate">Reviewer {idx + 1}: {profile?.name || 'Unknown'}</p>
-                    <p className={`text-xs ${displayStatus === 'OVERDUE' ? 'text-red-600 font-bold' : 'text-slate-600'}`}>
-                      {displayStatus === 'OVERDUE' ? '🔴 Overdue' : displayStatus}
+                    <p className={`text-xs font-semibold truncate ${isReplaced ? 'text-slate-500' : 'text-slate-900'}`}>Reviewer {idx + 1}: {profile?.name || 'Unknown'}</p>
+                    <p className={`text-xs ${isReplaced ? 'text-slate-500 font-bold' : displayStatus === 'OVERDUE' ? 'text-red-600 font-bold' : 'text-slate-600'}`}>
+                      {isReplaced ? '↻ Replaced' : displayStatus === 'OVERDUE' ? '🔴 Overdue' : displayStatus}
                     </p>
                   </div>
-                  {displayStatus === 'SUBMITTED' && <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
-                  {displayStatus === 'ACCEPTED' && <Circle className="w-4 h-4 text-blue-600 fill-blue-600 flex-shrink-0" />}
-                  {displayStatus === 'INVITED' && <Circle className="w-4 h-4 text-amber-600 fill-amber-600 flex-shrink-0" />}
-                  {displayStatus === 'OVERDUE' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
+                  {isReplaced && <RefreshCw className="w-4 h-4 text-slate-500 flex-shrink-0" />}
+                  {!isReplaced && displayStatus === 'SUBMITTED' && <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
+                  {!isReplaced && displayStatus === 'ACCEPTED' && <Circle className="w-4 h-4 text-blue-600 fill-blue-600 flex-shrink-0" />}
+                  {!isReplaced && displayStatus === 'INVITED' && <Circle className="w-4 h-4 text-amber-600 fill-amber-600 flex-shrink-0" />}
+                  {!isReplaced && displayStatus === 'OVERDUE' && <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
                 </div>
               );
             })}
