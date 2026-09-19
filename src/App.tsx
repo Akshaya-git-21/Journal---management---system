@@ -356,8 +356,8 @@ export default function App() {
         const shellClass = isShell ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-grow flex flex-col';
         return (
         <div className={shellClass}>
-          {/* Workspace chrome for every role except Author (whose workspace has its own header) */}
-          {loggedInUser && loggedInUser.role !== 'AUTHOR' && (
+          {/* Workspace chrome for every role except Author (whose workspace has its own header); the Coordinator's shell renders its own top bar too */}
+          {loggedInUser && loggedInUser.role !== 'AUTHOR' && loggedInUser.role !== 'COORDINATOR' && (
             <RoleSelector
               activeRole={loggedInUser.role}
               unassignedCount={0}
@@ -390,7 +390,7 @@ export default function App() {
                 )}
 
                 {loggedInUser?.role === 'COORDINATOR' && (
-                  <CoordinatorWorkspace />
+                  <CoordinatorWorkspace currentUser={loggedInUser} onSignOut={handleSignOut} />
                 )}
 
                 {loggedInUser?.role === 'GD_MEMBER' && (

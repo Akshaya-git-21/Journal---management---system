@@ -16,8 +16,8 @@ import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
-import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2, LayoutGrid, Cog, Inbox, Printer, PackageCheck, FileCheck2, MessageSquareWarning, Send } from 'lucide-react';
-import { NavGroup, NavItem } from './SidebarNavGroup';
+import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2, LayoutGrid, Cog, Inbox, Printer, PackageCheck, FileCheck2, MessageSquareWarning, Send, Monitor, GraduationCap, CloudUpload, CalendarDays, Bell } from 'lucide-react';
+import { CoordinatorBrand, CNavGroup as NavGroup, CNavItem as NavItem, CoordinatorTopBar } from './CoordinatorChrome';
 import { AssignmentConfirmationDialog } from './AssignmentConfirmationDialog';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 import ProductionSection from './production/ProductionSection';
@@ -26,6 +26,8 @@ import JournalTemplateSection from './production/JournalTemplateSection';
 interface CoordinatorWorkspaceProps {
   manuscripts?: any[];
   onUpdateManuscript?: (manuscript: any) => void;
+  currentUser?: { name: string; email: string; role: string } | null;
+  onSignOut?: () => void;
 }
 
 // Coordinator work-queue tabs -- internal navigation aids (spec explicitly
@@ -62,7 +64,7 @@ function StatusBadge({ manuscript, latestRevision, productionStatus }: { manuscr
   );
 }
 
-export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) {
+export default function CoordinatorWorkspace({ currentUser, onSignOut }: CoordinatorWorkspaceProps) {
   const [items, setItems] = useState<ManuscriptRow[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<ProfileRow[]>([]);
   const [editorialBoardProfiles, setEditorialBoardProfiles] = useState<ProfileRow[]>([]);
@@ -491,43 +493,36 @@ export default function CoordinatorWorkspace(_props: CoordinatorWorkspaceProps) 
   const isPdfTemplateSection = activeSection === 'PDF_TEMPLATE';
 
   return (
-    <div id="coordinator-workspace" className="flex-1 min-h-0 bg-[#00170f] text-[#111827] flex flex-col font-sans">
+    <div id="coordinator-workspace" className="flex-1 min-h-0 bg-[#f6fbf9] text-[#111827] flex flex-col font-sans">
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
-        <aside className="w-full md:w-64 bg-[#00170f] border-r border-[#002116] p-4 shrink-0 text-white overflow-y-auto">
-          <div className="space-y-3">
-            <NavGroup title="Workspace" icon={<LayoutGrid className="w-4 h-4" />} expanded={expandedNavGroups.workspace} onToggle={() => toggleNavGroup('workspace')}>
+        <aside className="w-full md:w-[270px] bg-[#032b22] shrink-0 text-white overflow-y-auto">
+          <CoordinatorBrand />
+          <div className="px-3 pb-6">
+            <NavGroup title="Workspace" icon={<LayoutGrid className="w-4 h-4" />} hasActive={isDashboardSection || isManuscriptQueueSection || isPendingApprovalsSection} expanded={expandedNavGroups.workspace} onToggle={() => toggleNavGroup('workspace')}>
               <NavItem icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" active={isDashboardSection} onClick={() => { setActiveSection('DASHBOARD'); setSelectedId(null); }} />
               <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Manuscript Queue" active={isManuscriptQueueSection} onClick={() => { setActiveSection('MANUSCRIPT_QUEUE'); setSelectedId(null); }} />
               <NavItem icon={<ShieldCheck className="w-4 h-4" />} label="Pending Approvals" active={isPendingApprovalsSection} onClick={() => { setActiveSection('PENDING_APPROVALS'); setSelectedId(null); }} />
             </NavGroup>
 
-            <NavGroup title="People" icon={<Users className="w-4 h-4" />} expanded={expandedNavGroups.people} onToggle={() => toggleNavGroup('people')}>
+            <NavGroup title="People" icon={<Users className="w-4 h-4" />} hasActive={isEditorialBoardSection || isReviewersSection || isPublishersSection || isGDMembersSection} expanded={expandedNavGroups.people} onToggle={() => toggleNavGroup('people')}>
               <NavItem icon={<BookOpen className="w-4 h-4" />} label="Editorial Board" active={isEditorialBoardSection} onClick={() => { setActiveSection('EDITORIAL_BOARD'); setSelectedId(null); }} />
               <NavItem icon={<Users className="w-4 h-4" />} label="Reviewers" active={isReviewersSection} onClick={() => { setActiveSection('REVIEWERS'); setSelectedId(null); }} />
               <NavItem icon={<Building2 className="w-4 h-4" />} label="Publishers" active={isPublishersSection} onClick={() => { setActiveSection('PUBLISHERS'); setSelectedId(null); }} />
               <NavItem icon={<PackageCheck className="w-4 h-4" />} label="GD Members" active={isGDMembersSection} onClick={() => { setActiveSection('GD_MEMBERS'); setSelectedId(null); }} />
             </NavGroup>
 
-            <NavGroup title="System" icon={<Cog className="w-4 h-4" />} expanded={expandedNavGroups.system} onToggle={() => toggleNavGroup('system')}>
+            <NavGroup title="System" icon={<Cog className="w-4 h-4" />} hasActive={isReportsSection || isCommunicationsSection || isSettingsSection || isAuditTrailSection} expanded={expandedNavGroups.system} onToggle={() => toggleNavGroup('system')}>
               <NavItem icon={<BarChart3 className="w-4 h-4" />} label="Reports & Analytics" active={isReportsSection} onClick={() => { setActiveSection('REPORTS'); setSelectedId(null); }} />
               <NavItem icon={<MessageCircle className="w-4 h-4" />} label="Communications" active={isCommunicationsSection} onClick={() => { setActiveSection('COMMUNICATIONS'); setSelectedId(null); }} />
               <NavItem icon={<Settings className="w-4 h-4" />} label="Settings" active={isSettingsSection} onClick={() => { setActiveSection('SETTINGS'); setSelectedId(null); }} />
               <NavItem icon={<Activity className="w-4 h-4" />} label="Audit Trail" active={isAuditTrailSection} onClick={() => { setActiveSection('AUDIT_TRAIL'); setSelectedId(null); }} />
             </NavGroup>
-
-            <NavGroup title="Production" icon={<Printer className="w-4 h-4" />} expanded={expandedNavGroups.production} onToggle={() => toggleNavGroup('production')}>
-              <NavItem icon={<Inbox className="w-4 h-4" />} label="Production Queue" active={isProductionQueueSection} onClick={() => { setActiveSection('PRODUCTION_QUEUE'); setSelectedId(null); }} />
-              <NavItem icon={<PackageCheck className="w-4 h-4" />} label="In Production" active={isInProductionSection} onClick={() => { setActiveSection('IN_PRODUCTION'); setSelectedId(null); }} />
-              <NavItem icon={<Send className="w-4 h-4" />} label="Proofs Awaiting Author" active={isProofsAwaitingAuthorSection} onClick={() => { setActiveSection('PROOFS_AWAITING_AUTHOR'); setSelectedId(null); }} />
-              <NavItem icon={<MessageSquareWarning className="w-4 h-4" />} label="Corrections" active={isCorrectionsSection} onClick={() => { setActiveSection('CORRECTIONS'); setSelectedId(null); }} />
-              <NavItem icon={<FileCheck2 className="w-4 h-4" />} label="Ready for Publication" active={isReadyForPublicationSection} onClick={() => { setActiveSection('READY_FOR_PUBLICATION'); setSelectedId(null); }} />
-              <NavItem icon={<FileText className="w-4 h-4" />} label="PDF Template" active={isPdfTemplateSection} onClick={() => { setActiveSection('PDF_TEMPLATE'); setSelectedId(null); }} />
-            </NavGroup>
           </div>
         </aside>
 
-        <div className="flex-1 bg-[#00170f] md:p-3 overflow-hidden flex flex-col min-h-0">
-          <main className="flex-1 bg-slate-50 md:rounded-3xl border border-[#002b1d]/20 p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
+        <div className="flex-1 min-w-0 bg-[#f6fbf9] overflow-hidden flex flex-col min-h-0">
+          <CoordinatorTopBar user={currentUser} onSignOut={onSignOut} />
+          <main className="flex-1 bg-[#f6fbf9] p-6 md:p-8 overflow-y-auto text-left flex flex-col gap-5">
             {isDashboardSection ? (
               <DashboardOverviewScreen
                 items={items}
@@ -1347,106 +1342,71 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
   const manuscriptsById = Object.fromEntries(items.map((m) => [m.id, m]));
   const hasSlaWarnings = overdueReviews.length > 0 || overdueSubmissions.length > 0;
 
+  const stageCards = [
+    { key: 'submitted', label: 'Current queue', title: 'Submitted', value: stageCounts.submitted, note: 'Awaiting technical screening check.', factor: 4, icon: <FileText className="w-5 h-5" />,
+      card: 'border-emerald-200 bg-gradient-to-br from-emerald-50 to-white', tile: 'bg-emerald-700', labelC: 'text-emerald-800', noteC: 'text-emerald-700', track: 'bg-emerald-200', fill: 'bg-emerald-700' },
+    { key: 'screening', label: 'Desk phase', title: 'Screening', value: screeningCount, note: 'Initial technical vetting.', factor: 8, icon: <Monitor className="w-5 h-5" />,
+      card: 'border-amber-200 bg-gradient-to-br from-amber-50 to-white', tile: 'bg-amber-500', labelC: 'text-amber-700', noteC: 'text-amber-700', track: 'bg-amber-200', fill: 'bg-[#e16e06]' },
+    { key: 'peer', label: 'Peer vetting', title: 'Under review', value: stageCounts.underReview, note: 'Active external review reports.', factor: 8, icon: <Users className="w-5 h-5" />,
+      card: 'border-sky-200 bg-gradient-to-br from-sky-50 to-white', tile: 'bg-sky-600', labelC: 'text-sky-800', noteC: 'text-sky-700', track: 'bg-sky-200', fill: 'bg-sky-600' },
+    { key: 'decision', label: 'Academic gate', title: 'Decision', value: stageCounts.awaitingDecision, note: 'Awaiting editorial judgment.', factor: 8, icon: <GraduationCap className="w-5 h-5" />,
+      card: 'border-violet-200 bg-gradient-to-br from-violet-50 to-white', tile: 'bg-violet-600', labelC: 'text-violet-800', noteC: 'text-violet-700', track: 'bg-violet-200', fill: 'bg-violet-600' },
+    { key: 'production', label: 'Archiving phase', title: 'Production', value: productionCount, note: 'Injecting DOI variables.', factor: 8, icon: <CloudUpload className="w-5 h-5" />,
+      card: 'border-emerald-200 bg-gradient-to-br from-emerald-50 to-white', tile: 'bg-emerald-700', labelC: 'text-emerald-800', noteC: 'text-emerald-700', track: 'bg-emerald-200', fill: 'bg-emerald-700' },
+  ];
+
+  // Icon tile per pipeline event -- purely presentational.
+  const activityIcon = (status: ManuscriptStatus) => {
+    switch (status) {
+      case 'SUBMITTED': return { icon: <FileText className="w-4 h-4" />, tone: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+      case 'EDITOR_REVIEW': return { icon: <ClipboardList className="w-4 h-4" />, tone: 'bg-violet-50 text-violet-700 border-violet-200' };
+      case 'UNDER_REVIEW': return { icon: <Users className="w-4 h-4" />, tone: 'bg-sky-50 text-sky-700 border-sky-200' };
+      case 'AWAITING_DECISION': return { icon: <ClipboardList className="w-4 h-4" />, tone: 'bg-violet-50 text-violet-700 border-violet-200' };
+      default: return { icon: <RefreshCcw className="w-4 h-4" />, tone: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+    }
+  };
+
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.35em] text-slate-400 font-bold">Dashboard overview</p>
-          <h1 className="mt-2 text-3xl font-black text-slate-900">Monitor editorial pipeline, decisions backlog, and active SLAs.</h1>
+          <p className="text-xs uppercase tracking-[0.3em] text-emerald-900 font-bold">Dashboard overview</p>
+          <h1 className="mt-3 text-3xl font-black text-[#0a2e22]">Monitor editorial pipeline, decisions backlog, and active SLAs.</h1>
+          <p className="mt-2 text-sm text-slate-500">Track manuscript progress, reviewer activities, and key actions across the journal workflow.</p>
         </div>
-        <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm">
-          <Clock className="w-3.5 h-3.5 text-slate-400" /> {now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} · {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-700 font-bold">Current queue</p>
-              <h2 className="mt-3 text-2xl font-black text-slate-900">Submitted</h2>
-            </div>
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700">1</span>
-          </div>
-          <p className="mt-3 text-3xl font-black text-slate-900">{stageCounts.submitted}</p>
-          <p className="mt-2 text-sm text-emerald-700">Awaiting technical screening check.</p>
-          <div className="mt-4 h-2 rounded-full bg-emerald-200">
-            <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${Math.min(100, stageCounts.submitted * 4)}%` }} />
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-amber-700 font-bold">Desk phase</p>
-              <h2 className="mt-3 text-2xl font-black text-slate-900">Screening</h2>
-            </div>
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-xs font-bold text-amber-700">2</span>
-          </div>
-          <p className="mt-3 text-3xl font-black text-slate-900">{screeningCount}</p>
-          <p className="mt-2 text-sm text-amber-700">Initial technical vetting.</p>
-          <div className="mt-4 h-2 rounded-full bg-amber-200">
-            <div className="h-2 rounded-full bg-amber-600" style={{ width: `${Math.min(100, screeningCount * 8)}%` }} />
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-sky-700 font-bold">Peer vetting</p>
-              <h2 className="mt-3 text-2xl font-black text-slate-900">Under review</h2>
-            </div>
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-100 text-xs font-bold text-sky-700">3</span>
-          </div>
-          <p className="mt-3 text-3xl font-black text-slate-900">{stageCounts.underReview}</p>
-          <p className="mt-2 text-sm text-sky-700">Active external review reports.</p>
-          <div className="mt-4 h-2 rounded-full bg-sky-200">
-            <div className="h-2 rounded-full bg-sky-600" style={{ width: `${Math.min(100, stageCounts.underReview * 8)}%` }} />
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-violet-200 bg-violet-50 p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-violet-700 font-bold">Academic gate</p>
-              <h2 className="mt-3 text-2xl font-black text-slate-900">Decision</h2>
-            </div>
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">4</span>
-          </div>
-          <p className="mt-3 text-3xl font-black text-slate-900">{stageCounts.awaitingDecision}</p>
-          <p className="mt-2 text-sm text-violet-700">Awaiting editorial judgment.</p>
-          <div className="mt-4 h-2 rounded-full bg-violet-200">
-            <div className="h-2 rounded-full bg-violet-600" style={{ width: `${Math.min(100, stageCounts.awaitingDecision * 8)}%` }} />
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-700 font-bold">Archiving phase</p>
-              <h2 className="mt-3 text-2xl font-black text-slate-900">Production</h2>
-            </div>
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700">5</span>
-          </div>
-          <p className="mt-3 text-3xl font-black text-slate-900">{productionCount}</p>
-          <p className="mt-2 text-sm text-emerald-700">Injecting DOI variables.</p>
-          <div className="mt-4 h-2 rounded-full bg-emerald-200">
-            <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${Math.min(100, productionCount * 8)}%` }} />
-          </div>
+        <div className="inline-flex items-center gap-2.5 rounded-xl border border-[#d8e8e7] bg-white px-4 py-2.5 text-sm font-bold text-slate-800 shadow-sm shrink-0">
+          <CalendarDays className="w-4 h-4 text-emerald-800" /> {now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} · {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-3xl bg-white border border-slate-200 p-5 shadow-sm">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        {stageCards.map((c) => (
+          <div key={c.key} className={`rounded-2xl border p-5 shadow-sm ${c.card}`}>
+            <div className="flex items-center gap-3">
+              <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white ${c.tile}`}>{c.icon}</span>
+              <p className={`text-[11px] uppercase tracking-[0.2em] font-bold ${c.labelC}`}>{c.label}</p>
+            </div>
+            <h2 className="mt-5 text-2xl font-black text-slate-900">{c.title}</h2>
+            <p className="mt-1 text-3xl font-black text-slate-900">{c.value}</p>
+            <p className={`mt-2 text-sm ${c.noteC}`}>{c.note}</p>
+            <div className={`mt-4 h-1.5 rounded-full ${c.track}`}>
+              <div className={`h-1.5 rounded-full ${c.fill}`} style={{ width: `${Math.min(100, c.value * c.factor)}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-2 items-start">
+        <div className="rounded-2xl bg-white border border-[#e7ebec] p-6 shadow-sm">
           <div className="flex items-center justify-between">
-            <p className="text-xs uppercase tracking-[0.24em] text-slate-400 font-bold">SLA warning exceptions</p>
-            <span className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Review required</span>
+            <p className="flex items-center gap-3 text-lg font-bold text-[#0a2e22]"><Bell className="w-5 h-5 text-emerald-800" /> SLA Warning Exceptions</p>
+            <span className="text-xs text-slate-400">Review required</span>
           </div>
           <div className="mt-4 space-y-3">
             {loading ? (
               <div className="flex items-center justify-center py-10 text-slate-400"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading...</div>
             ) : !hasSlaWarnings ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No active SLA exceptions right now.</div>
+              <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No active SLA exceptions right now.</div>
             ) : (
               <>
                 {overdueReviews.map((review) => {
@@ -1454,18 +1414,25 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
                   const reviewer = profiles[review.reviewer_id];
                   const daysOverdue = Math.max(1, Math.floor((Date.now() - new Date(review.due_date).getTime()) / 86400000));
                   return (
-                    <div key={review.id} className="rounded-2xl bg-rose-50 border border-rose-100 p-4">
-                      <p className="text-sm font-bold text-rose-700">{manuscript ? manuscript.title : review.manuscript_id} — Overdue Review Round</p>
-                      <p className="mt-1 text-sm text-slate-600">
-                        Assigned reviewer {reviewer?.name || 'Unknown reviewer'} is overdue on decision feedback by {daysOverdue} day{daysOverdue === 1 ? '' : 's'}.
-                      </p>
+                    <div key={review.id} className="flex gap-3 rounded-xl bg-rose-50 p-4">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-rose-600 text-sm font-black text-white">!</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-rose-700">{manuscript ? manuscript.title : review.manuscript_id} — Overdue Review Round</p>
+                        <p className="mt-1.5 text-sm text-slate-600">
+                          Assigned reviewer {reviewer?.name || 'Unknown reviewer'} is overdue on decision feedback by {daysOverdue} day{daysOverdue === 1 ? '' : 's'}.
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-xs text-slate-400">{daysOverdue} day{daysOverdue === 1 ? '' : 's'} ago</span>
                     </div>
                   );
                 })}
                 {overdueSubmissions.length > 0 && (
-                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-4">
-                    <p className="text-sm font-bold text-amber-700">Desk Screening Threshold Warning</p>
-                    <p className="mt-1 text-sm text-slate-600">{overdueSubmissions.length} submission{overdueSubmissions.length === 1 ? '' : 's'} have been in unassigned screening queue for over the SLA limit of {SLA_SCREENING_DAYS} days.</p>
+                  <div className="flex gap-3 rounded-xl bg-amber-50 p-4">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500 text-sm font-black text-white">!</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-amber-700">Desk Screening Threshold Warning</p>
+                      <p className="mt-1.5 text-sm text-slate-600">{overdueSubmissions.length} submission{overdueSubmissions.length === 1 ? '' : 's'} have been in unassigned screening queue for over the SLA limit of {SLA_SCREENING_DAYS} days.</p>
+                    </div>
                   </div>
                 )}
               </>
@@ -1473,27 +1440,31 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
           </div>
         </div>
 
-        <div className="rounded-3xl bg-white border border-slate-200 p-5 shadow-sm">
+        <div className="rounded-2xl bg-white border border-[#e7ebec] p-6 shadow-sm">
           <div className="flex items-center justify-between">
-            <p className="text-xs uppercase tracking-[0.24em] text-slate-400 font-bold">Recent pipeline activity</p>
-            <span className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Live</span>
+            <p className="flex items-center gap-3 text-lg font-bold text-[#0a2e22]"><Activity className="w-5 h-5 text-emerald-800" /> Recent Pipeline Activity</p>
+            <span className="flex items-center gap-1.5 text-sm font-semibold text-emerald-700"><span className="h-2 w-2 rounded-full bg-emerald-600" /> Live</span>
           </div>
-          <div className="mt-4 space-y-4 text-sm text-slate-700">
+          <div className="mt-4 text-sm text-slate-700">
             {loading ? (
               <div className="flex items-center justify-center py-10 text-slate-400"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading...</div>
             ) : recentActivity.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No pipeline activity yet.</div>
+              <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No pipeline activity yet.</div>
             ) : (
               recentActivity.map((event, idx) => {
                 const manuscript = manuscriptsById[event.manuscript_id];
                 const actor = event.actor_id ? profiles[event.actor_id] : null;
+                const visual = activityIcon(event.to_status);
                 return (
-                  <div key={event.id} className={idx < recentActivity.length - 1 ? 'border-b border-slate-200 pb-3' : ''}>
-                    <p className="font-semibold text-slate-900">
-                      {manuscript ? manuscript.title : event.manuscript_id} {ACTIVITY_LABELS[event.to_status] || 'was updated'}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">By: {actor?.name || 'System'}</p>
-                    <p className="mt-1 text-[11px] text-slate-400">{formatRelativeTime(event.created_at)}</p>
+                  <div key={event.id} className={`flex items-start gap-3 py-3.5 ${idx > 0 ? 'border-t border-slate-100' : ''}`}>
+                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${visual.tone}`}>{visual.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-slate-900">
+                        <span className="font-bold">{manuscript ? manuscript.title : event.manuscript_id}</span> {ACTIVITY_LABELS[event.to_status] || 'was updated'}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">By: {actor?.name || 'System'}</p>
+                    </div>
+                    <span className="shrink-0 text-xs text-slate-400">{formatRelativeTime(event.created_at)}</span>
                   </div>
                 );
               })

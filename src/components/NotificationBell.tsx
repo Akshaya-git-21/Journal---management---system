@@ -19,7 +19,7 @@ export interface JmsOpenManuscriptDetail { manuscriptId: string; notificationTyp
  * what getMyNotifications()/markNotificationRead() already expose, scoped by
  * the existing RLS (recipient_id = auth.uid()).
  */
-export default function NotificationBell({ dark = true }: { dark?: boolean }) {
+export default function NotificationBell({ dark = true, badgeClassName = 'bg-red-500' }: { dark?: boolean; badgeClassName?: string }) {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -105,7 +105,7 @@ export default function NotificationBell({ dark = true }: { dark?: boolean }) {
       >
         <Bell className="w-4 h-4" />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+          <span className={`absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full ${badgeClassName} text-white text-[10px] font-bold flex items-center justify-center`}>
             {unreadCount}
           </span>
         )}
