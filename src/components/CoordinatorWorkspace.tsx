@@ -801,7 +801,8 @@ function QueueTable({ items, onOpen, productionByManuscript }: { items: Manuscri
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const totalPages = Math.ceil(items.length / itemsPerPage);
-  const startIdx = (currentPage - 1) * itemsPerPage;
+  const activePage = Math.min(currentPage, Math.max(1, totalPages));
+  const startIdx = (activePage - 1) * itemsPerPage;
   const paginatedItems = items.slice(startIdx, startIdx + itemsPerPage);
 
   if (items.length === 0) {
@@ -844,8 +845,8 @@ function QueueTable({ items, onOpen, productionByManuscript }: { items: Manuscri
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(Math.max(1, activePage - 1))}
+              disabled={activePage === 1}
               className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Previous
@@ -856,7 +857,7 @@ function QueueTable({ items, onOpen, productionByManuscript }: { items: Manuscri
                   key={page}
                   onClick={() => setCurrentPage(page)}
                   className={`w-8 h-8 rounded-lg text-xs font-semibold transition ${
-                    page === currentPage
+                    page === activePage
                       ? 'bg-[#008751] text-white'
                       : 'border border-slate-300 text-slate-700 hover:bg-slate-50'
                   }`}
@@ -866,8 +867,8 @@ function QueueTable({ items, onOpen, productionByManuscript }: { items: Manuscri
               ))}
             </div>
             <button
-              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(Math.min(totalPages, activePage + 1))}
+              disabled={activePage === totalPages}
               className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Next

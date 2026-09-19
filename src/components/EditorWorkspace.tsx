@@ -255,17 +255,28 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
   // tracking uses reviewer_assignments.due_date; scheduling/copyediting has
   // no dedicated status in this schema) fall back to an honest empty state
   // rather than inventing a stage that isn't tracked.
+  const isClosedManuscript = (r: EditorManuscriptDetails) => r.manuscript.status === 'PUBLISHED' || r.manuscript.status === 'REJECTED';
   const SECTION_FILTERS: Record<string, { label: string; predicate: (r: EditorManuscriptDetails) => boolean }> = {
-    'active-submissions': { label: 'Active Submissions', predicate: (r) => r.assignment.status === 'ACCEPTED' },
-    'needs-editor': { label: 'Needs Editor', predicate: (r) => r.assignment.assessment_status === 'NOT_STARTED' },
+    // "Closed" = finished for the Editor's purposes; these never count as
+    // active work or as awaiting anything.
+    'active-submissions': { label: 'Active Submissions', predicate: (r) => r.assignment.status === 'ACCEPTED' && !isClosedManuscript(r) },
+    // Accepted the assignment but the initial editorial evaluation hasn't been started.
+    'needs-editor': { label: 'Needs Editor', predicate: (r) => r.assignment.status === 'ACCEPTED' && r.manuscript.status === 'EDITOR_REVIEW' && r.assignment.assessment_status === 'NOT_STARTED' },
+    // Invited but hasn't accepted yet.
     'in-submission-stage': { label: 'In Submission Stage', predicate: (r) => r.assignment.status === 'INVITED' },
-    'awaiting-reviews': { label: 'Awaiting Reviews', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' && r.reviewers.some((rv) => rv.status !== 'SUBMITTED') },
-    'reviews-submitted': { label: 'Reviews Submitted', predicate: (r) => r.reviewers.length > 0 && r.reviewers.every((rv) => rv.status === 'SUBMITTED') },
-    'reviews-overdue': { label: 'Reviews Overdue', predicate: (r) => r.reviewers.some((rv) => editorSeesReplacementNeeded(rv)) },
-    'revisions-submitted': { label: 'Revisions Submitted', predicate: (r) => r.revisions.length > 0 },
+    // Peer review is running and at least one reviewer still owes a response/report.
+    'awaiting-reviews': { label: 'Awaiting Reviews', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' && r.reviewers.some((rv) => rv.status === 'INVITED' || rv.status === 'ACCEPTED') },
+    // Every (non-declined) reviewer has submitted and the manuscript is at the decision gate.
+    'reviews-submitted': { label: 'Reviews Submitted', predicate: (r) => {
+      const active = r.reviewers.filter((rv) => rv.status !== 'DECLINED');
+      return r.manuscript.status === 'AWAITING_DECISION' && active.length > 0 && active.every((rv) => rv.status === 'SUBMITTED');
+    } },
+    'reviews-overdue': { label: 'Reviews Overdue', predicate: (r) => !isClosedManuscript(r) && r.reviewers.some((rv) => editorSeesReplacementNeeded(rv)) },
+    // A revision the Coordinator has forwarded to the Editor and that is waiting on them.
+    'revisions-submitted': { label: 'Revisions Submitted', predicate: (r) => !isClosedManuscript(r) && getLatestRevision(r.revisions)?.status === 'UNDER_REVIEW' },
     'in-review-stage': { label: 'In Review Stage', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' },
     'published-articles': { label: 'Published', predicate: (r) => r.manuscript.status === 'PUBLISHED' },
-    'declined-rejected': { label: 'Declined / Rejected', predicate: (r) => r.manuscript.status === 'REJECTED' },
+    'declined-rejected': { label: 'Declined / Rejected', predicate: (r) => r.manuscript.status === 'REJECTED' || r.assignment.status === 'DECLINED' },
   };
 
   const load = async () => {
@@ -297,9 +308,9 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
   const assignmentCounts = {
     total: rows.length,
     invited: rows.filter((r) => r.assignment.status === 'INVITED').length,
-    accepted: rows.filter((r) => r.assignment.status === 'ACCEPTED').length,
+    accepted: rows.filter(SECTION_FILTERS['active-submissions'].predicate).length,
     submitted: rows.filter((r) => r.assignment.assessment_status === 'SUBMITTED').length,
-    pending: rows.filter((r) => r.assignment.assessment_status === 'NOT_STARTED').length,
+    pending: rows.filter(SECTION_FILTERS['needs-editor'].predicate).length,
   };
 
   useEffect(() => {
@@ -561,8 +572,8 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatusStatCard title="Active Submissions" value={assignmentCounts.accepted} icon={<Clock className="w-5 h-5" />} tone="emerald" />
             <StatusStatCard title="Needs Editor" value={assignmentCounts.pending} icon={<AlertCircle className="w-5 h-5" />} tone="amber" />
-            <StatusStatCard title="In Submission" value={0} icon={<Archive className="w-5 h-5" />} tone="sky" />
-            <StatusStatCard title="System Pipeline" value={0} icon={<FileText className="w-5 h-5" />} tone="violet" />
+            <StatusStatCard title="In Submission" value={assignmentCounts.invited} icon={<Archive className="w-5 h-5" />} tone="sky" />
+            <StatusStatCard title="System Pipeline" value={assignmentCounts.total} icon={<FileText className="w-5 h-5" />} tone="violet" />
           </div>
 
 
@@ -584,7 +595,9 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
                 </button>
               </div>
             ) : (
-              <AssignmentListWithPagination rows={filteredRows} onOpen={(id, tab) => { setSelectedManuscriptId(id); setPendingTab(tab ?? null); }} />
+              <div key={sectionFilter ?? 'all'}>
+                <AssignmentListWithPagination rows={filteredRows} onOpen={(id, tab) => { setSelectedManuscriptId(id); setPendingTab(tab ?? null); }} />
+              </div>
             )}
 
         </div>
@@ -602,7 +615,9 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
   }
 
   const totalPages = Math.ceil(rows.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
+  // A search can shrink the list below the page we're on -- never show an empty page.
+  const activePage = Math.min(currentPage, totalPages);
+  const startIndex = (activePage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const paginatedRows = rows.slice(startIndex, endIndex);
 
@@ -696,8 +711,8 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(Math.max(1, activePage - 1))}
+              disabled={activePage === 1}
               className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               ← Previous
@@ -708,7 +723,7 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
                   key={page}
                   onClick={() => setCurrentPage(page)}
                   className={`w-8 h-8 rounded text-xs font-semibold transition ${
-                    currentPage === page
+                    activePage === page
                       ? 'bg-[#008751] text-white'
                       : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                   }`}
@@ -718,8 +733,8 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
               ))}
             </div>
             <button
-              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(Math.min(totalPages, activePage + 1))}
+              disabled={activePage === totalPages}
               className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Next →

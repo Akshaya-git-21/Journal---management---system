@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Loader2, AlertCircle, CheckCircle, XCircle, Send, RotateCcw, ArrowRight } from 'lucide-react';
 import { EditorAssignmentRow, RevisionRow, ScreeningResponse, submitEditorScreening, submitEditorRecommendation } from '../../../lib/workflow';
 import { getLatestRevision } from '../../../lib/manuscriptStatusLabel';
+import { usePersistedState } from '../../../lib/usePersistedState';
 
 interface Props {
   assignmentId: string;
@@ -51,14 +52,18 @@ export function EditorEvaluationFormTab({
   const isRevisionReview = latestRevision?.status === 'UNDER_REVIEW';
   const nextRevisionNumber = (latestRevision?.revision_number || 0) + 1;
 
-  const [responses, setResponses] = useState<Record<string, { answer: boolean | null; reason: string }>>(
+  // The Editor's answers are kept while they look at other tabs (this tab
+  // unmounts when they leave it) and are dropped once actually submitted.
+  const draftKey = `editor-evaluation:${assignmentId}:${latestRevision?.revision_number ?? 0}`;
+  const [responses, setResponses, clearResponses] = usePersistedState<Record<string, { answer: boolean | null; reason: string }>>(
+    draftKey + ':responses',
     () => Object.fromEntries(QUESTIONS.map(q => [q.id, { answer: null, reason: '' }]))
   );
-  const [comments, setComments] = useState('');
+  const [comments, setComments, clearComments] = usePersistedState(draftKey + ':comments', '');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [pendingAction, setPendingAction] = useState<FinalAction | null>(null);
-  const [actionReason, setActionReason] = useState('');
+  const [actionReason, setActionReason, clearActionReason] = usePersistedState(draftKey + ':reason', '');
 
   const setAnswer = (id: string, answer: boolean) =>
     setResponses(prev => ({ ...prev, [id]: { ...prev[id], answer } }));
@@ -92,6 +97,9 @@ export function EditorEvaluationFormTab({
         meta.needsReason ? actionReason.trim() : undefined
       );
       setPendingAction(null);
+      clearResponses();
+      clearComments();
+      clearActionReason();
       if (action === 'NEXT_STAGE') {
         (onMoveToNextStage || onSubmitSuccess)();
       } else {

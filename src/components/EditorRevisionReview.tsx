@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { usePersistedState } from '../lib/usePersistedState';
 import {
   getRevisionFiles, submitEditorRecommendation, ManuscriptFileRow, RevisionRow, ChecklistItem,
   ReviewerRecommendation, ReviewerAssignmentRow
@@ -85,14 +86,18 @@ export default function EditorRevisionReview({
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [previewFile, setPreviewFile] = useState<ManuscriptFileRow | null>(null);
 
-  const [comments, setComments] = useState('');
-  const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
-  const [selectedAction, setSelectedAction] = useState<RevisionAction | null>(null);
+  // Draft decision kept while the Editor visits other tabs; the effect below
+  // only seeds from the revision when there is no draft in progress.
+  const draftKey = `editor-revision-review:${manuscriptId}:${latestRevision?.revision_number ?? 0}`;
+  const hadDraft = useRef(typeof sessionStorage !== 'undefined' && sessionStorage.getItem(draftKey + ':comments') !== null);
+  const [comments, setComments, clearComments] = usePersistedState(draftKey + ':comments', '');
+  const [checklist, setChecklist, clearChecklist] = usePersistedState<ChecklistItem[]>(draftKey + ':checklist', []);
+  const [selectedAction, setSelectedAction, clearSelectedAction] = usePersistedState<RevisionAction | null>(draftKey + ':action', null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!latestRevision) return;
+    if (!latestRevision || hadDraft.current) return;
     setComments(latestRevision.editor_comments || '');
     setChecklist(
       latestRevision.editor_checklist && latestRevision.editor_checklist.length > 0
@@ -134,6 +139,9 @@ export default function EditorRevisionReview({
     setError('');
     try {
       await submitEditorRecommendation(manuscriptId, ACTION_META[selectedAction].recommendation, comments.trim(), checklist);
+      clearComments();
+      clearChecklist();
+      clearSelectedAction();
       onSubmitSuccess();
     } catch (e: any) {
       setError(e.message || 'Failed to submit decision');

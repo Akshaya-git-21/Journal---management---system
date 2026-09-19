@@ -11,6 +11,12 @@ interface AuthorRevisionRequestProps {
 const RESPONSE_NOTE_MAX = 2000;
 const MANUSCRIPT_FILE_TYPE = 'Revised Manuscript';
 
+// The revised manuscript must be a Word document. The browser's `accept`
+// filter only guards the file picker, so drag & drop (and anything renamed) is
+// checked here too.
+const WORD_EXTENSIONS = ['.doc', '.docx'];
+const isWordDocument = (file: File) => WORD_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext));
+
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diffMs / 60000);
@@ -84,7 +90,7 @@ function Dropzone({
           <input
             id={inputId}
             type="file"
-            accept=".pdf,.docx,.doc"
+            accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             disabled={uploading}
             onChange={(e: ChangeEvent<HTMLInputElement>) => {
               const selected = e.target.files?.[0];
@@ -102,7 +108,7 @@ function Dropzone({
             {uploading ? 'Uploading...' : 'Drag & drop your file here'}
           </p>
           {!uploading && <p className="text-xs text-slate-500 mt-0.5">or <span className="text-blue-600 font-semibold">Browse files</span></p>}
-          <p className="text-[11px] text-slate-400 mt-2">PDF, DOCX &middot; Maximum 20 MB</p>
+          <p className="text-[11px] text-slate-400 mt-2">Word document only (DOC, DOCX) &middot; Maximum 20 MB</p>
         </label>
       )}
     </div>
@@ -181,8 +187,12 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
 
   const handleFileSelect = async (fileType: string, file: File) => {
     if (!selectedRevision) return;
-    setUploadingType(fileType);
     setError('');
+    if (fileType === MANUSCRIPT_FILE_TYPE && !isWordDocument(file)) {
+      setError('The revised manuscript must be a Word document (.doc or .docx). PDF and other formats are not accepted.');
+      return;
+    }
+    setUploadingType(fileType);
     try {
       await uploadRevisionFile(selectedRevision.id, manuscriptId, file, fileType);
       await loadRevisionFiles(selectedRevision.id);
