@@ -264,16 +264,6 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
     'reviews-overdue': { label: 'Reviews Overdue', predicate: (r) => r.reviewers.some((rv) => editorSeesReplacementNeeded(rv)) },
     'revisions-submitted': { label: 'Revisions Submitted', predicate: (r) => r.revisions.length > 0 },
     'in-review-stage': { label: 'In Review Stage', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' },
-    // Copyediting/production sub-stage lives in manuscript_production,
-    // which RLS only exposes to Editors once a correction package is
-    // explicitly routed to them (sent_to_editor_at) -- not for every
-    // ACCEPTED manuscript they're assigned to. Faking both off the same
-    // manuscripts.status check made them permanently identical and never
-    // move independently as production actually progresses, so these fall
-    // back to an honest empty state like scheduled-articles below.
-    'copyediting-stage': { label: 'Copyediting Stage', predicate: () => false },
-    'in-production-stage': { label: 'In Production Stage', predicate: () => false },
-    'scheduled-articles': { label: 'Scheduled Articles', predicate: () => false },
     'published-articles': { label: 'Published', predicate: (r) => r.manuscript.status === 'PUBLISHED' },
     'declined-rejected': { label: 'Declined / Rejected', predicate: (r) => r.manuscript.status === 'REJECTED' },
   };
@@ -528,7 +518,7 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
             </button>
             {expandedSections.copyedit && (
               <div className="mt-2 space-y-1">
-                {(['copyediting-stage', 'in-production-stage', 'scheduled-articles', 'published-articles', 'declined-rejected'] as const).map((id) => {
+                {(['published-articles', 'declined-rejected'] as const).map((id) => {
                   const isActive = sectionFilter === id;
                   const count = rows.filter(SECTION_FILTERS[id].predicate).length;
                   return (

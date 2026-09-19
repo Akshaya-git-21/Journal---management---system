@@ -517,7 +517,6 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
 
             <NavGroup title="System" icon={<Cog className="w-4 h-4" />} hasActive={isReportsSection || isCommunicationsSection || isSettingsSection || isAuditTrailSection} expanded={expandedNavGroups.system} onToggle={() => toggleNavGroup('system')}>
               <NavItem icon={<BarChart3 className="w-4 h-4" />} label="Reports & Analytics" active={isReportsSection} onClick={() => { setActiveSection('REPORTS'); setSelectedId(null); }} />
-              <NavItem icon={<MessageCircle className="w-4 h-4" />} label="Communications" active={isCommunicationsSection} onClick={() => { setActiveSection('COMMUNICATIONS'); setSelectedId(null); }} />
               <NavItem icon={<Settings className="w-4 h-4" />} label="Settings" active={isSettingsSection} onClick={() => { setActiveSection('SETTINGS'); setSelectedId(null); }} />
               <NavItem icon={<Activity className="w-4 h-4" />} label="Audit Trail" active={isAuditTrailSection} onClick={() => { setActiveSection('AUDIT_TRAIL'); setSelectedId(null); }} />
             </NavGroup>

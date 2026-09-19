@@ -36,7 +36,22 @@ interface NewSubmissionFlowProps {
   onCancel: () => void;
   onSubmit: (paperDetails: any) => void;
   onSaveDraft?: (paperDetails: any) => void | Promise<void>;
+  /** An existing Incomplete (DRAFT) submission to pick up where it was left. */
+  resumeDraft?: {
+    id: string;
+    title: string;
+    subtitle?: string | null;
+    abstract: string;
+    cover_letter: string;
+    language: string;
+    submission_step: number;
+  } | null;
 }
+
+// Full wizard state of a saved draft, keyed by manuscript id. The DRAFT row in
+// the database only holds the core fields and the step; this holds everything
+// else (authors, files, funding, ethics, ...) so Resume restores it exactly.
+const DRAFT_STATE_PREFIX = 'ojs_draft_state_';
 
 // Full list of steps representing OJS 3 editorial setup
 const STEPS = [
@@ -82,7 +97,7 @@ const COUNTRIES = [
   'Venezuela', 'Vietnam', 'Yemen', 'Zambia', 'Zimbabwe'
 ];
 
-export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onSaveDraft }: NewSubmissionFlowProps) {
+export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onSaveDraft, resumeDraft }: NewSubmissionFlowProps) {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
 
@@ -244,11 +259,55 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
     return id;
   };
 
+  // Every piece of persistent form state, as [key, value, setter] -- used both
+  // to snapshot a draft on Save Draft and to restore it on Resume.
+  const draftFields = (): [string, any, (v: any) => void][] => [
+    ['completedSteps', completedSteps, setCompletedSteps],
+    ['checklist1', checklist1, setChecklist1], ['checklist2', checklist2, setChecklist2],
+    ['checklist3', checklist3, setChecklist3], ['checklist4', checklist4, setChecklist4],
+    ['subLanguage', subLanguage, setSubLanguage], ['subSection', subSection, setSubSection],
+    ['agreeConfidentiality', agreeConfidentiality, setAgreeConfidentiality], ['agreePrivacy', agreePrivacy, setAgreePrivacy],
+    ['agreeContact', agreeContact, setAgreeContact], ['agreeInstructions', agreeInstructions, setAgreeInstructions],
+    ['uploadedFiles', uploadedFiles, setUploadedFiles], ['additionalFiles', additionalFiles, setAdditionalFiles],
+    ['title', title, setTitle], ['subtitle', subtitle, setSubtitle], ['abstract', abstract, setAbstract],
+    ['keywords', keywords, setKeywords], ['supportingAgencies', supportingAgencies, setSupportingAgencies],
+    ['contributors', contributors, setContributors], ['coverLetter', coverLetter, setCoverLetter],
+    ['coverLetterFile', coverLetterFile, setCoverLetterFile],
+    ['isFunded', isFunded, setIsFunded], ['funderName', funderName, setFunderName], ['grantNumber', grantNumber, setGrantNumber],
+    ['fundingDesc', fundingDesc, setFundingDesc], ['additionalFunders', additionalFunders, setAdditionalFunders],
+    ['previouslySubmitted', previouslySubmitted, setPreviouslySubmitted], ['prevJournalName', prevJournalName, setPrevJournalName],
+    ['prevManuscriptId', prevManuscriptId, setPrevManuscriptId], ['prevSubmissionDate', prevSubmissionDate, setPrevSubmissionDate],
+    ['prevDecisionStatus', prevDecisionStatus, setPrevDecisionStatus], ['prevComments', prevComments, setPrevComments],
+    ['isClinicalTrial', isClinicalTrial, setIsClinicalTrial], ['trialRegNumber', trialRegNumber, setTrialRegNumber],
+    ['registryName', registryName, setRegistryName], ['trialRegDate', trialRegDate, setTrialRegDate],
+    ['patientConsent', patientConsent, setPatientConsent],
+    ['ethicalApprovalHuman', ethicalApprovalHuman, setEthicalApprovalHuman], ['ethicsCommitteeHuman', ethicsCommitteeHuman, setEthicsCommitteeHuman],
+    ['ethicsApprovalNoHuman', ethicsApprovalNoHuman, setEthicsApprovalNoHuman], ['ethicsApprovalDateHuman', ethicsApprovalDateHuman, setEthicsApprovalDateHuman],
+    ['ethicalApprovalAnimal', ethicalApprovalAnimal, setEthicalApprovalAnimal], ['ethicsCommitteeAnimal', ethicsCommitteeAnimal, setEthicsCommitteeAnimal],
+    ['ethicsApprovalNoAnimal', ethicsApprovalNoAnimal, setEthicsApprovalNoAnimal], ['ethicsApprovalDateAnimal', ethicsApprovalDateAnimal, setEthicsApprovalDateAnimal],
+    ['imagesPermissionRequired', imagesPermissionRequired, setImagesPermissionRequired], ['permissionDesc', permissionDesc, setPermissionDesc],
+    ['permissionDocs', permissionDocs, setPermissionDocs],
+    ['copyrightedContent', copyrightedContent, setCopyrightedContent], ['copyrightSourceInfo', copyrightSourceInfo, setCopyrightSourceInfo],
+    ['copyrightDocs', copyrightDocs, setCopyrightDocs],
+    ['pubLicense', pubLicense, setPubLicense], ['reviewerSuggestions', reviewerSuggestions, setReviewerSuggestions],
+    ['acceptLicense', acceptLicense, setAcceptLicense], ['licenseType', licenseType, setLicenseType],
+    ['isOpenAccess', isOpenAccess, setIsOpenAccess], ['feeWaiverRequest', feeWaiverRequest, setFeeWaiverRequest],
+  ];
+
   const handleSaveDraft = async () => {
     if (!onSaveDraft || isSavingDraft) return;
     setIsSavingDraft(true);
     try {
       const id = getOrCreateManuscriptId();
+      // Remember the whole form + the step the author is on, so Resume picks
+      // up exactly here (stored before the list view takes over).
+      try {
+        const snapshot: Record<string, any> = { currentStep };
+        draftFields().forEach(([key, value]) => { snapshot[key] = value; });
+        localStorage.setItem(DRAFT_STATE_PREFIX + id, JSON.stringify(snapshot));
+      } catch (storageErr) {
+        console.warn('Could not store the full draft state locally:', storageErr);
+      }
       await onSaveDraft({
         id,
         title: title.trim(),
@@ -308,6 +367,36 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
         console.error(err);
       }
     }
+  }, []);
+
+  // Resume an Incomplete submission: restore the saved form and land on the
+  // step the author left. Falls back to the fields stored on the DRAFT row
+  // (title, abstract, cover letter, language, step) if the full snapshot
+  // isn't available (e.g. the draft was saved from another browser).
+  useEffect(() => {
+    if (!resumeDraft) return;
+    setDraftManuscriptId(resumeDraft.id);
+    let snapshot: Record<string, any> | null = null;
+    try {
+      const raw = localStorage.getItem(DRAFT_STATE_PREFIX + resumeDraft.id);
+      if (raw) snapshot = JSON.parse(raw);
+    } catch { snapshot = null; }
+
+    const clampStep = (n: any) => Math.min(8, Math.max(1, Number(n) || 1));
+    if (snapshot) {
+      draftFields().forEach(([key, , setter]) => { if (snapshot![key] !== undefined) setter(snapshot![key]); });
+      setCurrentStep(clampStep(snapshot.currentStep ?? resumeDraft.submission_step));
+    } else {
+      const step = clampStep(resumeDraft.submission_step);
+      setTitle(resumeDraft.title || '');
+      setSubtitle(resumeDraft.subtitle || '');
+      setAbstract(resumeDraft.abstract || '');
+      setCoverLetter(resumeDraft.cover_letter || '');
+      setSubLanguage(resumeDraft.language || 'English');
+      setCompletedSteps(Array.from({ length: step - 1 }, (_, i) => i + 1));
+      setCurrentStep(step);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Save draft dynamically on every step transition or state update
@@ -951,6 +1040,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
 
       // Clear draft from localStorage
       localStorage.removeItem('ojs_submission_cached_draft');
+      localStorage.removeItem(DRAFT_STATE_PREFIX + nextIdVal);
 
       // Move to completion screen after brief delay to show success
       setTimeout(() => {
@@ -1325,7 +1415,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                         type="checkbox"
                         checked={agreeConfidentiality}
                         onChange={(e) => setAgreeConfidentiality(e.target.checked)}
-                        className="w-5 h-5 rounded border-gray-300 text-[#008751] focus:ring-[#008751] accent-[#008751]"
+                        className="w-5 h-5 shrink-0 rounded border-gray-300 text-[#008751] focus:ring-[#008751] accent-[#008751]"
                       />
                       <span>All documents and files submitted through this platform will remain confidential and will not be published, shared, distributed, or submitted to any third party without the user&rsquo;s authorization.</span>
                     </label>
@@ -1336,7 +1426,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                         type="checkbox"
                         checked={agreePrivacy}
                         onChange={(e) => setAgreePrivacy(e.target.checked)}
-                        className="w-5 h-5 rounded border-gray-300 text-[#008751] focus:ring-[#008751] accent-[#008751]"
+                        className="w-5 h-5 shrink-0 rounded border-gray-300 text-[#008751] focus:ring-[#008751] accent-[#008751]"
                       />
                       <span>Yes, I agree to the conditions outlined in the journal privacy statement.</span>
                     </label>
@@ -1347,7 +1437,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                         type="checkbox"
                         checked={agreeContact}
                         onChange={(e) => setAgreeContact(e.target.checked)}
-                        className="w-5 h-5 rounded border-gray-300 text-[#008751] focus:ring-[#008751] accent-[#008751]"
+                        className="w-5 h-5 shrink-0 rounded border-gray-300 text-[#008751] focus:ring-[#008751] accent-[#008751]"
                       />
                       <span>I wish to represent myself as the Primary Contact for this submission block.</span>
                     </label>
@@ -2158,7 +2248,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                         type="checkbox"
                         checked={contribPrincipal}
                         onChange={(e) => setContribPrincipal(e.target.checked)}
-                        className="w-5 h-5 rounded border-gray-300 text-[#008751] focus:ring-[#008751] accent-[#008751]"
+                        className="w-5 h-5 shrink-0 rounded border-gray-300 text-[#008751] focus:ring-[#008751] accent-[#008751]"
                       />
                       <span>Corresponding Author for editorial correspondence regarding this paper.</span>
                     </label>

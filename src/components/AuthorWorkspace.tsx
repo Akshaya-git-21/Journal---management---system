@@ -50,6 +50,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
   const [view, setView] = useState<'list' | 'new' | 'detail' | 'discussion' | 'revision'>('list');
+  // The Incomplete (DRAFT) submission being resumed; null = a brand-new submission.
+  const [resumeDraft, setResumeDraft] = useState<ManuscriptRow | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Which tab OjsSubmissionDetail should open on -- set when "Review
   // Proofreading" is clicked so it lands straight on the production tab
@@ -545,6 +547,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
       await load();
       setStatusFilter('incomplete');
+      setResumeDraft(null);
       setView('list');
     } catch (err: any) {
       setError(err.message || 'Failed to save draft');
@@ -554,10 +557,11 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
   if (view === 'new') {
     return (
-      <div className={`w-full min-h-screen ${LIGHT_PAGE_SURFACE} role-tint`}>
+      <div key={resumeDraft?.id ?? 'new'} className={`w-full min-h-screen ${LIGHT_PAGE_SURFACE} role-tint`}>
         <NewSubmissionFlow
+          resumeDraft={resumeDraft}
           currentUser={currentUser ?? null}
-          onCancel={() => { setView('list'); load(); }}
+          onCancel={() => { setResumeDraft(null); setView('list'); load(); }}
           onSubmit={handleNewSubmission}
           onSaveDraft={handleSaveDraft}
         />
@@ -625,15 +629,6 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                 />
               ))}
             </NavGroup>
-
-            <p className="text-[11px] uppercase tracking-[0.24em] font-bold text-emerald-300/60 px-2 mb-3 mt-4">Actions</p>
-            <button
-              type="button"
-              onClick={() => setView('new')}
-              className="w-full rounded-2xl bg-[#008751] hover:bg-[#007043] text-white px-4 py-3 text-left font-black text-sm transition cursor-pointer"
-            >
-              + New Submission
-            </button>
           </div>
           </div>
           <SidebarDecoration />
@@ -656,7 +651,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           }
           leading={view !== 'new' ? (
             <button
-              onClick={() => setView('new')}
+              onClick={() => { setResumeDraft(null); setView('new'); }}
               className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer"
             >
               <Plus className="w-4 h-4" /> New Submission
@@ -700,17 +695,11 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               <div className="bg-white border border-slate-200 rounded-lg p-4 mb-6 shadow-sm">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs uppercase tracking-wide font-semibold text-emerald-700 mb-2">
-                      <span>/submissions/queue</span>
-                    </div>
                     <h2 className="text-lg font-semibold text-slate-900">
                       {{ incomplete: 'Incomplete submissions', active: 'Active submissions', review: 'Under review', revisions: 'Revisions requested', accepted: 'Accepted submissions', rejected: 'Rejected submissions', published: 'Published submissions' }[statusFilter]}
                     </h2>
                     <p className="text-sm text-slate-600">Manage your submissions and track their progress through the editorial workflow.</p>
                   </div>
-                  <button className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition">
-                    Filters
-                  </button>
                 </div>
               </div>
 
@@ -811,7 +800,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                               )}
                               {m.status === 'DRAFT' ? (
                                 <button
-                                  onClick={() => setView('new')}
+                                  onClick={() => { setResumeDraft(m); setView('new'); }}
                                   className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 transition"
                                 >
                                   Resume Draft
