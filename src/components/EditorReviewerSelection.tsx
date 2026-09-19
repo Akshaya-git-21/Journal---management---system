@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Loader2, AlertCircle, CheckCircle, Users } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle, Check, Users } from 'lucide-react';
 import { ProfileRow, SuggestedReviewerRow, ReviewerAssignmentRow, editorSelectReviewers, editorSelectAuthorSuggestion, getManuscriptReviewerPool } from '../lib/workflow';
 import { isReviewerOverdue, editorSeesReplacementNeeded } from '../lib/reviewerStatus';
 
@@ -146,6 +146,22 @@ export function useEditorReviewerSelection({ manuscriptId, suggestedReviewers, o
 
 type SelectionState = ReturnType<typeof useEditorReviewerSelection>;
 
+/** The tick box shown at the end of a selectable reviewer row: empty when not
+ * chosen, filled green with a white tick when chosen. Purely visual -- the
+ * row it sits in is the clickable element (role="checkbox"). */
+export function SelectionCheckbox({ checked, disabled }: { checked: boolean; disabled?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 transition ${
+        checked ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 bg-white'
+      } ${disabled ? 'opacity-50' : ''}`}
+    >
+      {checked && <Check className="h-4 w-4 stroke-[3px]" />}
+    </span>
+  );
+}
+
 // Once selected, this stays visible permanently (not just a one-time
 // success message) -- reviewer_assignments only exist once the
 // Coordinator has actually sent the invitations, so without this the
@@ -214,7 +230,7 @@ function ReviewersSelectedCard({ editorSelections, selectionAssignment }: Pick<S
  * place other content (e.g. the Author's suggested reviewers) between the
  * list and the Confirm button instead of them being stacked back-to-back. */
 export function ReviewerSelectionList(state: SelectionState) {
-  const { reviewers, loading, selectedPoolIds, togglePool, submitting, error, success, alreadySelected, editorSelections, remainingSlots, selectionStatus, selectionAssignment, hasDeclinedSelection } = state;
+  const { reviewers, loading, selectedPoolIds, togglePool, totalTentative, submitting, error, success, alreadySelected, editorSelections, remainingSlots, selectionStatus, selectionAssignment, hasDeclinedSelection } = state;
 
   // A declined reviewer stays visible above (with its real "Declined"
   // status) instead of silently disappearing, and the picker below reopens
@@ -229,8 +245,11 @@ export function ReviewerSelectionList(state: SelectionState) {
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-slate-700" />
           <h3 className="text-sm font-black text-slate-900">
-            {hasDeclinedSelection ? 'Choose Another Reviewer' : `Select ${remainingSlots} Reviewer${remainingSlots === 1 ? '' : 's'}`}
+            {hasDeclinedSelection ? 'Choose Another Reviewer' : 'Reviewers'}
           </h3>
+          <span className="ml-auto rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-600">
+            {totalTentative} of {remainingSlots}
+          </span>
         </div>
 
       {error && (
@@ -258,11 +277,13 @@ export function ReviewerSelectionList(state: SelectionState) {
             return (
               <button
                 type="button"
+                role="checkbox"
+                aria-checked={isSelected}
                 key={r.id}
                 onClick={() => togglePool(r.id)}
                 disabled={submitting}
-                className={`w-full flex items-center justify-between p-3 border rounded-lg text-left transition disabled:opacity-50 ${
-                  isSelected ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : 'border-slate-200 hover:border-slate-300'
+                className={`w-full flex items-center justify-between gap-4 p-3 border rounded-lg text-left transition disabled:opacity-50 ${
+                  isSelected ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
                 <div>
@@ -270,11 +291,7 @@ export function ReviewerSelectionList(state: SelectionState) {
                   <p className="text-xs text-slate-600">{r.email}</p>
                   <p className="text-[11px] text-slate-500 mt-0.5">Expert Focus Area: {focusArea}</p>
                 </div>
-                {isSelected && (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 shrink-0">
-                    Invite
-                  </span>
-                )}
+                <SelectionCheckbox checked={isSelected} disabled={submitting} />
               </button>
             );
           })}

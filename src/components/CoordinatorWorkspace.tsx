@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import { ManuscriptStatus } from '../types';
 import { supabase } from '../lib/supabase';
 import { createEditorAccount, createReviewerAccount, createAndActivatePublisherAccount, createAndActivateGDMemberAccount } from '../lib/auth';
@@ -537,6 +537,8 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
                 overdueReviews={overdueReviews}
                 profiles={activityProfiles}
                 loading={loading}
+                onOpenManuscript={(id) => { setActiveSection('MANUSCRIPT_QUEUE'); setSelectedId(id); }}
+                onOpenUnassigned={() => { setActiveSection('MANUSCRIPT_QUEUE'); setSelectedId(null); setTab('SUBMITTED'); }}
               />
             ) : isManuscriptQueueSection ? (
               selected ? (
@@ -1331,7 +1333,7 @@ const ACTIVITY_LABELS: Record<ManuscriptStatus, string> = {
   REJECTED: 'was rejected',
 };
 
-function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentActivity, overdueReviews, profiles, loading }: {
+function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentActivity, overdueReviews, profiles, loading, onOpenManuscript, onOpenUnassigned }: {
   items: ManuscriptRow[];
   stageCounts: { submitted: number; underReview: number; awaitingDecision: number; done: number };
   pendingApprovals: number;
@@ -1339,8 +1341,19 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
   overdueReviews: OverdueReviewRow[];
   profiles: Record<string, ProfileRow>;
   loading: boolean;
+  /** Open this manuscript's detail page. */
+  onOpenManuscript: (manuscriptId: string) => void;
+  /** Open the Manuscript Queue on its Unassigned tab. */
+  onOpenUnassigned: () => void;
 }) {
   const now = useLiveClock();
+  // Make a card behave like a button (mouse + keyboard) without changing its markup.
+  const clickable = (onActivate: () => void) => ({
+    role: 'button' as const,
+    tabIndex: 0,
+    onClick: onActivate,
+    onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onActivate(); } },
+  });
   const screeningCount = items.filter((m) => m.status === 'EDITOR_REVIEW').length;
   const productionCount = items.filter((m) => ['ACCEPTED', 'PUBLISHED'].includes(m.status)).length;
   const SLA_SCREENING_DAYS = 7;
@@ -1404,7 +1417,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
                   const reviewer = profiles[review.reviewer_id];
                   const daysOverdue = Math.max(1, Math.floor((Date.now() - new Date(review.due_date).getTime()) / 86400000));
                   return (
-                    <div key={review.id} className="flex gap-3 rounded-xl bg-rose-50 p-4">
+                    <div key={review.id} {...clickable(() => onOpenManuscript(review.manuscript_id))} title="Open this manuscript" className="flex gap-3 rounded-xl bg-rose-50 p-4 cursor-pointer transition hover:bg-rose-100 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-rose-600 text-sm font-black text-white">!</span>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-rose-700">{manuscript ? manuscript.title : review.manuscript_id} — Overdue Review Round</p>
@@ -1417,7 +1430,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
                   );
                 })}
                 {overdueSubmissions.length > 0 && (
-                  <div className="flex gap-3 rounded-xl bg-amber-50 p-4">
+                  <div {...clickable(onOpenUnassigned)} title="Open the unassigned queue" className="flex gap-3 rounded-xl bg-amber-50 p-4 cursor-pointer transition hover:bg-amber-100 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-300">
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500 text-sm font-black text-white">!</span>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-amber-700">Desk Screening Threshold Warning</p>
@@ -1446,7 +1459,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
                 const actor = event.actor_id ? profiles[event.actor_id] : null;
                 const visual = activityIcon(event.to_status);
                 return (
-                  <div key={event.id} className={`flex items-start gap-3 py-3.5 ${idx > 0 ? 'border-t border-slate-100' : ''}`}>
+                  <div key={event.id} {...clickable(() => onOpenManuscript(event.manuscript_id))} title="Open this manuscript" className={`flex items-start gap-3 py-3.5 px-2 -mx-2 rounded-lg cursor-pointer transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-200 ${idx > 0 ? 'border-t border-slate-100' : ''}`}>
                     <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${visual.tone}`}>{visual.icon}</span>
                     <div className="min-w-0 flex-1">
                       <p className="text-slate-900">

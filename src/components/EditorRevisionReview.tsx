@@ -152,7 +152,7 @@ export default function EditorRevisionReview({
 
   return (
     <div className="w-full bg-slate-50">
-      <div className="max-w-4xl mx-auto p-8 space-y-6">
+      <div className="w-full p-8 space-y-6">
         {/* 1. Revision information */}
         <div className="border-b border-slate-200 pb-4">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Revision Review</p>

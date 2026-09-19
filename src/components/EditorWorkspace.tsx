@@ -40,7 +40,7 @@ import { SidebarThemeContext, LIGHT_SIDEBAR_SURFACE, LIGHT_PAGE_SURFACE } from '
 import { Loader2, ArrowLeft, ArrowRight, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send, RefreshCw } from 'lucide-react';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
 import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
-import { EditorReviewerSelection, useEditorReviewerSelection, ReviewerSelectionList, ReviewerSelectionConfirmButton } from './EditorReviewerSelection';
+import { EditorReviewerSelection, useEditorReviewerSelection, ReviewerSelectionList, ReviewerSelectionConfirmButton, SelectionCheckbox } from './EditorReviewerSelection';
 import { ReviewerReplacementAlert } from './ReviewerReplacementAlert';
 import EditorEvaluationSidebar from './EditorEvaluationSidebar';
 import FilePreviewModal from './FilePreviewModal';
@@ -1794,6 +1794,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                                 type={canToggle ? 'button' : undefined}
                                 onClick={canToggle ? () => state!.toggleSuggestion(reviewer.id) : undefined}
                                 disabled={canToggle ? state!.submitting : undefined}
+                                {...(canToggle ? { role: 'checkbox', 'aria-checked': isTentative } : {})}
                                 className={`w-full text-left border rounded-lg p-4 transition ${canToggle ? 'cursor-pointer hover:border-slate-300 disabled:opacity-50' : ''} ${
                                   isAssigned || isTentative ? 'bg-emerald-50 border-emerald-200' : isCommitted ? 'bg-amber-50 border-amber-200' : 'border-slate-200'
                                 }`}
@@ -1813,8 +1814,8 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                                     <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded shrink-0">✓ Assigned</span>
                                   ) : isCommitted ? (
                                     <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 shrink-0">Awaiting Invitation</span>
-                                  ) : isTentative ? (
-                                    <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded shrink-0">✓ Selected</span>
+                                  ) : canToggle ? (
+                                    <SelectionCheckbox checked={isTentative} disabled={state!.submitting} />
                                   ) : null}
                                 </div>
                               </Wrapper>

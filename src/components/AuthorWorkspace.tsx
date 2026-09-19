@@ -581,8 +581,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
   if (view === 'revision' && selectedId) {
     return (
-      <div className="w-full min-h-screen bg-slate-100 p-6 md:p-8">
-        <div className="max-w-3xl mx-auto space-y-5">
+      <div className={`w-full min-h-screen ${LIGHT_PAGE_SURFACE} role-tint p-6 md:p-8`}>
+        <div className="w-full space-y-5">
           <button
             onClick={() => { setView('list'); setSelectedId(null); load(); }}
             className="text-xs font-bold text-slate-500 hover:text-slate-700"
