@@ -644,10 +644,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           onSignOut={onSignOut}
           tinted
           left={
-            <div>
-              <h1 className="text-xl font-bold leading-tight text-[#0a2e22]">My Manuscripts</h1>
-              <p className="text-xs text-slate-500 font-medium">{currentUser?.name} • {currentUser?.email}</p>
-            </div>
+            <h1 className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap text-2xl font-black leading-tight text-[#0a2e22]">My Manuscripts</h1>
           }
           leading={view !== 'new' ? (
             <button
