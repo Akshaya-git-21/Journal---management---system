@@ -75,7 +75,7 @@ export function EditMemberModal({ member, onClose, onSaved }: { member: ProfileR
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { setError("Name is required."); return; }
-    if (!/^[^s@]+@[^s@]+.[^s@]+$/.test(email.trim())) { setError("Enter a valid email address."); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setError("Enter a valid email address."); return; }
     setSaving(true);
     setError(null);
     try {
