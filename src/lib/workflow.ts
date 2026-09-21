@@ -1021,3 +1021,9 @@ export async function markAllNotificationsRead(): Promise<void> {
   const { error } = await supabase.from('workflow_notifications').update({ read_at: new Date().toISOString() }).is('read_at', null);
   if (error) throw new Error(error.message);
 }
+
+/** Coordinator-only: permanently deletes submitted manuscripts and everything
+ * attached to them (see 0112_coordinator_delete_manuscripts.sql). Returns how
+ * many were actually deleted. */
+export const deleteManuscripts = (ids: string[]) =>
+  rpcOrThrow<number>(supabase.rpc('coordinator_delete_manuscripts', { p_ids: ids }));

@@ -8,7 +8,7 @@ import {
   listActiveProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished, sendToPublisher,
   subscribeToManuscripts, PublishDecision, getRevisions, RevisionRow, getReviewerAssignmentCounts,
   getRecentStatusHistory, getOverdueReviewerAssignments, OverdueReviewRow, getRecentAuditLog,
-  notifyExpiredReviewerReplacements
+  notifyExpiredReviewerReplacements, deleteManuscripts
 } from '../lib/workflow';
 import { getManuscriptStatusLabel, getRoleAwareStatusLabel, getLatestRevision, getRevisionMeta, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
 import { listProduction, subscribeToProduction } from '../lib/production';
@@ -16,13 +16,15 @@ import CoordinatorManuscriptDetail from './CoordinatorManuscriptDetail';
 import CoordinatorRevisionManager from './CoordinatorRevisionManager';
 import EditorDetailsModal from './EditorDetailsModal';
 import RevisionHistoryPanel from './RevisionHistoryPanel';
-import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2, LayoutGrid, Cog, Inbox, Printer, PackageCheck, FileCheck2, MessageSquareWarning, Send, Monitor, GraduationCap, CloudUpload, CalendarDays, Bell } from 'lucide-react';
+import { Loader2, ArrowLeft, Clock, LayoutDashboard, FileText, Users, BarChart3, BookOpen, Mail, Settings, ShieldCheck, Plus, Download, RefreshCcw, CheckCircle2, UserPlus, X, Eye, FileQuestionMark, ClipboardList, MessageCircle, SlidersHorizontal, Activity, Building2, LayoutGrid, Cog, Inbox, Printer, PackageCheck, FileCheck2, MessageSquareWarning, Send, Monitor, GraduationCap, CloudUpload, CalendarDays, Bell, Trash2 } from 'lucide-react';
 import { SidebarBrand, SidebarDecoration, TopBar } from './RoleChrome';
 import { StatusStatCard } from './StatusStatCard';
 import { SidebarThemeContext } from './sidebarTheme';
 import { NavGroup, NavItem } from './SidebarNavGroup';
 import { AssignmentConfirmationDialog } from './AssignmentConfirmationDialog';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
+import { MemberRowActions, EditMemberModal, DeleteMemberModal } from "./MemberManagement";
+import ReportsAnalyticsDashboard from './ReportsAnalyticsDashboard';
 import ProductionSection from './production/ProductionSection';
 import JournalTemplateSection from './production/JournalTemplateSection';
 
@@ -121,6 +123,8 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
   const [gdMemberInvitePassword, setGdMemberInvitePassword] = useState('');
   const [generatedGDMemberCredentials, setGeneratedGDMemberCredentials] = useState<{ email: string; password: string } | null>(null);
   const [selectedEditorForDetails, setSelectedEditorForDetails] = useState<ProfileRow | null>(null);
+  const [memberToEdit, setMemberToEdit] = useState<ProfileRow | null>(null);
+  const [memberToDelete, setMemberToDelete] = useState<ProfileRow | null>(null);
 
   // Lazily surface any reviewer-replacement deadline that expired with no
   // Editor action taken -- idempotent (see notify_expired_reviewer_replacements
@@ -498,10 +502,10 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
   return (
     <div id="coordinator-workspace" className="flex-1 min-h-0 bg-[#f6fbf9] text-[#111827] flex flex-col font-sans">
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
-        <aside className="w-full md:w-[270px] bg-gradient-to-b from-[#def2ec] via-[#f4f3e8] to-[#e4eedd] border-r border-[#d9dccb] shrink-0 text-[#1f3b30] overflow-y-auto flex flex-col">
+        <aside className="w-full md:w-[220px] xl:w-[270px] bg-gradient-to-b from-[#def2ec] via-[#f4f3e8] to-[#e4eedd] border-r border-[#d9dccb] shrink-0 text-[#1f3b30] overflow-y-auto overflow-x-hidden flex flex-col">
           <SidebarThemeContext.Provider value="light">
           <SidebarBrand />
-          <div className="px-3 pb-6">
+          <div className="px-5 pb-6">
             <NavGroup title="Workspace" icon={<LayoutGrid className="w-4 h-4" />} hasActive={isDashboardSection || isManuscriptQueueSection || isPendingApprovalsSection} expanded={expandedNavGroups.workspace} onToggle={() => toggleNavGroup('workspace')}>
               <NavItem icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" active={isDashboardSection} onClick={() => { setActiveSection('DASHBOARD'); setSelectedId(null); }} />
               <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Manuscript Queue" active={isManuscriptQueueSection} onClick={() => { setActiveSection('MANUSCRIPT_QUEUE'); setSelectedId(null); }} />
@@ -567,6 +571,8 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
                 onInvite={handleOpenInvite}
                 onExport={() => window.alert('Exported editorial board members.')}
                 onEditorDetails={setSelectedEditorForDetails}
+                onEdit={setMemberToEdit}
+                onDelete={setMemberToDelete}
               />
             ) : isReviewersSection ? (
               <ReviewerDirectoryScreen
@@ -577,6 +583,8 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
                 onSearch={setReviewerSearch}
                 onInviteReviewer={handleOpenReviewerInvite}
                 onReviewerDetails={setSelectedEditorForDetails}
+                onEdit={setMemberToEdit}
+                onDelete={setMemberToDelete}
               />
             ) : isPublishersSection ? (
               <PublishersScreen
@@ -586,6 +594,8 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
                 onSearch={setPublisherSearch}
                 onInvitePublisher={handleOpenPublisherInvite}
                 onPublisherDetails={setSelectedEditorForDetails}
+                onEdit={setMemberToEdit}
+                onDelete={setMemberToDelete}
               />
             ) : isGDMembersSection ? (
               <GDMembersScreen
@@ -595,9 +605,11 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
                 onSearch={setGdMemberSearch}
                 onInviteGDMember={handleOpenGDMemberInvite}
                 onGDMemberDetails={setSelectedEditorForDetails}
+                onEdit={setMemberToEdit}
+                onDelete={setMemberToDelete}
               />
             ) : isReportsSection ? (
-              <ReportsAnalyticsScreen totalCount={totalCount} stageCounts={stageCounts} pendingApprovals={pendingApprovals.length} editors={editorialBoardProfiles.length} reviewers={reviewerProfiles.length} />
+              <ReportsAnalyticsDashboard items={items} editors={editorialBoardProfiles} reviewers={reviewerProfiles} pendingApprovals={pendingApprovals.length} overdueReviews={overdueReviews.length} productionByManuscript={productionByManuscript} />
             ) : isCommunicationsSection ? (
               <NotAvailableScreen title="Communications" text="Coordinator-wide messaging is not connected to a data source yet." />
             ) : isSettingsSection ? (
@@ -782,6 +794,19 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
             onGeneratePassword={() => setGdMemberInvitePassword(generateTempPassword())}
             onSubmit={handleSendGDMemberInvite}
           />
+          {memberToEdit && (
+            <EditMemberModal member={memberToEdit} onClose={() => setMemberToEdit(null)} onSaved={load} />
+          )}
+          {memberToDelete && (
+            <DeleteMemberModal
+              member={memberToDelete}
+              onClose={() => setMemberToDelete(null)}
+              onDeleted={async (mode) => {
+                await load();
+                if (mode === "deactivated") window.alert(`${memberToDelete.name || memberToDelete.email} has workflow history, so the account was deactivated instead of erased.`);
+              }}
+            />
+          )}
           {selectedEditorForDetails && (
             <EditorDetailsModal
               editor={selectedEditorForDetails}
@@ -799,13 +824,44 @@ function formatDate(iso: string | null) {
   return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function QueueTable({ items, onOpen, productionByManuscript }: { items: ManuscriptRow[]; onOpen: (id: string) => void; productionByManuscript?: Record<string, string> }) {
+function QueueTable({ items, onOpen, onDeleted, selectMode, onExitSelectMode, productionByManuscript }: { items: ManuscriptRow[]; onOpen: (id: string) => void; onDeleted: () => void | Promise<void>; selectMode: boolean; onExitSelectMode: () => void; productionByManuscript?: Record<string, string> }) {
   const [currentPage, setCurrentPage] = useState(1);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pendingDelete, setPendingDelete] = useState<ManuscriptRow[] | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Leaving delete mode drops any selection.
+  useEffect(() => { if (!selectMode) setSelected(new Set()); }, [selectMode]);
   const itemsPerPage = 10;
   const totalPages = Math.ceil(items.length / itemsPerPage);
   const activePage = Math.min(currentPage, Math.max(1, totalPages));
   const startIdx = (activePage - 1) * itemsPerPage;
   const paginatedItems = items.slice(startIdx, startIdx + itemsPerPage);
+
+  // Selection only ever counts manuscripts that are still in the (filtered) list.
+  const selectedItems = items.filter((m) => selected.has(m.id));
+  const pageIds = paginatedItems.map((m) => m.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const toggleOne = (id: string) => setSelected((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const togglePage = () => setSelected((prev) => { const next = new Set(prev); pageIds.forEach((id) => (allPageSelected ? next.delete(id) : next.add(id))); return next; });
+  const closeDeleteDialog = () => { if (deleting) return; setPendingDelete(null); setDeleteError(null); };
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteManuscripts(pendingDelete.map((m) => m.id));
+      setSelected((prev) => { const next = new Set(prev); pendingDelete.forEach((m) => next.delete(m.id)); return next; });
+      setPendingDelete(null);
+      onExitSelectMode();
+      await onDeleted();
+    } catch (err: any) {
+      setDeleteError(err.message || "Unable to delete the selected manuscripts.");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   if (items.length === 0) {
     return <div className="text-center py-20 text-sm text-slate-400 bg-white border border-dashed border-slate-300 rounded-2xl">No manuscripts in this stage.</div>;
@@ -813,10 +869,23 @@ function QueueTable({ items, onOpen, productionByManuscript }: { items: Manuscri
 
   return (
     <div className="space-y-4">
-      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+      {selectMode && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+          <p className="text-sm font-semibold text-rose-900">{selectedItems.length === 0 ? "Select the manuscripts you want to delete" : `${selectedItems.length} manuscript${selectedItems.length === 1 ? "" : "s"} selected`}</p>
+          <div className="flex items-center gap-2">
+            {selectedItems.length < items.length && (
+              <button onClick={() => setSelected(new Set(items.map((m) => m.id)))} className="rounded-full border border-rose-200 bg-white px-4 py-1.5 text-xs font-semibold text-rose-800 hover:bg-rose-100">Select all {items.length}</button>
+            )}
+            <button onClick={onExitSelectMode} className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+            <button onClick={() => setPendingDelete(selectedItems)} disabled={selectedItems.length === 0} className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed"><Trash2 className="w-3.5 h-3.5" /> Delete selected</button>
+          </div>
+        </div>
+      )}
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
             <tr>
+              {selectMode && <th className="px-4 py-3 w-10"><input type="checkbox" aria-label="Select all manuscripts on this page" checked={allPageSelected} onChange={togglePage} className="h-4 w-4 rounded border-slate-300 accent-rose-600 cursor-pointer" /></th>}
               <th className="px-4 py-3">ID</th>
               <th className="px-4 py-3">Title</th>
               <th className="px-4 py-3">Author</th>
@@ -827,7 +896,8 @@ function QueueTable({ items, onOpen, productionByManuscript }: { items: Manuscri
           </thead>
           <tbody className="divide-y divide-slate-100">
             {paginatedItems.map((m) => (
-              <tr key={m.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(m.id)}>
+              <tr key={m.id} className={`hover:bg-slate-50 cursor-pointer ${selected.has(m.id) ? "bg-rose-50/70" : ""}`} onClick={() => (selectMode ? toggleOne(m.id) : onOpen(m.id))}>
+                {selectMode && <td className="px-4 py-3 w-10"><input type="checkbox" aria-label={`Select ${m.title}`} checked={selected.has(m.id)} onChange={() => toggleOne(m.id)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border-slate-300 accent-rose-600 cursor-pointer" /></td>}
                 <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.id}</td>
                 <td className="px-4 py-3 font-bold text-slate-800 max-w-xs truncate">{m.title}</td>
                 <td className="px-4 py-3 text-slate-600 text-xs">{m.author_name}</td>
@@ -878,6 +948,28 @@ function QueueTable({ items, onOpen, productionByManuscript }: { items: Manuscri
           </div>
         </div>
       )}
+
+      {pendingDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={closeDeleteDialog}>
+          <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl border border-slate-200 p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-black text-slate-900">Delete {pendingDelete.length === 1 ? "manuscript" : `${pendingDelete.length} manuscripts`}?</h2>
+            <p className="mt-2 text-sm text-slate-600">This permanently removes {pendingDelete.length === 1 ? "this manuscript" : "these manuscripts"} together with all reviews, assignments, revisions, discussions and production records. This cannot be undone.</p>
+            <ul className="mt-3 max-h-40 overflow-y-auto rounded-2xl bg-slate-50 border border-slate-200 divide-y divide-slate-100 text-xs">
+              {pendingDelete.slice(0, 8).map((m) => (
+                <li key={m.id} className="px-3 py-2"><span className="font-mono text-slate-400">{m.id}</span> <span className="font-semibold text-slate-800">{m.title}</span></li>
+              ))}
+              {pendingDelete.length > 8 && <li className="px-3 py-2 text-slate-500">…and {pendingDelete.length - 8} more</li>}
+            </ul>
+            {deleteError && <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{deleteError}</div>}
+            <div className="mt-5 flex gap-2">
+              <button onClick={confirmDelete} disabled={deleting} className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-rose-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-60">
+                {deleting && <Loader2 className="w-4 h-4 animate-spin" />} Delete
+              </button>
+              <button onClick={closeDeleteDialog} disabled={deleting} className="flex-1 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -920,7 +1012,7 @@ function PendingApprovalsScreen({ approvals, loading, onAction }: { approvals: P
   );
 }
 
-function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, onExport, onEditorDetails }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInvite: () => void; onExport: () => void; onEditorDetails: (editor: ProfileRow) => void; }) {
+function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, onExport, onEditorDetails, onEdit, onDelete }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInvite: () => void; onExport: () => void; onEditorDetails: (editor: ProfileRow) => void; onEdit: (member: ProfileRow) => void; onDelete: (member: ProfileRow) => void; }) {
   const [activeTab, setActiveTab] = useState<'ALL' | 'EDITORS' | 'ASSOCIATE' | 'SECTION'>('ALL');
   const totalMembers = profiles.length;
   const activeMembers = profiles.filter((p) => p.status === 'ACTIVE').length;
@@ -1056,7 +1148,7 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
                           </span>
                         </td>
                         <td className="px-4 py-4 text-slate-600">{joinedOn}</td>
-                        <td className="px-4 py-4 text-right text-slate-500 hover:text-slate-900 cursor-pointer" onClick={() => onEditorDetails(profile)}><Eye className="h-4 w-4" /></td>
+                        <td className="px-4 py-4 text-right whitespace-nowrap"><span className="inline-flex items-center gap-1"><button type="button" title="View" aria-label={`View ${profile.name}`} onClick={() => onEditorDetails(profile)} className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"><Eye className="h-4 w-4" /></button><MemberRowActions profile={profile} onEdit={onEdit} onDelete={onDelete} /></span></td>
                       </tr>
                     );
                   })
@@ -1393,13 +1485,13 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
         {stageCards.map((c) => (
           <StatusStatCard key={c.key} title={c.title} value={c.value} note={c.note} icon={c.icon} tone={c.tone} progress={c.value * c.factor} />
         ))}
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2 items-start">
+      <div className="grid gap-5 xl:grid-cols-2 items-start">
         <div className="rounded-2xl bg-white border border-[#e7ebec] p-6 shadow-sm">
           <div className="flex items-center justify-between">
             <p className="flex items-center gap-3 text-lg font-bold text-[#0a2e22]"><Bell className="w-5 h-5 text-emerald-800" /> SLA Warning Exceptions</p>
@@ -1480,6 +1572,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
 }
 
 function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onOpen, onRefresh, tab, setTab, stageCounts, productionByManuscript }: { items: ManuscriptRow[]; filtered: ManuscriptRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onOpen: (id: string | null) => void; onRefresh: () => void; tab: string; setTab: (value: string) => void; stageCounts?: { all: number; submitted: number; editorReview: number; underReview: number; awaitingDecision: number; done: number }; productionByManuscript?: Record<string, string>; }) {
+  const [selectMode, setSelectMode] = useState(false);
   const getStageCount = (stageKey: string) => {
     if (!stageCounts) return 0;
     switch (stageKey) {
@@ -1504,6 +1597,7 @@ function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onO
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <button onClick={onRefresh} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-[#007043]"><RefreshCcw className="w-4 h-4" /> Refresh</button>
+            <button onClick={() => setSelectMode((v) => !v)} className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-bold shadow-sm transition ${selectMode ? "border-rose-600 bg-rose-600 text-white hover:bg-rose-700" : "border-rose-200 bg-white text-rose-600 hover:bg-rose-50"}`}><Trash2 className="w-4 h-4" /> {selectMode ? "Cancel" : "Delete"}</button>
             <div className="relative w-full max-w-sm">
               <input
                 value={search}
@@ -1540,13 +1634,13 @@ function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onO
       {loading ? (
         <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>
       ) : (
-        <QueueTable items={filtered} onOpen={onOpen} productionByManuscript={productionByManuscript} />
+        <QueueTable items={filtered} onOpen={onOpen} onDeleted={onRefresh} selectMode={selectMode} onExitSelectMode={() => setSelectMode(false)} productionByManuscript={productionByManuscript} />
       )}
     </>
   );
 }
 
-function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, onSearch, onInviteReviewer, onReviewerDetails }: { profiles: ProfileRow[]; assignmentCounts: Record<string, { invited: number; accepted: number; completed: number }>; loading: boolean; search: string; onSearch: (value: string) => void; onInviteReviewer: () => void; onReviewerDetails: (reviewer: ProfileRow) => void; }) {
+function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, onSearch, onInviteReviewer, onReviewerDetails, onEdit, onDelete }: { profiles: ProfileRow[]; assignmentCounts: Record<string, { invited: number; accepted: number; completed: number }>; loading: boolean; search: string; onSearch: (value: string) => void; onInviteReviewer: () => void; onReviewerDetails: (reviewer: ProfileRow) => void; onEdit: (member: ProfileRow) => void; onDelete: (member: ProfileRow) => void; }) {
   const totalReviewers = profiles.length;
   const activeReviewers = profiles.filter((p) => p.status === 'ACTIVE').length;
   const pendingInvitations = profiles.filter((p) => p.status === 'PENDING_APPROVAL' || p.status === 'INVITED').length;
@@ -1619,7 +1713,7 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+      <div className="bg-white border border-slate-200 rounded-3xl overflow-x-auto shadow-sm">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
             <tr>
@@ -1654,8 +1748,11 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
                       {row.status}
                     </span>
                   </td>
-                  <td className="px-4 py-4 text-right">
-                    <button onClick={() => onReviewerDetails(row.profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
+                  <td className="px-4 py-4 text-right whitespace-nowrap">
+                    <div className="inline-flex items-center gap-1">
+                      <button onClick={() => onReviewerDetails(row.profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
+                      <MemberRowActions profile={row.profile} onEdit={onEdit} onDelete={onDelete} />
+                    </div>
                   </td>
                 </tr>
               ))
@@ -1667,7 +1764,7 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
   );
 }
 
-function PublishersScreen({ profiles, loading, search, onSearch, onInvitePublisher, onPublisherDetails }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInvitePublisher: () => void; onPublisherDetails: (publisher: ProfileRow) => void; }) {
+function PublishersScreen({ profiles, loading, search, onSearch, onInvitePublisher, onPublisherDetails, onEdit, onDelete }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInvitePublisher: () => void; onPublisherDetails: (publisher: ProfileRow) => void; onEdit: (member: ProfileRow) => void; onDelete: (member: ProfileRow) => void; }) {
   const totalPublishers = profiles.length;
   const activePublishers = profiles.filter((p) => p.status === 'ACTIVE').length;
   const pendingInvitations = profiles.filter((p) => p.status === 'PENDING_APPROVAL' || p.status === 'INVITED').length;
@@ -1718,7 +1815,7 @@ function PublishersScreen({ profiles, loading, search, onSearch, onInvitePublish
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+      <div className="bg-white border border-slate-200 rounded-3xl overflow-x-auto shadow-sm">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
             <tr>
@@ -1749,8 +1846,11 @@ function PublishersScreen({ profiles, loading, search, onSearch, onInvitePublish
                         {status}
                       </span>
                     </td>
-                    <td className="px-4 py-4 text-right">
-                      <button onClick={() => onPublisherDetails(profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
+                    <td className="px-4 py-4 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center gap-1">
+                        <button onClick={() => onPublisherDetails(profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
+                        <MemberRowActions profile={profile} onEdit={onEdit} onDelete={onDelete} />
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1834,7 +1934,7 @@ function InvitePublisherModal({ open, onClose, name, email, organization, passwo
   );
 }
 
-function GDMembersScreen({ profiles, loading, search, onSearch, onInviteGDMember, onGDMemberDetails }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInviteGDMember: () => void; onGDMemberDetails: (member: ProfileRow) => void; }) {
+function GDMembersScreen({ profiles, loading, search, onSearch, onInviteGDMember, onGDMemberDetails, onEdit, onDelete }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInviteGDMember: () => void; onGDMemberDetails: (member: ProfileRow) => void; onEdit: (member: ProfileRow) => void; onDelete: (member: ProfileRow) => void; }) {
   const totalMembers = profiles.length;
   const activeMembers = profiles.filter((p) => p.status === 'ACTIVE').length;
   const pendingInvitations = profiles.filter((p) => p.status === 'PENDING_APPROVAL' || p.status === 'INVITED').length;
@@ -1885,7 +1985,7 @@ function GDMembersScreen({ profiles, loading, search, onSearch, onInviteGDMember
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+      <div className="bg-white border border-slate-200 rounded-3xl overflow-x-auto shadow-sm">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
             <tr>
@@ -1916,8 +2016,11 @@ function GDMembersScreen({ profiles, loading, search, onSearch, onInviteGDMember
                         {status}
                       </span>
                     </td>
-                    <td className="px-4 py-4 text-right">
-                      <button onClick={() => onGDMemberDetails(profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
+                    <td className="px-4 py-4 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center gap-1">
+                        <button onClick={() => onGDMemberDetails(profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
+                        <MemberRowActions profile={profile} onEdit={onEdit} onDelete={onDelete} />
+                      </div>
                     </td>
                   </tr>
                 );
@@ -2070,63 +2173,6 @@ function AuditTrailScreen({ manuscripts }: { manuscripts: ManuscriptRow[] }) {
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-function ReportsAnalyticsScreen({ totalCount, stageCounts, pendingApprovals, editors, reviewers }: { totalCount: number; stageCounts: { submitted: number; underReview: number; awaitingDecision: number; done: number; }; pendingApprovals: number; editors: number; reviewers: number; }) {
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-slate-900">Reports & Analytics</h1>
-          <p className="text-sm text-slate-500 mt-1">Review editorial metrics and system activity at a glance.</p>
-        </div>
-        <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600">
-          <Clock className="w-3.5 h-3.5 text-slate-400" /> June 25, 2026
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Total Manuscripts</p>
-          <p className="mt-3 text-3xl font-black text-slate-900">{totalCount}</p>
-        </div>
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Submitted</p>
-          <p className="mt-3 text-3xl font-black text-slate-900">{stageCounts.submitted}</p>
-        </div>
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Under Review</p>
-          <p className="mt-3 text-3xl font-black text-slate-900">{stageCounts.underReview}</p>
-        </div>
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Decision Pending</p>
-          <p className="mt-3 text-3xl font-black text-slate-900">{stageCounts.awaitingDecision}</p>
-        </div>
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-slate-200">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Pending Approvals</p>
-          <p className="mt-3 text-3xl font-black text-slate-900">{pendingApprovals}</p>
-        </div>
-      </div>
-
-      <div className="grid gap-3 xl:grid-cols-3">
-        <div className="rounded-3xl bg-white border border-slate-200 p-6">
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Editorial Board</p>
-          <p className="mt-3 text-3xl font-black text-slate-900">{editors}</p>
-          <p className="text-xs text-slate-500 mt-1">Active editor profiles</p>
-        </div>
-        <div className="rounded-3xl bg-white border border-slate-200 p-6">
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Reviewers</p>
-          <p className="mt-3 text-3xl font-black text-slate-900">{reviewers}</p>
-          <p className="text-xs text-slate-500 mt-1">Active reviewer profiles</p>
-        </div>
-        <div className="rounded-3xl bg-white border border-slate-200 p-6">
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Workload Index</p>
-          <p className="mt-3 text-3xl font-black text-slate-900">{totalCount > 0 ? Math.min(100, Math.round((stageCounts.underReview / totalCount) * 100)) : 0}%</p>
-          <p className="text-xs text-slate-500 mt-1">Review queue utilization</p>
-        </div>
-      </div>
     </div>
   );
 }

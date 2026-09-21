@@ -460,3 +460,50 @@ export function onAuthChange(callback: (user: AuthUser | null) => void): () => v
 
   return () => subscription.subscription.unsubscribe();
 }
+
+async function callManageUser(payload: Record<string, unknown>): Promise<{ mode?: 'deleted' | 'deactivated'; message: string }> {
+  const token = await getFreshAccessToken();
+  if (!token) {
+    throw new Error('Your session has expired. Please sign in again.');
+  }
+
+  let response: Response;
+  try {
+    response = await fetch('/api/manage-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(payload)
+    });
+  } catch {
+    throw new Error('Network error: could not reach the server. Check your connection and try again.');
+  }
+
+  let result: any = null;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error(`API unavailable: the member management endpoint returned an unexpected response (HTTP ${response.status}).`);
+  }
+  if (!response.ok) {
+    throw new Error(result?.error || 'Unable to update team member.');
+  }
+  return result;
+}
+
+/** Coordinator-only: edit a team member's name, email and role details. */
+export async function updateTeamMember(
+  userId: string,
+  fields: { name: string; email: string; metadata?: Record<string, string> }
+): Promise<void> {
+  await callManageUser({ action: 'update', userId, ...fields });
+}
+
+/**
+ * Coordinator-only: delete a team member. Accounts with workflow history
+ * can't be erased, so the server deactivates them instead -- `mode` tells the
+ * caller which happened.
+ */
+export async function deleteTeamMember(userId: string): Promise<'deleted' | 'deactivated'> {
+  const result = await callManageUser({ action: 'delete', userId });
+  return result.mode ?? 'deleted';
+}

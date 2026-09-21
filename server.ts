@@ -85,6 +85,19 @@ async function startServer() {
     }
   });
 
+  // Admin: Edit or delete an Editor/Reviewer/Publisher/GD Member (Coordinator
+  // only). Thin adapter over handleManageUserRequest; the Vercel function at
+  // api/manage-user.ts serves the same route in production.
+  app.post("/api/manage-user", async (req, res) => {
+    try {
+      const { handleManageUserRequest } = await import("./src/lib/manageUserHandler.ts");
+      const result = await handleManageUserRequest(req.headers.authorization, req.body || {});
+      return res.status(result.status).json(result.body);
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || 'Unable to manage user.' });
+    }
+  });
+
   // User: Reset their own password with current session (called from password reset flow)
   app.post("/api/validate-reset-session", async (req, res) => {
     try {

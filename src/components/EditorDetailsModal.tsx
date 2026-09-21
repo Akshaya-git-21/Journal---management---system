@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Copy, Lock, AlertCircle } from 'lucide-react';
 import { resetUserPassword } from '../lib/auth';
 import { ProfileRow } from '../lib/workflow';
+import { MEMBER_FORM, EDITORIAL_BOARD_ROLE_LABEL } from './MemberManagement';
 
 interface EditorDetailsModalProps {
   editor: ProfileRow | null;
@@ -69,6 +70,14 @@ export default function EditorDetailsModal({ editor, onClose }: EditorDetailsMod
     }
   };
 
+  const form = MEMBER_FORM[editor.role || ''] || MEMBER_FORM.GD_MEMBER;
+  const roleTitle = editor.role === 'REVIEWER' ? 'Reviewer' : editor.role === 'PUBLISHER' ? 'Publisher' : editor.role === 'GD_MEMBER' ? 'GD Member' : 'Editor';
+  const profileFields: { label: string; value: string }[] = [
+    { label: form.nameLabel, value: editor.name || '—' },
+    ...(editor.role === 'EDITOR' ? [{ label: EDITORIAL_BOARD_ROLE_LABEL, value: editor.metadata?.editorial_role || 'Editorial Board' }] : []),
+    ...(form.detailKey ? [{ label: form.detailLabel || '', value: editor.metadata?.[form.detailKey] || '—' }] : []),
+  ];
+
   const initials = (editor.name || 'UN').split(' ').map((part: string) => part[0]).slice(0, 2).join('').toUpperCase();
 
   return (
@@ -76,7 +85,7 @@ export default function EditorDetailsModal({ editor, onClose }: EditorDetailsMod
       <div className="bg-white rounded-2xl shadow-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] text-white px-6 py-4 flex items-center justify-between border-b">
-          <h2 className="text-lg font-bold">{editor.role === 'REVIEWER' ? 'Reviewer' : editor.role === 'PUBLISHER' ? 'Publisher' : 'Editor'} Details</h2>
+          <h2 className="text-lg font-bold">{roleTitle} Details</h2>
           <button onClick={onClose} className="text-white hover:bg-white/20 p-1 rounded transition">
             <X className="w-5 h-5" />
           </button>
@@ -91,11 +100,24 @@ export default function EditorDetailsModal({ editor, onClose }: EditorDetailsMod
             </div>
             <div className="flex-1">
               <p className="font-bold text-slate-900">{editor.name || 'Unknown'}</p>
-              <p className="text-xs text-slate-500 uppercase tracking-wide">{editor.role || 'Editor'}</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide">{roleTitle}</p>
             </div>
           </div>
 
           <hr className="border-slate-200" />
+
+          {/* Profile -- same fields and labels captured when the account was created */}
+          <div className="space-y-3">
+            <p className="text-xs uppercase tracking-widest font-bold text-slate-600">Profile</p>
+            <div className="bg-slate-50 rounded-xl p-3 space-y-3">
+              {profileFields.map((f) => (
+                <div key={f.label}>
+                  <p className="text-[11px] uppercase tracking-wider text-slate-500 font-bold">{f.label}</p>
+                  <p className="text-sm font-medium text-slate-900 break-words">{f.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
 
           {/* Contact Information */}
           <div className="space-y-3">
@@ -103,7 +125,7 @@ export default function EditorDetailsModal({ editor, onClose }: EditorDetailsMod
             <div className="bg-slate-50 rounded-xl p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-[11px] uppercase tracking-wider text-slate-500 font-bold">Email</p>
+                  <p className="text-[11px] uppercase tracking-wider text-slate-500 font-bold">{form.emailLabel}</p>
                   <p className="text-sm font-medium text-slate-900 break-all">{editor.email}</p>
                 </div>
                 <button
