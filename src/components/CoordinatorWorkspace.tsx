@@ -1,4 +1,5 @@
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type FC, type KeyboardEvent, type ReactNode } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { ManuscriptStatus } from '../types';
 import { supabase } from '../lib/supabase';
 import { createEditorAccount, createReviewerAccount, createAndActivatePublisherAccount, createAndActivateGDMemberAccount } from '../lib/auth';
@@ -1392,6 +1393,57 @@ function InviteReviewerModal({ open, onClose, name, email, specialty, password, 
   );
 }
 
+const SLA_DISMISSED_KEY = "jms.coordinator.dismissedSlaAlerts";
+const SWIPE_DISTANCE = 110;
+
+/** Alerts the Coordinator has swiped away after reading them (remembered per browser). */
+function useDismissedAlerts() {
+  const [dismissed, setDismissed] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(SLA_DISMISSED_KEY) || "[]"); } catch { return []; }
+  });
+  const save = (next: string[]) => {
+    setDismissed(next);
+    try { localStorage.setItem(SLA_DISMISSED_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+  };
+  return {
+    dismissed,
+    dismiss: (key: string) => save(dismissed.includes(key) ? dismissed : [...dismissed, key]),
+    restoreAll: () => save([]),
+  };
+}
+
+/** Card that can be swiped left or right (touch or mouse) to dismiss it. A tap
+ * still activates it, but a drag never does. */
+const SwipeableAlert: FC<{ onDismiss: () => void; onOpen: () => void; title: string; className: string; children: ReactNode }> = ({ onDismiss, onOpen, title, className, children }) => {
+  const dragged = useRef(false);
+  return (
+    <motion.div
+      layout
+      role="button"
+      tabIndex={0}
+      title={title}
+      className={className + " touch-pan-y select-none"}
+      drag="x"
+      dragDirectionLock
+      dragSnapToOrigin
+      dragElastic={0.6}
+      onDragStart={() => { dragged.current = true; }}
+      onDragEnd={(_, info) => {
+        if (Math.abs(info.offset.x) > SWIPE_DISTANCE || Math.abs(info.velocity.x) > 600) onDismiss();
+        setTimeout(() => { dragged.current = false; }, 0);
+      }}
+      onClick={() => { if (!dragged.current) onOpen(); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); }
+        if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); onDismiss(); }
+      }}
+      exit={{ opacity: 0, height: 0, marginTop: 0, paddingTop: 0, paddingBottom: 0, transition: { duration: 0.2 } }}
+    >
+      {children}
+    </motion.div>
+  );
+};
+
 function useLiveClock() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -1451,7 +1503,14 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
   const SLA_SCREENING_DAYS = 7;
   const overdueSubmissions = items.filter((m) => m.status === 'SUBMITTED' && m.submitted_at && (Date.now() - new Date(m.submitted_at).getTime()) / 86400000 > SLA_SCREENING_DAYS);
   const manuscriptsById = Object.fromEntries(items.map((m) => [m.id, m]));
+  const { dismissed, dismiss, restoreAll } = useDismissedAlerts();
+  // The desk-screening alert comes back on its own if a different set of submissions goes overdue.
+  const screeningKey = "screening:" + overdueSubmissions.map((m) => m.id).sort().join(",");
+  const visibleReviews = overdueReviews.filter((r) => !dismissed.includes("review:" + r.id));
+  const showScreening = overdueSubmissions.length > 0 && !dismissed.includes(screeningKey);
+  const dismissedCount = (overdueReviews.length - visibleReviews.length) + (overdueSubmissions.length > 0 && !showScreening ? 1 : 0);
   const hasSlaWarnings = overdueReviews.length > 0 || overdueSubmissions.length > 0;
+  const hasVisibleWarnings = visibleReviews.length > 0 || showScreening;
 
   const stageCards = [
     { key: 'submitted', title: 'Submitted', value: stageCounts.submitted, note: 'Awaiting technical screening check.', factor: 4, icon: <FileText className="w-5 h-5" />, tone: 'emerald' as const },
@@ -1495,7 +1554,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
         <div className="rounded-2xl bg-white border border-[#e7ebec] p-6 shadow-sm">
           <div className="flex items-center justify-between">
             <p className="flex items-center gap-3 text-lg font-bold text-[#0a2e22]"><Bell className="w-5 h-5 text-emerald-800" /> SLA Warning Exceptions</p>
-            <span className="text-xs text-slate-400">Review required</span>
+            <span className="text-xs text-slate-400">{hasVisibleWarnings ? "Swipe a card away once read" : "Review required"}</span>
           </div>
           <div className="mt-4 space-y-3">
             {loading ? (
@@ -1504,12 +1563,14 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
               <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No active SLA exceptions right now.</div>
             ) : (
               <>
-                {overdueReviews.map((review) => {
+                {!hasVisibleWarnings && <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">All caught up — every exception has been dismissed.</div>}
+                <AnimatePresence initial={false}>
+                {visibleReviews.map((review) => {
                   const manuscript = manuscriptsById[review.manuscript_id];
                   const reviewer = profiles[review.reviewer_id];
                   const daysOverdue = Math.max(1, Math.floor((Date.now() - new Date(review.due_date).getTime()) / 86400000));
                   return (
-                    <div key={review.id} {...clickable(() => onOpenManuscript(review.manuscript_id))} title="Open this manuscript" className="flex gap-3 rounded-xl bg-rose-50 p-4 cursor-pointer transition hover:bg-rose-100 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
+                    <SwipeableAlert key={review.id} onDismiss={() => dismiss("review:" + review.id)} onOpen={() => onOpenManuscript(review.manuscript_id)} title="Open this manuscript — or swipe to dismiss" className="flex gap-3 rounded-xl bg-rose-50 p-4 cursor-grab active:cursor-grabbing transition-colors hover:bg-rose-100 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-300">
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-rose-600 text-sm font-black text-white">!</span>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-rose-700">{manuscript ? manuscript.title : review.manuscript_id} — Overdue Review Round</p>
@@ -1518,17 +1579,21 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
                         </p>
                       </div>
                       <span className="shrink-0 text-xs text-slate-400">{daysOverdue} day{daysOverdue === 1 ? '' : 's'} ago</span>
-                    </div>
+                    </SwipeableAlert>
                   );
                 })}
-                {overdueSubmissions.length > 0 && (
-                  <div {...clickable(onOpenUnassigned)} title="Open the unassigned queue" className="flex gap-3 rounded-xl bg-amber-50 p-4 cursor-pointer transition hover:bg-amber-100 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-300">
+                {showScreening && (
+                  <SwipeableAlert key="screening" onDismiss={() => dismiss(screeningKey)} onOpen={onOpenUnassigned} title="Open the unassigned queue — or swipe to dismiss" className="flex gap-3 rounded-xl bg-amber-50 p-4 cursor-grab active:cursor-grabbing transition-colors hover:bg-amber-100 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-300">
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500 text-sm font-black text-white">!</span>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-amber-700">Desk Screening Threshold Warning</p>
                       <p className="mt-1.5 text-sm text-slate-600">{overdueSubmissions.length} submission{overdueSubmissions.length === 1 ? '' : 's'} have been in unassigned screening queue for over the SLA limit of {SLA_SCREENING_DAYS} days.</p>
                     </div>
-                  </div>
+                  </SwipeableAlert>
+                )}
+                </AnimatePresence>
+                {dismissedCount > 0 && (
+                  <button type="button" onClick={restoreAll} className="w-full rounded-xl border border-dashed border-slate-200 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">{dismissedCount} dismissed · Show again</button>
                 )}
               </>
             )}
