@@ -8,7 +8,7 @@ import {
   editorSelectReplacementReviewer, ProfileRow
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
-import { getManuscriptStatusLabel, getRoleAwareStatusLabel, getLatestRevision, getRevisionMeta, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
+import { getManuscriptStatusLabel, getRoleAwareStatusLabel, getLatestRevision, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
 import { getEditorFacingReviewerStatus, editorSeesReplacementNeeded } from '../lib/reviewerStatus';
 import { formatTimelineDate } from '../lib/dateFormat';
 import {
@@ -108,18 +108,10 @@ const STATUS_STYLES: Record<ManuscriptStatus, string> = {
 
 function StatusBadge({ manuscript, latestRevision }: { manuscript: ManuscriptRow; latestRevision?: RevisionRow | null }) {
   const label = getRoleAwareStatusLabel(manuscript, 'EDITOR', latestRevision);
-  const revisionMeta = getRevisionMeta(latestRevision);
   const style = STANDARD_STATUS_COLORS[label as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT;
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${style}`}>
-        {label}
-      </span>
-      {revisionMeta && (
-        <span className="inline-flex items-center px-2 py-1 rounded-full border border-slate-200 bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-wide">
-          Rev {revisionMeta.revisionNumber}{revisionMeta.revisionType ? ` — ${revisionMeta.revisionType}` : ''}
-        </span>
-      )}
+    <span className={`inline-flex items-center whitespace-nowrap px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${style}`}>
+      {label}
     </span>
   );
 }
@@ -626,10 +618,10 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
       <table className="w-full text-left text-sm">
         <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
           <tr>
-            <th className="px-4 py-3">Title</th>
-            <th className="px-4 py-3">Manuscript Status</th>
-            <th className="px-4 py-3">Assignment</th>
-            <th className="px-4 py-3"></th>
+            <th className="px-6 py-3.5">Title</th>
+            <th className="px-4 py-3.5 w-[190px]">Manuscript Status</th>
+            <th className="px-4 py-3.5 w-[130px]">Assignment</th>
+            <th className="px-6 py-3.5 w-[190px]"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -662,7 +654,7 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
             const inProofreading = details.manuscript.status === 'ACCEPTED';
             return (
               <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id, isRevisionSubmitted ? 'status' : reviewsReady ? 'reviews' : inProofreading ? 'production' : undefined)}>
-                <td className="px-4 py-3 font-bold text-slate-800">
+                <td className="px-6 py-4 align-middle font-bold text-slate-800">
                   {details.manuscript.title}
                   {details.assignment.timeline_start_date && details.assignment.timeline_end_date && (
                     <p className="mt-0.5 text-[11px] font-normal text-slate-500">
@@ -680,22 +672,17 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-4 align-middle">
                   {awaitingCoordinator ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${STANDARD_STATUS_COLORS['EDITORIAL REVIEW']}`}>
-                        EDITORIAL REVIEW
-                      </span>
-                      <span className="inline-flex items-center px-2 py-1 rounded-full border border-slate-200 bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-wide">
-                        Rev {(latestRevision?.revision_number || 0) + 1}
-                      </span>
+                    <span className={`inline-flex items-center whitespace-nowrap px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${STANDARD_STATUS_COLORS['EDITORIAL REVIEW']}`}>
+                      EDITORIAL REVIEW
                     </span>
                   ) : (
                     <StatusBadge manuscript={details.manuscript} latestRevision={latestRevision} />
                   )}
                 </td>
-                <td className="px-4 py-3 text-xs font-bold text-slate-600">{details.assignment.status}</td>
-                <td className={`px-4 py-3 text-right font-bold text-xs ${isRevisionSubmitted ? 'text-indigo-600' : reviewsReady ? 'text-emerald-600' : awaitingCoordinator ? 'text-slate-500' : inProofreading ? 'text-emerald-600' : 'text-[#008751]'}`}>
+                <td className="px-4 py-4 align-middle whitespace-nowrap text-xs font-bold uppercase tracking-wide text-slate-600">{details.assignment.status}</td>
+                <td className={`px-6 py-4 align-middle whitespace-nowrap text-right font-bold text-xs ${isRevisionSubmitted ? 'text-indigo-600' : reviewsReady ? 'text-emerald-600' : awaitingCoordinator ? 'text-slate-500' : inProofreading ? 'text-emerald-600' : 'text-[#008751]'}`}>
                   {isRevisionSubmitted ? 'Review Revision →' : reviewsReady ? 'Reviews Ready →' : awaitingCoordinator ? 'Pending Decision →' : inProofreading ? 'Review Proofreading →' : 'Open →'}
                 </td>
               </tr>
