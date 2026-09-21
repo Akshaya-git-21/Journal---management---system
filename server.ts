@@ -98,6 +98,17 @@ async function startServer() {
     }
   });
 
+  // Public: does an account exist for this email? (login form only -- returns a boolean)
+  app.post("/api/account-status", async (req, res) => {
+    try {
+      const { handleAccountStatusRequest } = await import("./src/lib/accountStatusHandler.ts");
+      const result = await handleAccountStatusRequest(req.body?.email);
+      return res.status(result.status).json(result.body);
+    } catch (error: any) {
+      return res.status(500).json({ error: "Unable to check the account." });
+    }
+  });
+
   // User: Reset their own password with current session (called from password reset flow)
   app.post("/api/validate-reset-session", async (req, res) => {
     try {

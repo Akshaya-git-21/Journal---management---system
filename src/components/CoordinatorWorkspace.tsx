@@ -6,7 +6,7 @@ import { createEditorAccount, createReviewerAccount, createAndActivatePublisherA
 import {
   ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, SuggestedReviewerRow, ProfileRow, AuditLogRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getStatusHistory, getSuggestedReviewers,
-  listActiveProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished, sendToPublisher,
+  listManagedProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished, sendToPublisher,
   subscribeToManuscripts, PublishDecision, getRevisions, RevisionRow, getReviewerAssignmentCounts,
   getRecentStatusHistory, getOverdueReviewerAssignments, OverdueReviewRow, getRecentAuditLog,
   notifyExpiredReviewerReplacements, deleteManuscripts
@@ -398,10 +398,10 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
       const [rows, approvals, editors, reviewers, publishers, gdMembers, activity, overdue, production] = await Promise.all([
         listManuscripts(),
         listPendingApprovals(),
-        listActiveProfilesByRole('EDITOR'),
-        listActiveProfilesByRole('REVIEWER'),
-        listActiveProfilesByRole('PUBLISHER'),
-        listActiveProfilesByRole('GD_MEMBER'),
+        listManagedProfilesByRole('EDITOR'),
+        listManagedProfilesByRole('REVIEWER'),
+        listManagedProfilesByRole('PUBLISHER'),
+        listManagedProfilesByRole('GD_MEMBER'),
         getRecentStatusHistory(8),
         getOverdueReviewerAssignments(),
         listProduction(),
@@ -610,7 +610,7 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
                 onDelete={setMemberToDelete}
               />
             ) : isReportsSection ? (
-              <ReportsAnalyticsDashboard items={items} editors={editorialBoardProfiles} reviewers={reviewerProfiles} pendingApprovals={pendingApprovals.length} overdueReviews={overdueReviews.length} productionByManuscript={productionByManuscript} />
+              <ReportsAnalyticsDashboard items={items} editors={editorialBoardProfiles.filter((p) => p.status === 'ACTIVE')} reviewers={reviewerProfiles.filter((p) => p.status === 'ACTIVE')} pendingApprovals={pendingApprovals.length} overdueReviews={overdueReviews.length} productionByManuscript={productionByManuscript} />
             ) : isCommunicationsSection ? (
               <NotAvailableScreen title="Communications" text="Coordinator-wide messaging is not connected to a data source yet." />
             ) : isSettingsSection ? (
@@ -804,7 +804,7 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
               onClose={() => setMemberToDelete(null)}
               onDeleted={async (mode) => {
                 await load();
-                if (mode === "deactivated") window.alert(`${memberToDelete.name || memberToDelete.email} has workflow history, so the account was deactivated instead of erased.`);
+                if (mode === "deactivated") window.alert(`${memberToDelete.name || memberToDelete.email} has workflow history, so the account was closed (it can no longer sign in) instead of erased.`);
               }}
             />
           )}
@@ -1717,7 +1717,7 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
     invited: assignmentCounts[profile.id]?.invited ?? 0,
     accepted: assignmentCounts[profile.id]?.accepted ?? 0,
     completed: assignmentCounts[profile.id]?.completed ?? 0,
-    status: profile.status === 'ACTIVE' ? 'Active' : profile.status === 'INVITED' || profile.status === 'PENDING_APPROVAL' ? 'Pending' : profile.status === 'DECLINED' ? 'Declined' : 'Active',
+    status: profile.status === 'ACTIVE' ? 'Active' : profile.status === 'INVITED' || profile.status === 'PENDING_APPROVAL' ? 'Pending' : profile.status === 'DECLINED' ? 'Declined' : profile.status === 'INACTIVE' ? 'Inactive' : 'Active',
     specialty: profile.metadata?.specialization || profile.metadata?.expertise || '—',
   }));
 
@@ -1901,7 +1901,7 @@ function PublishersScreen({ profiles, loading, search, onSearch, onInvitePublish
               </tr>
             ) : (
               profiles.map((profile) => {
-                const status = profile.status === 'ACTIVE' ? 'Active' : profile.status === 'INVITED' || profile.status === 'PENDING_APPROVAL' ? 'Pending' : profile.status === 'DECLINED' ? 'Declined' : 'Active';
+                const status = profile.status === 'ACTIVE' ? 'Active' : profile.status === 'INVITED' || profile.status === 'PENDING_APPROVAL' ? 'Pending' : profile.status === 'DECLINED' ? 'Declined' : profile.status === 'INACTIVE' ? 'Inactive' : 'Active';
                 return (
                   <tr key={profile.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-4 font-semibold text-slate-900">{profile.name || 'Unknown Publisher'}</td>
@@ -2071,7 +2071,7 @@ function GDMembersScreen({ profiles, loading, search, onSearch, onInviteGDMember
               </tr>
             ) : (
               profiles.map((profile) => {
-                const status = profile.status === 'ACTIVE' ? 'Active' : profile.status === 'INVITED' || profile.status === 'PENDING_APPROVAL' ? 'Pending' : profile.status === 'DECLINED' ? 'Declined' : 'Active';
+                const status = profile.status === 'ACTIVE' ? 'Active' : profile.status === 'INVITED' || profile.status === 'PENDING_APPROVAL' ? 'Pending' : profile.status === 'DECLINED' ? 'Declined' : profile.status === 'INACTIVE' ? 'Inactive' : 'Active';
                 return (
                   <tr key={profile.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-4 font-semibold text-slate-900">{profile.name || 'Unknown GD Member'}</td>

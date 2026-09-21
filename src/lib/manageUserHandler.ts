@@ -40,7 +40,7 @@ export async function handleManageUserRequest(authHeader: string | undefined, bo
     return { status: 403, body: { error: 'Forbidden: Only Coordinators can manage team members.' } };
   }
 
-  const { data: target, error: targetError } = await supabaseAdmin.from('profiles').select('id, role, email, name, metadata').eq('id', userId).maybeSingle();
+  const { data: target, error: targetError } = await supabaseAdmin.from('profiles').select('id, role, email, name, metadata, status').eq('id', userId).maybeSingle();
   if (targetError) return { status: 500, body: { error: `Server error looking up target user: ${targetError.message}` } };
   if (!target) return { status: 404, body: { error: 'Invalid target user: no matching profile was found.' } };
   if (!MANAGED_ROLES.includes(target.role)) {
@@ -48,6 +48,9 @@ export async function handleManageUserRequest(authHeader: string | undefined, bo
   }
 
   if (action === 'update') {
+    const newStatus = body.status;
+    if (newStatus !== undefined && newStatus !== 'ACTIVE' && newStatus !== 'INACTIVE') return { status: 400, body: { error: 'Status must be ACTIVE or INACTIVE.' } };
+    if (newStatus !== undefined && target.status !== 'ACTIVE' && target.status !== 'INACTIVE') return { status: 400, body: { error: 'Only Active or Inactive accounts can change status.' } };
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
     if (!name) return { status: 400, body: { error: 'Name is required.' } };
@@ -66,21 +69,20 @@ export async function handleManageUserRequest(authHeader: string | undefined, bo
     const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, authUpdate);
     if (authError) return { status: 400, body: { error: `Supabase Auth error: ${authError.message}` } };
 
-    const { error: profileError } = await supabaseAdmin.from('profiles').update({ name, email, metadata }).eq('id', userId);
+    const { error: profileError } = await supabaseAdmin.from('profiles').update({ name, email, metadata, ...(newStatus ? { status: newStatus } : {}) }).eq('id', userId);
     if (profileError) return { status: 500, body: { error: `Unable to update profile: ${profileError.message}` } };
     return { status: 200, body: { success: true, message: 'Member updated.' } };
   }
 
   // delete -- a hard delete is only possible for accounts with no workflow
   // history (manuscripts, assignments, discussions... all reference profiles).
-  // Otherwise the account is deactivated instead: removed from every active
-  // roster and blocked from signing in, while its history stays intact.
+  // Otherwise the profile is marked DELETED instead: removed from every
+  // roster and blocked from signing in ("Account not exists"), while its
+  // history stays intact.
   const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId);
   if (!deleteError) return { status: 200, body: { success: true, mode: 'deleted', message: 'Member deleted.' } };
 
-  const { error: banError } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: '876000h' });
-  if (banError) return { status: 500, body: { error: `Unable to remove member: ${deleteError.message}` } };
-  const { error: statusError } = await supabaseAdmin.from('profiles').update({ status: 'REJECTED' }).eq('id', userId);
+  const { error: statusError } = await supabaseAdmin.from('profiles').update({ status: 'DELETED' }).eq('id', userId);
   if (statusError) return { status: 500, body: { error: `Unable to deactivate member: ${statusError.message}` } };
-  return { status: 200, body: { success: true, mode: 'deactivated', message: 'Member has workflow history, so the account was deactivated instead of erased.' } };
+  return { status: 200, body: { success: true, mode: 'deactivated', message: 'Member has workflow history, so the account was closed (it can no longer sign in) instead of erased.' } };
 }

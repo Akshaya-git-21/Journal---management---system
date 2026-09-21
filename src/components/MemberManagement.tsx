@@ -69,6 +69,7 @@ export function EditMemberModal({ member, onClose, onSaved }: { member: ProfileR
   const [email, setEmail] = useState(member.email || "");
   const [editorialRole, setEditorialRole] = useState<string>(member.metadata?.editorial_role || "Editorial Board");
   const [detail, setDetail] = useState<string>(form.detailKey ? member.metadata?.[form.detailKey] || "" : "");
+  const [status, setStatus] = useState<"ACTIVE" | "INACTIVE">(member.status === "INACTIVE" ? "INACTIVE" : "ACTIVE");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,7 +83,7 @@ export function EditMemberModal({ member, onClose, onSaved }: { member: ProfileR
       const metadata: Record<string, string> = {};
       if (role === "EDITOR") metadata.editorial_role = editorialRole;
       if (form.detailKey) metadata[form.detailKey] = detail;
-      await updateTeamMember(member.id, { name, email, metadata });
+      await updateTeamMember(member.id, { name, email, metadata, status });
       await onSaved();
       onClose();
     } catch (err: any) {
@@ -130,6 +131,16 @@ export function EditMemberModal({ member, onClose, onSaved }: { member: ProfileR
               <input value={detail} onChange={(e) => setDetail(e.target.value)} placeholder={form.detailPh} disabled={saving} className={fieldClass} />
             </div>
           ) : null}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className={labelClass}>Status</label>
+            <div>
+              <select value={status} onChange={(e) => setStatus(e.target.value as "ACTIVE" | "INACTIVE")} disabled={saving} className={fieldClass}>
+                <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
+              </select>
+              {status === "INACTIVE" && <p className="mt-2 text-[11px] text-rose-600">Inactive members cannot sign in until you set them back to Active.</p>}
+            </div>
+          </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
             <button type="button" onClick={onClose} disabled={saving} className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
               Cancel
@@ -169,7 +180,7 @@ export function DeleteMemberModal({ member, onClose, onDeleted }: { member: Prof
           <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
           <div className="text-sm text-slate-700">
             <p>Delete <strong>{member.name || member.email}</strong> ({member.email})? They will lose access immediately.</p>
-            <p className="mt-2 text-xs text-slate-500">If this person already appears in manuscripts, assignments or messages, the account is deactivated instead of erased so that history stays intact. Reassign any work in progress first.</p>
+            <p className="mt-2 text-xs text-slate-500">They will no longer be able to sign in ("Account not exists"). If this person already appears in manuscripts, assignments or messages, the account is closed instead of erased so that history stays intact. Reassign any work in progress first.</p>
           </div>
         </div>
         {error && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}

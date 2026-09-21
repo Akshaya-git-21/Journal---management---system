@@ -102,7 +102,14 @@ export async function registerAccount(
 export async function loginAccount(email: string, password: string): Promise<AuthUser> {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-  if (error) throw new Error(error.message || 'Invalid email or password.');
+  if (error) {
+    // Supabase answers "Invalid login credentials" for both a wrong password
+    // and an email with no account -- ask the server which one it is.
+    if (error.code === 'invalid_credentials' || /invalid login credentials/i.test(error.message || '')) {
+      if ((await accountExists(email)) === false) throw new Error('Account not exists');
+    }
+    throw new Error(error.message || 'Invalid email or password.');
+  }
 
   const user = data.user;
   if (!user) throw new Error('Login failed: no session returned.');
@@ -123,7 +130,34 @@ export async function loginAccount(email: string, password: string): Promise<Aut
     throw new Error('This account request was rejected. Contact your Coordinator.');
   }
 
+  if (profile.status === 'INACTIVE') {
+    await supabase.auth.signOut();
+    throw new Error('Account is deactivated. Contact your Coordinator to reactivate it.');
+  }
+
+  if (profile.status === 'DELETED') {
+    await supabase.auth.signOut();
+    throw new Error('Account not exists');
+  }
+
   return toAuthUser(profile);
+}
+
+/** Asks the server whether a profile exists for this email. Returns null when
+ * the check itself can't be completed (so callers fall back to the generic message). */
+async function accountExists(email: string): Promise<boolean | null> {
+  try {
+    const response = await fetch('/api/account-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    if (!response.ok) return null;
+    const result = await response.json();
+    return typeof result?.exists === 'boolean' ? result.exists : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function logoutAccount(): Promise<void> {
@@ -493,7 +527,7 @@ async function callManageUser(payload: Record<string, unknown>): Promise<{ mode?
 /** Coordinator-only: edit a team member's name, email and role details. */
 export async function updateTeamMember(
   userId: string,
-  fields: { name: string; email: string; metadata?: Record<string, string> }
+  fields: { name: string; email: string; metadata?: Record<string, string>; status?: 'ACTIVE' | 'INACTIVE' }
 ): Promise<void> {
   await callManageUser({ action: 'update', userId, ...fields });
 }

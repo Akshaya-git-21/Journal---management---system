@@ -893,6 +893,15 @@ export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER' | 'PU
   return data ?? [];
 }
 
+/** Team members of a role that the Coordinator can manage: ACTIVE and INACTIVE
+ * (so a deactivated member stays visible and can be switched back on). Use
+ * listActiveProfilesByRole for pickers that must only offer usable accounts. */
+export async function listManagedProfilesByRole(role: 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'GD_MEMBER'): Promise<ProfileRow[]> {
+  const { data, error } = await supabase.from('profiles').select('id, name, email, role, status, created_at, metadata').eq('role', role).in('status', ['ACTIVE', 'INACTIVE']).order('name', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
 export async function listPendingApprovals(): Promise<ProfileRow[]> {
   const { data, error } = await supabase.from('profiles').select('id, name, email, role, requested_role, status').eq('status', 'PENDING_APPROVAL').order('created_at', { ascending: true });
   if (error) throw new Error(error.message);

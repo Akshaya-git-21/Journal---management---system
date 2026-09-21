@@ -49,7 +49,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const { data: target, error: targetError } = await admin.from('profiles').select('id, role, email, name, metadata').eq('id', userId).maybeSingle();
+    const { data: target, error: targetError } = await admin.from('profiles').select('id, role, email, name, metadata, status').eq('id', userId).maybeSingle();
     if (targetError) {
       res.status(500).json({ error: `Server error looking up target user: ${targetError.message}` });
       return;
@@ -64,6 +64,9 @@ export default async function handler(req: any, res: any) {
     }
 
     if (action === 'update') {
+      const newStatus = body.status;
+      if (newStatus !== undefined && newStatus !== 'ACTIVE' && newStatus !== 'INACTIVE') { res.status(400).json({ error: 'Status must be ACTIVE or INACTIVE.' }); return; }
+      if (newStatus !== undefined && target.status !== 'ACTIVE' && target.status !== 'INACTIVE') { res.status(400).json({ error: 'Only Active or Inactive accounts can change status.' }); return; }
       const name = typeof body.name === 'string' ? body.name.trim() : '';
       const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
       if (!name) { res.status(400).json({ error: 'Name is required.' }); return; }
@@ -82,7 +85,7 @@ export default async function handler(req: any, res: any) {
       const { error: authError } = await admin.auth.admin.updateUserById(userId, authUpdate);
       if (authError) { res.status(400).json({ error: `Supabase Auth error: ${authError.message}` }); return; }
 
-      const { error: profileError } = await admin.from('profiles').update({ name, email, metadata }).eq('id', userId);
+      const { error: profileError } = await admin.from('profiles').update({ name, email, metadata, ...(newStatus ? { status: newStatus } : {}) }).eq('id', userId);
       if (profileError) { res.status(500).json({ error: `Unable to update profile: ${profileError.message}` }); return; }
       res.status(200).json({ success: true, message: 'Member updated.' });
       return;
@@ -93,11 +96,9 @@ export default async function handler(req: any, res: any) {
       res.status(200).json({ success: true, mode: 'deleted', message: 'Member deleted.' });
       return;
     }
-    const { error: banError } = await admin.auth.admin.updateUserById(userId, { ban_duration: '876000h' });
-    if (banError) { res.status(500).json({ error: `Unable to remove member: ${deleteError.message}` }); return; }
-    const { error: statusError } = await admin.from('profiles').update({ status: 'REJECTED' }).eq('id', userId);
+    const { error: statusError } = await admin.from('profiles').update({ status: 'DELETED' }).eq('id', userId);
     if (statusError) { res.status(500).json({ error: `Unable to deactivate member: ${statusError.message}` }); return; }
-    res.status(200).json({ success: true, mode: 'deactivated', message: 'Member has workflow history, so the account was deactivated instead of erased.' });
+    res.status(200).json({ success: true, mode: 'deactivated', message: 'Member has workflow history, so the account was closed (it can no longer sign in) instead of erased.' });
   } catch (error: any) {
     console.error('[api/manage-user] Unexpected error:', error);
     res.status(500).json({ error: error?.message || 'Unable to manage user.' });
