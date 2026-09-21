@@ -9,6 +9,23 @@
 
 html {
   font-size: 15px;
+  /* The whole interface is designed to be seen at 90%: render it that way at
+     the browser's normal 100% zoom. (Users can still zoom the page further
+     and the responsive layout adapts.) */
+  zoom: 0.9;
+}
+
+/* With `zoom`, viewport units shrink by the same factor, so full-height
+   screens would stop 10% short of the bottom. main.tsx measures the real
+   factor at startup and stores its inverse in --vh-comp (1 when the browser
+   doesn't scale viewport units), which these rules use to fill the screen. */
+.h-screen { height: calc(100vh * var(--vh-comp, 1)); }
+.min-h-screen { min-height: calc(100vh * var(--vh-comp, 1)); }
+.max-h-screen { max-height: calc(100vh * var(--vh-comp, 1)); }
+@media (min-width: 768px) {
+  .md\:h-screen { height: calc(100vh * var(--vh-comp, 1)); }
+  .md\:min-h-screen { min-height: calc(100vh * var(--vh-comp, 1)); }
+  .md\:max-h-screen { max-height: calc(100vh * var(--vh-comp, 1)); }
 }
 
 body {

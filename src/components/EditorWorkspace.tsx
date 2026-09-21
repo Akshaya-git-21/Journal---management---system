@@ -445,7 +445,7 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
         />
       ))}
 
-      <aside className={`w-[270px] ${LIGHT_SIDEBAR_SURFACE} flex flex-col shrink-0`}>
+      <aside className={`w-[220px] xl:w-[270px] ${LIGHT_SIDEBAR_SURFACE} flex flex-col shrink-0`}>
         <SidebarThemeContext.Provider value="light">
         <SidebarBrand />
 
@@ -622,7 +622,7 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
   const paginatedRows = rows.slice(startIndex, endIndex);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
           <tr>

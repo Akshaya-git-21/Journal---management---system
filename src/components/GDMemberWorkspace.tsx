@@ -67,7 +67,7 @@ export default function GDMemberWorkspace({ currentUser, onSignOut }: GDMemberWo
   return (
     <div id="gd-member-workspace" className="flex-1 min-h-0 bg-[#f6fbf9] text-[#111827] flex flex-col font-sans">
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden min-h-0">
-        <aside className={`w-full md:w-[270px] ${LIGHT_SIDEBAR_SURFACE} shrink-0 overflow-y-auto flex flex-col`}>
+        <aside className={`w-full md:w-[220px] xl:w-[270px] ${LIGHT_SIDEBAR_SURFACE} shrink-0 overflow-y-auto flex flex-col`}>
           <SidebarThemeContext.Provider value="light">
           <SidebarBrand />
           <div className="px-3 pb-6">

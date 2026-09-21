@@ -174,7 +174,7 @@ export default function ReviewerWorkspace({ currentUser, onSignOut }: ReviewerWo
   return (
     <div className={`w-full min-h-screen ${LIGHT_PAGE_SURFACE} role-tint flex flex-col md:flex-row font-sans`}>
       {/* Left Sidebar */}
-      <div className={`w-full md:w-[270px] ${LIGHT_SIDEBAR_SURFACE} md:min-h-screen md:sticky md:top-0 md:max-h-screen md:overflow-y-auto shrink-0 flex flex-col`}>
+      <div className={`w-full md:w-[220px] xl:w-[270px] ${LIGHT_SIDEBAR_SURFACE} md:min-h-screen md:sticky md:top-0 md:max-h-screen md:overflow-y-auto shrink-0 flex flex-col`}>
         <SidebarThemeContext.Provider value="light">
         <SidebarBrand />
         <div className="px-3 pb-6">
