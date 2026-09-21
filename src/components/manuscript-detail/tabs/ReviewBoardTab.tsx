@@ -10,6 +10,7 @@ import {
 } from '../../../lib/workflow';
 import { getReviewerDisplayStatus, reviewerNeedsReplacement } from '../../../lib/reviewerStatus';
 import { formatTimelineDate } from '../../../lib/dateFormat';
+import { defaultReviewTimeline } from '../../../lib/settings';
 import { createReviewerAccount } from '../../../lib/auth';
 import { AlertCircle, Loader2, CheckCircle, Star, XCircle, RefreshCw, UserPlus, Send, Bell } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
@@ -51,8 +52,8 @@ export function ReviewBoardTab({
   // Shared between the direct-accept and needs-account flows so the dates
   // only have to be entered once.
   const [showAcceptTimeline, setShowAcceptTimeline] = useState<string | null>(null);
-  const [acceptTimelineStart, setAcceptTimelineStart] = useState('');
-  const [acceptTimelineEnd, setAcceptTimelineEnd] = useState('');
+  const [acceptTimelineStart, setAcceptTimelineStart] = useState(() => defaultReviewTimeline().start);
+  const [acceptTimelineEnd, setAcceptTimelineEnd] = useState(() => defaultReviewTimeline().end);
   const [sendingInvitations, setSendingInvitations] = useState(false);
 
   // The Coordinator no longer invites reviewers directly from this list --
@@ -72,8 +73,8 @@ export function ReviewBoardTab({
   // Module 98 -- the Review Timeline (deadline) the Coordinator must set
   // alongside sending the invitations, exactly like the Editorial Timeline
   // required when assigning the Editor.
-  const [reviewTimelineStart, setReviewTimelineStart] = useState('');
-  const [reviewTimelineEnd, setReviewTimelineEnd] = useState('');
+  const [reviewTimelineStart, setReviewTimelineStart] = useState(() => defaultReviewTimeline().start);
+  const [reviewTimelineEnd, setReviewTimelineEnd] = useState(() => defaultReviewTimeline().end);
   const [sendingReminderFor, setSendingReminderFor] = useState<string | null>(null);
   const [reminderError, setReminderError] = useState('');
 

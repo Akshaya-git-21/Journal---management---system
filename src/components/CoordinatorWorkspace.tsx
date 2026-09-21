@@ -26,6 +26,9 @@ import { AssignmentConfirmationDialog } from './AssignmentConfirmationDialog';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 import { MemberRowActions, EditMemberModal, DeleteMemberModal } from "./MemberManagement";
 import ReportsAnalyticsDashboard from './ReportsAnalyticsDashboard';
+import SettingsScreen from './SettingsScreen';
+import { loadSettings, useJournalSettings } from '../lib/settings';
+import { SLA_DISMISSED_KEY, formatDisplayDate, getDisplayPrefs, zoneOptions } from '../lib/displayPrefs';
 import ProductionSection from './production/ProductionSection';
 import JournalTemplateSection from './production/JournalTemplateSection';
 
@@ -126,6 +129,14 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
   const [selectedEditorForDetails, setSelectedEditorForDetails] = useState<ProfileRow | null>(null);
   const [memberToEdit, setMemberToEdit] = useState<ProfileRow | null>(null);
   const [memberToDelete, setMemberToDelete] = useState<ProfileRow | null>(null);
+
+  // Journal-wide settings (SLA days, default review deadline, password rules...) and the
+  // journal name shown in the browser tab.
+  const journalSettings = useJournalSettings();
+  useEffect(() => { loadSettings().catch(() => {}); }, []);
+  useEffect(() => {
+    document.title = journalSettings.profile.name || 'Journal Management System';
+  }, [journalSettings.profile.name]);
 
   // Lazily surface any reviewer-replacement deadline that expired with no
   // Editor action taken -- idempotent (see notify_expired_reviewer_replacements
@@ -614,7 +625,7 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
             ) : isCommunicationsSection ? (
               <NotAvailableScreen title="Communications" text="Coordinator-wide messaging is not connected to a data source yet." />
             ) : isSettingsSection ? (
-              <NotAvailableScreen title="Settings" text="Journal configuration settings are not connected to a data source yet." />
+              <SettingsScreen items={items} editors={editorialBoardProfiles} reviewers={reviewerProfiles} publishers={publisherProfiles} gdMembers={gdMemberProfiles} />
             ) : isAuditTrailSection ? (
               <AuditTrailScreen manuscripts={items} />
             ) : isProductionQueueSection ? (
@@ -822,7 +833,7 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
 
 function formatDate(iso: string | null) {
   if (!iso) return '--';
-  return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  return formatDisplayDate(iso);
 }
 
 function QueueTable({ items, onOpen, onDeleted, selectMode, onExitSelectMode, productionByManuscript }: { items: ManuscriptRow[]; onOpen: (id: string) => void; onDeleted: () => void | Promise<void>; selectMode: boolean; onExitSelectMode: () => void; productionByManuscript?: Record<string, string> }) {
@@ -834,7 +845,7 @@ function QueueTable({ items, onOpen, onDeleted, selectMode, onExitSelectMode, pr
 
   // Leaving delete mode drops any selection.
   useEffect(() => { if (!selectMode) setSelected(new Set()); }, [selectMode]);
-  const itemsPerPage = 10;
+  const itemsPerPage = getDisplayPrefs().rowsPerPage;
   const totalPages = Math.ceil(items.length / itemsPerPage);
   const activePage = Math.min(currentPage, Math.max(1, totalPages));
   const startIdx = (activePage - 1) * itemsPerPage;
@@ -1407,7 +1418,6 @@ function InviteReviewerModal({ open, onClose, name, email, specialty, password, 
   );
 }
 
-const SLA_DISMISSED_KEY = "jms.coordinator.dismissedSlaAlerts";
 const SWIPE_DISTANCE = 110;
 
 /** Alerts the Coordinator has swiped away after reading them (remembered per browser). */
@@ -1514,7 +1524,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
   });
   const screeningCount = items.filter((m) => m.status === 'EDITOR_REVIEW').length;
   const productionCount = items.filter((m) => ['ACCEPTED', 'PUBLISHED'].includes(m.status)).length;
-  const SLA_SCREENING_DAYS = 7;
+  const SLA_SCREENING_DAYS = useJournalSettings().workflow.screeningSlaDays;
   const overdueSubmissions = items.filter((m) => m.status === 'SUBMITTED' && m.submitted_at && (Date.now() - new Date(m.submitted_at).getTime()) / 86400000 > SLA_SCREENING_DAYS);
   const manuscriptsById = Object.fromEntries(items.map((m) => [m.id, m]));
   const { dismissed, dismiss, restoreAll } = useDismissedAlerts();
@@ -1554,7 +1564,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
           <p className="mt-2 text-sm text-slate-500">Track manuscript progress, reviewer activities, and key actions across the journal workflow.</p>
         </div>
         <div className="inline-flex items-center gap-2.5 rounded-xl border border-[#d8e8e7] bg-white px-4 py-2.5 text-sm font-bold text-slate-800 shadow-sm shrink-0">
-          <CalendarDays className="w-4 h-4 text-emerald-800" /> {now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} · {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          <CalendarDays className="w-4 h-4 text-emerald-800" /> {now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', ...zoneOptions() })} · {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', ...zoneOptions() })}
         </div>
       </div>
 

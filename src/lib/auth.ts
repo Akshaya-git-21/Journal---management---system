@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { getSettings } from './settings';
 import { Role, ProfileStatus } from '../types';
 
 export interface AuthUser {
@@ -220,10 +221,16 @@ export async function createUserAccount(
   }
 }
 
-export async function createEditorAccount(email: string, password: string, fullName: string, specialization: string, editorialRole: string): Promise<{ temporaryPassword: string }> {
-  if (!password || password.length < 8) {
-    throw new Error('Password must be at least 8 characters');
+/** Coordinator-created accounts must meet the journal's minimum password length (never below 8). */
+function assertPasswordLength(password: string): void {
+  const min = Math.max(8, getSettings().access.minPasswordLength);
+  if (!password || password.length < min) {
+    throw new Error(`Password must be at least ${min} characters`);
   }
+}
+
+export async function createEditorAccount(email: string, password: string, fullName: string, specialization: string, editorialRole: string): Promise<{ temporaryPassword: string }> {
+  assertPasswordLength(password);
 
   await createUserAccount(email, password, fullName, 'EDITOR', {
     specialization,
@@ -237,9 +244,7 @@ export async function createEditorAccount(email: string, password: string, fullN
 }
 
 export async function createReviewerAccount(email: string, password: string, fullName: string, specialization: string): Promise<{ temporaryPassword: string }> {
-  if (!password || password.length < 8) {
-    throw new Error('Password must be at least 8 characters');
-  }
+  assertPasswordLength(password);
 
   await createUserAccount(email, password, fullName, 'REVIEWER', {
     specialization,
@@ -252,9 +257,7 @@ export async function createReviewerAccount(email: string, password: string, ful
 }
 
 export async function createPublisherAccount(email: string, password: string, fullName: string, organization: string): Promise<{ temporaryPassword: string }> {
-  if (!password || password.length < 8) {
-    throw new Error('Password must be at least 8 characters');
-  }
+  assertPasswordLength(password);
 
   await createUserAccount(email, password, fullName, 'PUBLISHER', {
     organization,
@@ -267,9 +270,7 @@ export async function createPublisherAccount(email: string, password: string, fu
 }
 
 export async function createGDMemberAccount(email: string, password: string, fullName: string): Promise<{ temporaryPassword: string }> {
-  if (!password || password.length < 8) {
-    throw new Error('Password must be at least 8 characters');
-  }
+  assertPasswordLength(password);
 
   await createUserAccount(email, password, fullName, 'GD_MEMBER', {
     invited_by: 'coordinator',
