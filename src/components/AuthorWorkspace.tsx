@@ -223,9 +223,9 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
   // Delete manuscript
   const handleDelete = async (manuscriptId: string, manuscript: ManuscriptRow) => {
-    // Only allow delete if editor hasn't started review
-    if (['EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED', 'REJECTED'].includes(manuscript.status)) {
-      setError('Cannot delete manuscript once editorial review has begun');
+    // Authors can only delete an unsubmitted draft -- never after submission.
+    if (manuscript.status !== 'DRAFT') {
+      setError('A submitted manuscript cannot be deleted');
       return;
     }
 
@@ -835,13 +835,15 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                                   Contact
                                 </button>
                               )}
-                              <button
-                                onClick={() => handleDelete(m.id, m)}
-                                disabled={deleteLoading === m.id || ['EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED', 'REJECTED'].includes(m.status)}
-                                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {deleteLoading === m.id ? <Loader2 className="w-3 h-3 animate-spin inline" /> : 'Delete'}
-                              </button>
+                              {m.status === 'DRAFT' && (
+                                <button
+                                  onClick={() => handleDelete(m.id, m)}
+                                  disabled={deleteLoading === m.id}
+                                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {deleteLoading === m.id ? <Loader2 className="w-3 h-3 animate-spin inline" /> : 'Delete'}
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))}

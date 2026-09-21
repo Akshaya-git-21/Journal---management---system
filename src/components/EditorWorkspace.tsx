@@ -242,6 +242,21 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
   const [decliningAssignment, setDecliningAssignment] = useState(false);
   const [sectionFilter, setSectionFilter] = useState<string | null>(null);
 
+  // "Remove from My Queue": hides rows from THIS Editor's list only. The manuscript, its
+  // reviews and its history are untouched, and the Coordinator still sees everything.
+  // Kept per Editor in this browser; "Show again" brings them back.
+  const removedKey = `jms.editor.removedFromQueue.${currentUser?.email ?? ''}`;
+  const [removedIds, setRemovedIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(removedKey) || '[]'); } catch { return []; }
+  });
+  const [removeMode, setRemoveMode] = useState(false);
+  const [removeSelection, setRemoveSelection] = useState<Set<string>>(new Set());
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const saveRemoved = (ids: string[]) => {
+    setRemovedIds(ids);
+    try { localStorage.setItem(removedKey, JSON.stringify(ids)); } catch { /* storage unavailable */ }
+  };
+
   // Real predicates over actual assignment/manuscript/reviewer data -- no
   // fabricated counts. Buckets with no matching schema field (overdue
   // tracking uses reviewer_assignments.due_date; scheduling/copyediting has
@@ -287,7 +302,10 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
     }
   };
 
+  const removedSet = new Set(removedIds);
+  const removedCount = rows.filter((r) => removedSet.has(r.manuscript.id)).length;
   const filteredRows = rows.filter((row) => {
+    if (removedSet.has(row.manuscript.id)) return false;
     if (sectionFilter && !SECTION_FILTERS[sectionFilter]?.predicate(row)) return false;
     const query = searchTerm.toLowerCase();
     return (
@@ -548,7 +566,14 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
       <main className="flex-1 flex flex-col overflow-hidden">
         {topBar}
         <div className="bg-white border-b border-slate-200 px-8 py-5 shrink-0">
-          <div className="flex items-center justify-end">
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => { setRemoveMode((v) => !v); setRemoveSelection(new Set()); }}
+              className={`rounded-full border px-4 py-2 text-xs font-bold transition ${removeMode ? 'border-slate-700 bg-slate-700 text-white hover:bg-slate-800' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+            >
+              {removeMode ? 'Cancel' : 'Remove from My Queue'}
+            </button>
             <div className="relative w-64">
               <input
                 value={searchTerm}
@@ -587,18 +612,68 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
                 </button>
               </div>
             ) : (
-              <div key={sectionFilter ?? 'all'}>
-                <AssignmentListWithPagination rows={filteredRows} onOpen={(id, tab) => { setSelectedManuscriptId(id); setPendingTab(tab ?? null); }} />
+              <div key={sectionFilter ?? 'all'} className="space-y-4">
+                {removeMode && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-sm font-semibold text-slate-800">
+                      {removeSelection.size === 0 ? 'Select the manuscripts to remove from your queue' : `${removeSelection.size} manuscript${removeSelection.size === 1 ? '' : 's'} selected`}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      {removeSelection.size < filteredRows.length && (
+                        <button onClick={() => setRemoveSelection(new Set(filteredRows.map((r) => r.manuscript.id)))} className="rounded-full border border-slate-300 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">Select all {filteredRows.length}</button>
+                      )}
+                      <button onClick={() => { setRemoveMode(false); setRemoveSelection(new Set()); }} className="rounded-full border border-slate-300 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">Cancel</button>
+                      <button onClick={() => setConfirmRemove(true)} disabled={removeSelection.size === 0} className="rounded-full bg-slate-700 px-4 py-1.5 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed">Remove from my queue</button>
+                    </div>
+                  </div>
+                )}
+                <AssignmentListWithPagination
+                  rows={filteredRows}
+                  onOpen={(id, tab) => { setSelectedManuscriptId(id); setPendingTab(tab ?? null); }}
+                  selectMode={removeMode}
+                  selected={removeSelection}
+                  onToggle={(ids) => setRemoveSelection((prev) => {
+                    const next = new Set(prev);
+                    const allOn = ids.every((id) => next.has(id));
+                    ids.forEach((id) => (allOn ? next.delete(id) : next.add(id)));
+                    return next;
+                  })}
+                />
+                {removedCount > 0 && !removeMode && (
+                  <button type="button" onClick={() => saveRemoved([])} className="w-full rounded-xl border border-dashed border-slate-200 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">{removedCount} removed from your queue · Show again</button>
+                )}
               </div>
             )}
 
         </div>
       </main>
+      {confirmRemove && (() => {
+        const toRemove = rows.filter((r) => removeSelection.has(r.manuscript.id));
+        const one = toRemove.length === 1;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={() => setConfirmRemove(false)}>
+            <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl border border-slate-200 p-6" onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-lg font-black text-slate-900">Remove {one ? 'this manuscript' : `${toRemove.length} manuscripts`} from your queue?</h2>
+              <p className="mt-2 text-sm text-slate-600">This only hides {one ? 'it' : 'them'} from your own list. Nothing is deleted: the manuscript, its reviews and its history stay in the system, and the Coordinator can still see {one ? 'it' : 'them'}. You can bring {one ? 'it' : 'them'} back with "Show again".</p>
+              <ul className="mt-3 max-h-40 overflow-y-auto rounded-2xl bg-slate-50 border border-slate-200 divide-y divide-slate-100 text-xs">
+                {toRemove.slice(0, 8).map((r) => (
+                  <li key={r.manuscript.id} className="px-3 py-2"><span className="font-mono text-slate-400">{r.manuscript.id}</span> <span className="font-semibold text-slate-800">{r.manuscript.title}</span></li>
+                ))}
+                {toRemove.length > 8 && <li className="px-3 py-2 text-slate-500">…and {toRemove.length - 8} more</li>}
+              </ul>
+              <div className="mt-5 flex gap-2">
+                <button onClick={() => { saveRemoved(Array.from(new Set([...removedIds, ...toRemove.map((r) => r.manuscript.id)]))); setRemoveMode(false); setRemoveSelection(new Set()); setConfirmRemove(false); }} className="flex-1 rounded-full bg-slate-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800">Remove from my queue</button>
+                <button onClick={() => setConfirmRemove(false)} className="flex-1 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
 
-function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscriptDetails[]; onOpen: (id: string, tab?: 'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | 'production') => void }) {
+function AssignmentListWithPagination({ rows, onOpen, selectMode, selected, onToggle }: { rows: EditorManuscriptDetails[]; onOpen: (id: string, tab?: 'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | 'production') => void; selectMode: boolean; selected: Set<string>; onToggle: (ids: string[]) => void }) {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -618,6 +693,11 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
       <table className="w-full text-left text-sm">
         <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
           <tr>
+            {selectMode && (
+              <th className="pl-6 pr-0 py-3.5 w-10">
+                <input type="checkbox" aria-label="Select all manuscripts on this page" checked={paginatedRows.length > 0 && paginatedRows.every((r) => selected.has(r.manuscript.id))} onChange={() => onToggle(paginatedRows.map((r) => r.manuscript.id))} className="h-4 w-4 rounded border-slate-300 accent-slate-700 cursor-pointer" />
+              </th>
+            )}
             <th className="px-6 py-3.5">Title</th>
             <th className="px-4 py-3.5 w-[190px]">Manuscript Status</th>
             <th className="px-4 py-3.5 w-[130px]">Assignment</th>
@@ -653,7 +733,12 @@ function AssignmentListWithPagination({ rows, onOpen }: { rows: EditorManuscript
             // Production Verification screen instead of the default Status tab.
             const inProofreading = details.manuscript.status === 'ACCEPTED';
             return (
-              <tr key={details.manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(details.manuscript.id, isRevisionSubmitted ? 'status' : reviewsReady ? 'reviews' : inProofreading ? 'production' : undefined)}>
+              <tr key={details.manuscript.id} className={`hover:bg-slate-50 cursor-pointer ${selected.has(details.manuscript.id) ? 'bg-slate-50' : ''}`} onClick={() => selectMode ? onToggle([details.manuscript.id]) : onOpen(details.manuscript.id, isRevisionSubmitted ? 'status' : reviewsReady ? 'reviews' : inProofreading ? 'production' : undefined)}>
+                {selectMode && (
+                  <td className="pl-6 pr-0 py-4 align-middle w-10">
+                    <input type="checkbox" aria-label={`Select ${details.manuscript.title}`} checked={selected.has(details.manuscript.id)} onChange={() => onToggle([details.manuscript.id])} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border-slate-300 accent-slate-700 cursor-pointer" />
+                  </td>
+                )}
                 <td className="px-6 py-4 align-middle font-bold text-slate-800">
                   {details.manuscript.title}
                   {details.assignment.timeline_start_date && details.assignment.timeline_end_date && (
