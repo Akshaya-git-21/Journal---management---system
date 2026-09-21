@@ -97,15 +97,9 @@ export function TopBar({ user, onSignOut, left, leading, tinted }: {
   );
 }
 
-/** Decorative roofline shapes pinned to the bottom of the light sidebar. */
+/** The sidebars are intentionally plain at the bottom now (the old mountain
+ * illustration was removed). Kept as a no-op so every workspace can keep
+ * rendering it without changes. */
 export function SidebarDecoration() {
-  return (
-    <svg viewBox="0 0 270 120" preserveAspectRatio="xMidYMax slice" className="pointer-events-none mt-auto block h-[110px] w-full shrink-0" aria-hidden="true">
-      <polygon points="0,120 0,52 68,12 138,52 138,120" fill="#c3dcc6" />
-      <polygon points="150,120 150,56 210,22 270,56 270,120" fill="#a8cbb0" />
-      <polygon points="78,120 134,54 192,120" fill="#4b8b62" />
-      <polygon points="40,120 92,80 140,120" fill="#8db894" opacity="0.85" />
-      <path d="M246 96 l3.5 8 8 3.5 -8 3.5 -3.5 8 -3.5 -8 -8 -3.5 8 -3.5z" fill="#ffffff" opacity="0.75" />
-    </svg>
-  );
+  return null;
 }
