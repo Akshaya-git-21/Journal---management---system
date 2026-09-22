@@ -204,6 +204,7 @@ export default function EditorDetailsModal({ editor, onClose }: EditorDetailsMod
                 )}
                 <input
                   type="password"
+                  autoComplete="new-password"
                   placeholder="New password (min 8 chars)"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
@@ -212,6 +213,7 @@ export default function EditorDetailsModal({ editor, onClose }: EditorDetailsMod
                 />
                 <input
                   type="password"
+                  autoComplete="new-password"
                   placeholder="Confirm password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
