@@ -23,7 +23,7 @@ export default function AdminPendingApprovals() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [notice, setNotice] = useState<{ kind: 'approved' | 'rejected' | 'error'; text: string } | null>(null);
 
   const load = async () => {
     const { data, error } = await supabase
@@ -48,7 +48,9 @@ export default function AdminPendingApprovals() {
     try {
       await adminReviewSignup(p.id, decision);
       const role = ROLE_LABEL[p.requested_role || 'AUTHOR'] || 'user';
-      setNotice({ kind: 'ok', text: decision === 'APPROVE' ? `${p.name || p.email} was approved as ${role}.` : `${p.name || p.email}'s request was rejected.` });
+      setNotice(decision === 'APPROVE'
+        ? { kind: 'approved', text: `${p.name || p.email} was approved as ${role}.` }
+        : { kind: 'rejected', text: `${p.name || p.email}'s request was rejected.` });
       await load();
     } catch (e: any) {
       setNotice({ kind: 'error', text: e.message || 'Unable to update the request.' });
@@ -69,7 +71,7 @@ export default function AdminPendingApprovals() {
       </div>
 
       {notice && (
-        <div className={`flex items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-sm ${notice.kind === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-700'}`}>
+        <div className={`flex items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-sm ${notice.kind === 'approved' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-700'}`}>
           <span>{notice.text}</span>
           <button onClick={() => setNotice(null)} className="shrink-0 text-xs font-semibold underline">Dismiss</button>
         </div>

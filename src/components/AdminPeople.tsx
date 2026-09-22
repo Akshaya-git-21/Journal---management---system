@@ -29,6 +29,9 @@ const ROLE_OPTIONS: { value: Role; label: string }[] = [
   { value: 'GD_MEMBER', label: 'GD Member' },
 ];
 const ROLE_LABEL: Record<string, string> = Object.fromEntries(ROLE_OPTIONS.map((r) => [r.value, r.label]));
+// Mirrors SKIP_FIRST_LOGIN_PASSWORD_CHANGE in src/lib/adminUsersHandler.ts -- these
+// roles sign in with the password the Admin set directly, no forced change.
+const SKIP_FIRST_LOGIN_PASSWORD_CHANGE: Role[] = ['ADMIN', 'COORDINATOR', 'PUBLISHER', 'GD_MEMBER'];
 const EDITORIAL_ROLES = ['Editorial Board', 'Editor-in-Chief', 'Associate Editor', 'Section Editor'];
 
 const TABS: { key: 'ALL' | Role; label: string }[] = [
@@ -566,7 +569,11 @@ export default function AdminPeople({ autoOpenCreate, onAutoOpenCreateHandled }:
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-sm font-black text-slate-900">{credentials.reset ? 'New temporary password' : 'Temporary login'} for {credentials.name || credentials.email}</p>
-              <p className="mt-1 text-sm text-slate-600">Shown once. Share it securely — they will be asked to choose their own password at first sign-in.</p>
+              <p className="mt-1 text-sm text-slate-600">
+                Shown once. Share it securely — {credentials.role && SKIP_FIRST_LOGIN_PASSWORD_CHANGE.includes(credentials.role)
+                  ? 'they sign in with this password directly.'
+                  : 'they will be asked to choose their own password at first sign-in.'}
+              </p>
             </div>
             <button onClick={() => setCredentials(null)} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Dismiss</button>
           </div>

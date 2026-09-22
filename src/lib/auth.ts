@@ -144,7 +144,7 @@ export async function loginAccount(email: string, password: string, selectedPort
   if (profile.status === 'REJECTED') {
     void logAuthEvent('sign_in_failed', { email, reason: 'request_rejected' });
     await supabase.auth.signOut();
-    throw new Error('This account request was rejected. Contact your Coordinator.');
+    throw new Error('This account request was rejected. Contact your Admin.');
   }
 
   if (profile.status === 'INACTIVE') {

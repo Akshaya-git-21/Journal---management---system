@@ -10,6 +10,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const ADMIN_ROLES = ['ADMIN', 'COORDINATOR', 'EDITOR', 'REVIEWER', 'AUTHOR', 'PUBLISHER', 'GD_MEMBER'];
+// These internal roles are only ever created/reset by an Admin, who hands the
+// password to the person directly -- no forced "choose your own password on
+// first sign-in" step. Editor/Reviewer/Author keep that step (self-registered
+// Editors/Reviewers already choose their own password at signup; Author too).
+const SKIP_FIRST_LOGIN_PASSWORD_CHANGE = ['ADMIN', 'COORDINATOR', 'PUBLISHER', 'GD_MEMBER'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Tables that mean "this person has workflow history". A role can't be changed
@@ -142,7 +147,7 @@ export async function runAdminUsersRequest(admin: any, authHeader: string | unde
         invited_by: 'admin',
         created_without_email: true,
         password_set_by_admin: true,
-        must_change_password: true,
+        must_change_password: !SKIP_FIRST_LOGIN_PASSWORD_CHANGE.includes(role),
         ...metadata,
       },
     });
@@ -162,7 +167,7 @@ export async function runAdminUsersRequest(admin: any, authHeader: string | unde
     }
     const row = {
       name, email, role, requested_role: role, status: 'ACTIVE',
-      metadata: { ...(profile?.metadata ?? {}), full_name: name, ...metadata, must_change_password: true, created_by_admin: true },
+      metadata: { ...(profile?.metadata ?? {}), full_name: name, ...metadata, must_change_password: !SKIP_FIRST_LOGIN_PASSWORD_CHANGE.includes(role), created_by_admin: true },
       approved_by: caller.id, approved_at: new Date().toISOString(),
     };
     const { error: writeError } = profile
@@ -278,12 +283,14 @@ export async function runAdminUsersRequest(admin: any, authHeader: string | unde
     const { error: authError } = await admin.auth.admin.updateUserById(target.id, { password });
     if (authError) return fail(400, `Supabase Auth error: ${authError.message}`);
     // The person must choose their own password at next sign-in (not for an
-    // Admin resetting their own password).
-    if (!isSelf) {
+    // Admin resetting their own password, and not for the internal roles an
+    // Admin manages passwords for directly).
+    const forceChange = !isSelf && !SKIP_FIRST_LOGIN_PASSWORD_CHANGE.includes(target.role);
+    if (forceChange) {
       const { error } = await admin.from('profiles').update({ metadata: { ...(target.metadata || {}), must_change_password: true } }).eq('id', target.id);
       if (error) return fail(500, `Password was changed but the change-on-first-login flag could not be set: ${error.message}`);
     }
-    await log('password_reset', target, { must_change_on_next_login: !isSelf });
+    await log('password_reset', target, { must_change_on_next_login: forceChange });
     return { status: 200, body: { success: true } };
   }
 
