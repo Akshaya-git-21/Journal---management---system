@@ -154,7 +154,7 @@ export default function EditorProductionVerification({ manuscriptId }: { manuscr
         </div>
       ) : awaitingAuthorFinalReturnSend ? (
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
-          Your response is recorded -- the Coordinator will forward it to the Author.
+          Your response is recorded and will be forwarded to the Author.
         </div>
       ) : awaitingAuthorFinalMoveToGdSend ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700 flex items-center gap-1.5">

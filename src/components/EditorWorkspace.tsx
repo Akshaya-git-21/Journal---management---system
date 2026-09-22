@@ -901,10 +901,11 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // True for one render after confirming "Move to Next Stage" on a
-  // resubmitted revision -- shows a short transition banner on the
-  // reviewer-selection screen so the jump there doesn't feel abrupt.
-  const [justMovedToNextStage, setJustMovedToNextStage] = useState(false);
+  // Lets the Editor dismiss the "choose reviewers" banner on the
+  // reviewer-selection screen for this visit; it reappears on a fresh visit
+  // (page reload, coming back later) for as long as reviewer selection is
+  // still actually pending -- see the banner's own visibility check below.
+  const [reviewerBannerDismissed, setReviewerBannerDismissed] = useState(false);
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [decisionError, setDecisionError] = useState('');
   const [editorComments, setEditorComments] = useState('');
@@ -1662,12 +1663,10 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                   // Record the decision and stay right here on the
                   // now-submitted Evaluation tab -- previously this jumped
                   // straight to the Reviewers tab, moving the Editor away
-                  // before they could see their own recorded decision.
-                  // justMovedToNextStage still primes the "select 2
-                  // reviewers" banner for whenever they navigate there
-                  // themselves.
+                  // before they could see their own recorded decision. The
+                  // "choose reviewers" banner shows itself once they navigate
+                  // there, for as long as it's actually still pending.
                   onChanged();
-                  setJustMovedToNextStage(true);
                 }}
               />
             )}
@@ -1833,16 +1832,22 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
               const canSelectAuthorSuggestionBase = manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT';
               return (
               <div className="space-y-6">
-                {justMovedToNextStage && !editorAlreadySelected && (
+                {canSelectAuthorSuggestionBase && !editorAlreadySelected && (reviewerAssignments?.length || 0) === 0 && !reviewerBannerDismissed && (
                   <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
-                    <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm shrink-0">
-                      <CheckCircle className="w-4 h-4" /> Revision Approved
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <p className="text-sm text-emerald-800 font-bold">Now select 2 reviewers to continue.</p>
+                    {(details.revisions || []).length > 0 ? (
+                      <>
+                        <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm shrink-0">
+                          <CheckCircle className="w-4 h-4" /> Revision Approved
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <p className="text-sm text-emerald-800 font-bold">Now select 2 reviewers to continue.</p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-emerald-800 font-bold">Please choose 2 reviewers.</p>
+                    )}
                     <button
                       type="button"
-                      onClick={() => setJustMovedToNextStage(false)}
+                      onClick={() => setReviewerBannerDismissed(true)}
                       className="ml-auto text-emerald-600 hover:text-emerald-800 shrink-0"
                     >
                       <XIcon className="w-4 h-4" />
@@ -1911,8 +1916,13 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                   // Order: "Select N Reviewer(s)" heading + reviewer list, then
                   // the Author's suggestions, then the Confirm button at the
                   // very bottom -- rather than Confirm sitting directly under
-                  // the reviewer list.
-                  return manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT' ? (
+                  // the reviewer list. Once reviewer selection is done (the
+                  // manuscript has moved past EDITOR_REVIEW/ACCEPT), this card
+                  // is stale noise -- the real, invited reviewers already show
+                  // in the Peer Reviews list above, so it's dropped entirely
+                  // rather than rendered as a static, un-toggleable leftover.
+                  if (!canSelectAuthorSuggestionBase) return null;
+                  return (
                     <ReviewerSelectionWithAuthorSuggestions
                       manuscriptId={manuscript.id}
                       suggestedReviewers={details.suggestedReviewers || []}
@@ -1922,7 +1932,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                     >
                       {renderAuthorSuggestionsCard}
                     </ReviewerSelectionWithAuthorSuggestions>
-                  ) : renderAuthorSuggestionsCard();
+                  );
                 })()}
               </div>
               );
@@ -2469,9 +2479,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
             )}
 
             {sidebarSection === 'cover_letter' && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
                 <h3 className="text-sm font-black text-slate-900 mb-4">COVER LETTER</h3>
-                {details.files && details.files.some(f => f.file_name?.toLowerCase().includes('cover')) ? (
+                {details.manuscript.cover_letter?.trim() && (
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{details.manuscript.cover_letter}</p>
+                )}
+                {details.files && details.files.some(f => f.file_name?.toLowerCase().includes('cover')) && (
                   <div className="space-y-3">
                     {details.files.filter(f => f.file_name?.toLowerCase().includes('cover')).map((file) => (
                       <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50">
@@ -2488,7 +2501,8 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                       </div>
                     ))}
                   </div>
-                ) : (
+                )}
+                {!details.manuscript.cover_letter?.trim() && !(details.files && details.files.some(f => f.file_name?.toLowerCase().includes('cover'))) && (
                   <p className="text-slate-500 text-sm">No cover letter provided.</p>
                 )}
               </div>

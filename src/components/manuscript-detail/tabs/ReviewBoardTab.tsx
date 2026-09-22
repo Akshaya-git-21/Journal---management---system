@@ -69,6 +69,10 @@ export function ReviewBoardTab({
   // Send button stays gone for good once used.
   const [poolAlreadySent, setPoolAlreadySent] = useState(false);
   const [poolError, setPoolError] = useState('');
+  // Fires right at the click, alongside poolAlreadySent -- so there's an
+  // unmissable confirmation the instant Send succeeds, not just the button
+  // silently swapping to its "already sent" look.
+  const [justSentPool, setJustSentPool] = useState(false);
 
   // Module 98 -- the Review Timeline (deadline) the Coordinator must set
   // alongside sending the invitations, exactly like the Editorial Timeline
@@ -326,6 +330,8 @@ export function ReviewBoardTab({
     try {
       await coordinatorSetReviewerPool(manuscript.id, selectedPoolReviewerIds);
       setPoolAlreadySent(true);
+      setJustSentPool(true);
+      setTimeout(() => setJustSentPool(false), 5000);
       onDataChange();
     } catch (e: any) {
       setPoolError(e.message || 'Failed to send reviewers to the Editor');
@@ -838,21 +844,28 @@ export function ReviewBoardTab({
                     );
                   })}
               </div>
-              {poolAlreadySent && !needsReplacementCandidates ? (
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
-                  <CheckCircle className="w-3.5 h-3.5" />
-                  Sent to Editor
-                </span>
-              ) : (
-                <button
-                  onClick={handleSendPoolToEditor}
-                  disabled={sendingPoolToEditor}
-                  className="text-xs px-4 py-2 bg-slate-800 text-white rounded-lg font-bold hover:bg-slate-900 disabled:opacity-50 transition flex items-center gap-1.5"
-                >
-                  {sendingPoolToEditor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                  {sendingPoolToEditor ? 'Sending...' : `Send ${selectedPoolReviewerIds.length > 0 ? selectedPoolReviewerIds.length + ' ' : ''}Reviewer${selectedPoolReviewerIds.length === 1 ? '' : 's'} to Editor`}
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {poolAlreadySent && !needsReplacementCandidates ? (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    Sent to Editor
+                  </span>
+                ) : (
+                  <button
+                    onClick={handleSendPoolToEditor}
+                    disabled={sendingPoolToEditor}
+                    className="text-xs px-4 py-2 bg-slate-800 text-white rounded-lg font-bold hover:bg-slate-900 disabled:opacity-50 transition flex items-center gap-1.5"
+                  >
+                    {sendingPoolToEditor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    {sendingPoolToEditor ? 'Sending...' : `Send ${selectedPoolReviewerIds.length > 0 ? selectedPoolReviewerIds.length + ' ' : ''}Reviewer${selectedPoolReviewerIds.length === 1 ? '' : 's'} to Editor`}
+                  </button>
+                )}
+                {justSentPool && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-800 animate-fade-in">
+                    <CheckCircle className="w-3.5 h-3.5" /> Sent!
+                  </span>
+                )}
+              </div>
             </>
           )}
         </div>

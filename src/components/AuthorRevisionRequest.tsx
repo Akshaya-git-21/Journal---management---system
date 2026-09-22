@@ -256,7 +256,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
 
   if (pendingRevisions.length === 0) {
     return (
-      <div className="bg-white border border-slate-200 rounded-lg p-8 text-center">
+      <div className="max-w-2xl mx-auto bg-white border border-slate-200 rounded-2xl p-8 text-center shadow-sm">
         <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
         <p className="text-slate-900 font-semibold">No Revisions Requested</p>
         <p className="text-slate-600 text-sm mt-1">Your manuscript is not in revision status.</p>
@@ -292,7 +292,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
     : [];
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-3xl mx-auto space-y-5">
       {pendingRevisions.length > 1 && (
         <div className="flex gap-2 flex-wrap">
           {pendingRevisions.map(rev => (
@@ -351,13 +351,13 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
           editor comment -- see buildAuthorNote() in DecisionTab.tsx), so
           decision_letter is what actually carries it forward to the Author. */}
       {reviewerComments.map((comment, idx) => (
-        <div key={idx} className="bg-white border border-slate-200 rounded-lg p-6">
+        <div key={idx} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Reviewer {idx + 1} Comments</h3>
           <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{comment}</p>
         </div>
       ))}
 
-      <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
         <div>
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2">Editor's Decision</h3>
           <p className={`text-base font-bold ${isMinor ? 'text-amber-700' : 'text-red-700'}`}>{decisionLabel}</p>
@@ -390,7 +390,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
       </div>
 
       {/* Revision Checklist */}
-      <div className="bg-white border border-slate-200 rounded-lg p-6">
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
         <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Revision Checklist</h3>
         <div className="space-y-2.5">
           <label className="flex items-center gap-2.5 text-sm cursor-pointer">
@@ -421,7 +421,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
       {!isSubmitted ? (
         <>
           {/* Upload Files */}
-          <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-6">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
             <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide">Upload Revised Files</h3>
 
             <Dropzone
@@ -452,7 +452,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
           </div>
 
           {/* Response note */}
-          <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
             <div>
               <label className="block text-sm font-bold text-slate-900 mb-2">Response to Editor (optional)</label>
               <textarea
@@ -483,7 +483,7 @@ export default function AuthorRevisionRequest({ manuscriptId, onRevisionSubmitte
           </div>
         </>
       ) : (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-6 text-center">
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 shadow-sm text-center">
           <CheckCircle className="w-12 h-12 text-emerald-600 mx-auto mb-4" />
           <p className="font-semibold text-emerald-900">Revision Submitted</p>
         </div>

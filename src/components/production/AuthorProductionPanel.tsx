@@ -301,7 +301,7 @@ export default function AuthorProductionPanel({ manuscriptId }: { manuscriptId: 
             returnedByEditor ? (
               <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl leading-relaxed text-amber-900">
                 <strong className="block font-bold text-sm mb-1">Editor's Response to Your Correction Request</strong>
-                <span className="text-sm whitespace-pre-wrap">{returnedByEditor.comments}</span>
+                <span className="text-sm whitespace-pre-wrap">&ldquo;{returnedByEditor.comments}&rdquo;</span>
               </div>
             ) : (
               <div className="bg-[#eefcf4] border border-emerald-100 p-4 rounded-xl leading-relaxed text-[#004d2e]">

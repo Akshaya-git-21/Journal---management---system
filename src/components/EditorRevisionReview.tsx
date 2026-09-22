@@ -152,7 +152,7 @@ export default function EditorRevisionReview({
 
   return (
     <div className="w-full bg-slate-50">
-      <div className="w-full p-8 space-y-6">
+      <div className="max-w-3xl mx-auto p-8 space-y-5">
         {/* 1. Revision information */}
         <div className="border-b border-slate-200 pb-4">
           <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Revision Review</p>
@@ -182,7 +182,7 @@ export default function EditorRevisionReview({
             review), and for Revision 3 specifically, whose reviewer names
             aren't meant to be exposed here. */}
         {latestRevision.revision_number !== 3 && reviewerAssignments.filter(r => r.status === 'SUBMITTED').length > 0 && (
-          <div className="bg-white border border-slate-200 rounded-lg p-6">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
             <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5" /> Reviewer Comments
             </h3>
@@ -227,7 +227,7 @@ export default function EditorRevisionReview({
           const priorEditorNote = match?.[1]?.trim();
           if (!priorEditorNote) return null;
           return (
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-6">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 shadow-sm">
               <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor's Comments</h3>
               <p className="text-sm text-slate-600 whitespace-pre-wrap">{priorEditorNote}</p>
             </div>
@@ -240,7 +240,7 @@ export default function EditorRevisionReview({
             (not hidden when empty) so it's clear this field exists even
             when this particular author left it blank -- their "Response to
             Editor" note is optional on the submission side. */}
-        <div className="bg-white border border-slate-200 rounded-lg p-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Author's Response</h3>
           {latestRevision.author_response ? (
             <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{latestRevision.author_response}</p>
@@ -250,7 +250,7 @@ export default function EditorRevisionReview({
         </div>
 
         {/* 5. Files for review */}
-        <div className="bg-white border border-slate-200 rounded-lg p-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">
             Revision {latestRevision.revision_number} — Files for Review
           </h3>
@@ -287,7 +287,7 @@ export default function EditorRevisionReview({
           )}
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-lg p-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor Comments</h3>
           <textarea
             value={comments}
@@ -300,7 +300,7 @@ export default function EditorRevisionReview({
         </div>
 
         {/* 7-8. Decision buttons + Submit Decision */}
-        <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide">Decision</h3>
 
           {error && (
