@@ -35,6 +35,7 @@ const ROLE_LABELS: Record<string, string> = {
   PUBLISHER: 'Publisher',
   COORDINATOR: 'Coordinator',
   GD_MEMBER: 'GD Member',
+  ADMIN: 'Admin',
 };
 
 function initialsOf(name: string) {

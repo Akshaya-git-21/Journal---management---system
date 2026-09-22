@@ -10,6 +10,25 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const MANAGED_ROLES = ['EDITOR', 'REVIEWER', 'PUBLISHER', 'GD_MEMBER'];
 const EDITABLE_METADATA_KEYS = ['specialization', 'editorial_role', 'organization'];
+// Module-wise access control (Phase 3): which Access-page module governs
+// editing/deleting each target role. See supabase/migrations/0118_module_access_control.sql.
+const MODULE_FOR_ROLE: Record<string, string> = { EDITOR: 'EDITORIAL_BOARD', REVIEWER: 'REVIEWERS', PUBLISHER: 'PUBLISHERS', GD_MEMBER: 'GD_MEMBERS' };
+
+/** Appends one entry to the activity log. Never throws: logging must not break the action. */
+async function recordActivity(client: any, actor: any, entry: { action: string; target?: any; details?: Record<string, unknown> }) {
+  try {
+    const { error } = await client.from('activity_log').insert({
+      category: 'user_management',
+      action: entry.action,
+      actor_id: actor?.id ?? null, actor_name: actor?.name ?? null, actor_email: actor?.email ?? null, actor_role: actor?.role ?? null,
+      target_id: entry.target?.id ?? null, target_name: entry.target?.name ?? null, target_email: entry.target?.email ?? null, target_role: entry.target?.role ?? null,
+      details: entry.details ?? {},
+    });
+    if (error) console.error('[activity] could not write the activity log:', error.message);
+  } catch (e: any) {
+    console.error('[activity] could not write the activity log:', e?.message);
+  }
+}
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
@@ -43,7 +62,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const { data: caller } = await admin.from('profiles').select('role, status').eq('id', tokenUser.user.id).maybeSingle();
+    const { data: caller } = await admin.from('profiles').select('id, name, email, role, status').eq('id', tokenUser.user.id).maybeSingle();
     if (!caller || caller.role !== 'COORDINATOR' || caller.status !== 'ACTIVE') {
       res.status(403).json({ error: 'Forbidden: Only Coordinators can manage team members.' });
       return;
@@ -60,6 +79,12 @@ export default async function handler(req: any, res: any) {
     }
     if (!MANAGED_ROLES.includes(target.role)) {
       res.status(403).json({ error: 'Forbidden: This account is not an Editor, Reviewer, Publisher or GD Member.' });
+      return;
+    }
+
+    const { data: allowed, error: permError } = await admin.rpc('has_permission', { p_user_id: caller.id, p_module: MODULE_FOR_ROLE[target.role], p_action: action === 'update' ? 'EDIT' : 'DELETE' });
+    if (permError || !allowed) {
+      res.status(403).json({ error: 'Forbidden: You do not have permission to do that.' });
       return;
     }
 
@@ -87,17 +112,34 @@ export default async function handler(req: any, res: any) {
 
       const { error: profileError } = await admin.from('profiles').update({ name, email, metadata, ...(newStatus ? { status: newStatus } : {}) }).eq('id', userId);
       if (profileError) { res.status(500).json({ error: `Unable to update profile: ${profileError.message}` }); return; }
+      const logWho = { id: target.id, name, email, role: target.role };
+      const logChanges: Record<string, unknown> = {};
+      if (name !== target.name) logChanges.name = { from: target.name, to: name };
+      for (const key of EDITABLE_METADATA_KEYS) {
+        if ((target.metadata?.[key] ?? '') !== (metadata[key] ?? '')) logChanges[key] = { from: target.metadata?.[key] ?? '', to: metadata[key] ?? '' };
+      }
+      if (email !== (target.email || '').toLowerCase()) {
+        await recordActivity(admin, caller, { action: 'user_email_changed', target: logWho, details: { changes: { email: { from: target.email, to: email } } } });
+      }
+      if (newStatus && newStatus !== target.status) {
+        await recordActivity(admin, caller, { action: newStatus === 'INACTIVE' ? 'user_deactivated' : 'user_activated', target: logWho, details: { changes: { status: { from: target.status, to: newStatus } } } });
+      }
+      if (Object.keys(logChanges).length > 0) {
+        await recordActivity(admin, caller, { action: 'user_updated', target: logWho, details: { changes: logChanges } });
+      }
       res.status(200).json({ success: true, message: 'Member updated.' });
       return;
     }
 
     const { error: deleteError } = await admin.auth.admin.deleteUser(userId);
     if (!deleteError) {
+      await recordActivity(admin, caller, { action: 'user_deleted', target, details: { mode: 'deleted', by: 'coordinator' } });
       res.status(200).json({ success: true, mode: 'deleted', message: 'Member deleted.' });
       return;
     }
     const { error: statusError } = await admin.from('profiles').update({ status: 'DELETED' }).eq('id', userId);
     if (statusError) { res.status(500).json({ error: `Unable to deactivate member: ${statusError.message}` }); return; }
+    await recordActivity(admin, caller, { action: 'user_deleted', target, details: { mode: 'closed', by: 'coordinator' } });
     res.status(200).json({ success: true, mode: 'deactivated', message: 'Member has workflow history, so the account was closed (it can no longer sign in) instead of erased.' });
   } catch (error: any) {
     console.error('[api/manage-user] Unexpected error:', error);

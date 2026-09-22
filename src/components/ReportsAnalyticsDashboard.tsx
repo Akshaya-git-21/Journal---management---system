@@ -182,12 +182,11 @@ interface Props {
   items: ManuscriptRow[];
   editors: ProfileRow[];
   reviewers: ProfileRow[];
-  pendingApprovals: number;
   overdueReviews: number;
   productionByManuscript: Record<string, string>;
 }
 
-export default function ReportsAnalyticsDashboard({ items, editors, reviewers, pendingApprovals, overdueReviews, productionByManuscript }: Props) {
+export default function ReportsAnalyticsDashboard({ items, editors, reviewers, overdueReviews, productionByManuscript }: Props) {
   const [range, setRange] = useState<Range>('30D');
   const [data, setData] = useState<AnalyticsData>({ reviewerAssignments: [], editorAssignments: [], history: [] });
   const [error, setError] = useState<string | null>(null);
@@ -209,7 +208,7 @@ export default function ReportsAnalyticsDashboard({ items, editors, reviewers, p
     return () => { cancelled = true; unsubscribe(); };
   }, []);
 
-  useEffect(() => { setLastUpdated(new Date()); }, [items, editors, reviewers, pendingApprovals]);
+  useEffect(() => { setLastUpdated(new Date()); }, [items, editors, reviewers]);
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 30_000);
     return () => window.clearInterval(id);
@@ -398,7 +397,6 @@ export default function ReportsAnalyticsDashboard({ items, editors, reviewers, p
         <Kpi label="Submitted" value={analytics.unassigned} hint="Awaiting editor assignment" accent="#f59e0b" />
         <Kpi label="Under Review" value={analytics.underReview} hint="In peer review" accent="#8b5cf6" />
         <Kpi label="Decision Pending" value={analytics.awaitingDecision} hint="Need a final decision" accent="#0ea5e9" />
-        <Kpi label="Pending Approvals" value={pendingApprovals} hint="Role requests to review" accent="#f97316" />
         <Kpi label="Published" value={analytics.published} hint="Live in the journal" accent="#047857" />
         <Kpi label="Avg Review Turnaround" value={analytics.avgTurnaround !== null ? `${analytics.avgTurnaround}d` : '—'} hint="Invite → review submitted" accent="#6366f1" />
         <Kpi label="Overdue Reviews" value={overdueReviews} hint="Past reviewer due date" accent="#ef4444" />

@@ -8,6 +8,7 @@ import {
 import { downloadCsv } from '../lib/csv';
 import { ManuscriptRow, ProfileRow, getRecentAuditLog } from '../lib/workflow';
 import { getManuscriptStatusLabel } from '../lib/manuscriptStatusLabel';
+import { usePermissions } from '../lib/permissions';
 
 type Tab = 'workflow' | 'profile' | 'access' | 'display' | 'export';
 
@@ -49,7 +50,11 @@ const profileText = (list: ProfileRow[]) => list.map((p) => [
 export default function SettingsScreen({ items, editors, reviewers, publishers, gdMembers }: {
   items: ManuscriptRow[]; editors: ProfileRow[]; reviewers: ProfileRow[]; publishers: ProfileRow[]; gdMembers: ProfileRow[];
 }) {
+  const { can } = usePermissions();
+  const canExport = can('SETTINGS', 'EXPORT');
+  const visibleTabs = TABS.filter((t) => t.key !== 'export' || canExport);
   const [tab, setTab] = useState<Tab>('workflow');
+  useEffect(() => { if (tab === 'export' && !canExport) setTab('workflow'); }, [tab, canExport]);
   const [draft, setDraft] = useState<JournalSettings>(getSettings());
   const [display, setDisplay] = useState<DisplayPrefs>(getDisplayPrefs());
   const [loading, setLoading] = useState(true);
@@ -150,7 +155,7 @@ export default function SettingsScreen({ items, editors, reviewers, publishers, 
       )}
 
       <div className="bg-white border border-slate-200 rounded-3xl px-4 py-4 flex flex-wrap gap-2">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)} className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold ${tab === t.key ? 'bg-[#0f766e] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
             {t.icon} {t.label}
           </button>
@@ -244,7 +249,7 @@ export default function SettingsScreen({ items, editors, reviewers, publishers, 
               </div>
             )}
 
-            {tab === 'export' && (
+            {tab === 'export' && canExport && (
               <div className="space-y-6">
                 <div>
                   <h2 className="text-lg font-black text-slate-900">Data & export</h2>

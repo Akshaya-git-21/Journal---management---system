@@ -9,6 +9,7 @@ import GDMemberProductionDetail from './production/GDMemberProductionDetail';
 import GDMemberPublicationDetail from './production/GDMemberPublicationDetail';
 import JournalTemplateSection from './production/JournalTemplateSection';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
+import { usePermissions } from '../lib/permissions';
 
 interface GDMemberWorkspaceProps {
   currentUser?: { name: string; email: string; role: Role } | null;
@@ -28,6 +29,7 @@ interface GDMemberWorkspaceProps {
  * GD_MEMBER's table grants are SELECT-only (0050_gd_member_production_read_access.sql).
  */
 export default function GDMemberWorkspace({ currentUser, onSignOut }: GDMemberWorkspaceProps) {
+  const { can } = usePermissions();
   const [activeView, setActiveView] = useState<GDMemberProductionView>('QUEUE');
   const [expanded, setExpanded] = useState(true);
   const [publicationExpanded, setPublicationExpanded] = useState(true);
@@ -71,35 +73,39 @@ export default function GDMemberWorkspace({ currentUser, onSignOut }: GDMemberWo
           <SidebarThemeContext.Provider value="light">
           <SidebarBrand />
           <div className="px-3 pb-6">
-            <NavGroup title="Production" icon={<Printer className="w-4 h-4" />} expanded={expanded} onToggle={() => setExpanded((v) => !v)}>
-              {PRODUCTION_NAV_ITEMS.map((item) => (
+            {can('PRODUCTION', 'VIEW') && (
+              <NavGroup title="Production" icon={<Printer className="w-4 h-4" />} expanded={expanded} onToggle={() => setExpanded((v) => !v)}>
+                {PRODUCTION_NAV_ITEMS.map((item) => (
+                  <NavItem
+                    key={item.key}
+                    icon={item.icon}
+                    label={item.label}
+                    active={activeView === item.key && !selectedId && !showTemplate}
+                    onClick={() => { setActiveView(item.key); setSelectedId(null); setShowTemplate(false); }}
+                  />
+                ))}
                 <NavItem
-                  key={item.key}
-                  icon={item.icon}
-                  label={item.label}
-                  active={activeView === item.key && !selectedId && !showTemplate}
-                  onClick={() => { setActiveView(item.key); setSelectedId(null); setShowTemplate(false); }}
+                  icon={<FileText className="w-4 h-4" />}
+                  label="PDF Template"
+                  active={showTemplate}
+                  onClick={() => { setShowTemplate(true); setSelectedId(null); }}
                 />
-              ))}
-              <NavItem
-                icon={<FileText className="w-4 h-4" />}
-                label="PDF Template"
-                active={showTemplate}
-                onClick={() => { setShowTemplate(true); setSelectedId(null); }}
-              />
-            </NavGroup>
+              </NavGroup>
+            )}
 
-            <NavGroup title="Publication" icon={<Globe className="w-4 h-4" />} expanded={publicationExpanded} onToggle={() => setPublicationExpanded((v) => !v)}>
-              {PUBLICATION_NAV_ITEMS.map((item) => (
-                <NavItem
-                  key={item.key}
-                  icon={item.icon}
-                  label={item.label}
-                  active={activeView === item.key && !selectedId && !showTemplate}
-                  onClick={() => { setActiveView(item.key); setSelectedId(null); setShowTemplate(false); }}
-                />
-              ))}
-            </NavGroup>
+            {can('PUBLICATION', 'VIEW') && (
+              <NavGroup title="Publication" icon={<Globe className="w-4 h-4" />} expanded={publicationExpanded} onToggle={() => setPublicationExpanded((v) => !v)}>
+                {PUBLICATION_NAV_ITEMS.map((item) => (
+                  <NavItem
+                    key={item.key}
+                    icon={item.icon}
+                    label={item.label}
+                    active={activeView === item.key && !selectedId && !showTemplate}
+                    onClick={() => { setActiveView(item.key); setSelectedId(null); setShowTemplate(false); }}
+                  />
+                ))}
+              </NavGroup>
+            )}
           </div>
           <SidebarDecoration />
           </SidebarThemeContext.Provider>

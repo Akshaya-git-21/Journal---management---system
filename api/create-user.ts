@@ -12,7 +12,26 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+/** Appends one entry to the activity log. Never throws: logging must not break the action. */
+async function recordActivity(client: any, actor: any, entry: { action: string; target?: any; details?: Record<string, unknown> }) {
+  try {
+    const { error } = await client.from('activity_log').insert({
+      category: 'user_management',
+      action: entry.action,
+      actor_id: actor?.id ?? null, actor_name: actor?.name ?? null, actor_email: actor?.email ?? null, actor_role: actor?.role ?? null,
+      target_id: entry.target?.id ?? null, target_name: entry.target?.name ?? null, target_email: entry.target?.email ?? null, target_role: entry.target?.role ?? null,
+      details: entry.details ?? {},
+    });
+    if (error) console.error('[activity] could not write the activity log:', error.message);
+  } catch (e: any) {
+    console.error('[activity] could not write the activity log:', e?.message);
+  }
+}
+
 const ALLOWED_ROLES = ['EDITOR', 'REVIEWER', 'PUBLISHER', 'GD_MEMBER'];
+// Module-wise access control (Phase 3): which Access-page module governs
+// creating each target role. See supabase/migrations/0118_module_access_control.sql.
+const MODULE_FOR_ROLE: Record<string, string> = { EDITOR: 'EDITORIAL_BOARD', REVIEWER: 'REVIEWERS', PUBLISHER: 'PUBLISHERS', GD_MEMBER: 'GD_MEMBERS' };
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
@@ -63,7 +82,7 @@ export default async function handler(req: any, res: any) {
 
     const { data: callerProfile, error: profileError } = await supabaseAdmin
       .from('profiles')
-      .select('role, status')
+      .select('id, name, email, role, status')
       .eq('id', tokenUser.user.id)
       .single();
 
@@ -73,6 +92,12 @@ export default async function handler(req: any, res: any) {
     }
     if (callerProfile.role !== 'COORDINATOR' || callerProfile.status !== 'ACTIVE') {
       res.status(403).json({ error: 'Forbidden: Only an active Coordinator can create Editor/Reviewer/Publisher/GD Member accounts.' });
+      return;
+    }
+
+    const { data: allowed, error: permError } = await supabaseAdmin.rpc('has_permission', { p_user_id: callerProfile.id, p_module: MODULE_FOR_ROLE[role], p_action: 'CREATE' });
+    if (permError || !allowed) {
+      res.status(403).json({ error: 'Forbidden: You do not have permission to create this kind of account.' });
       return;
     }
 
@@ -92,6 +117,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    await recordActivity(supabaseAdmin, callerProfile, { action: 'user_created', target: { id: data.user?.id, name: fullName, email, role }, details: { created_by: 'coordinator' } });
     res.status(200).json({ user: data.user });
   } catch (error: any) {
     console.error('[api/create-user] Unexpected error:', error);

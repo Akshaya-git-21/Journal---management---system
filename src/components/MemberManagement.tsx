@@ -12,18 +12,24 @@ const ROLE_LABELS: Record<string, string> = {
 const EDITORIAL_ROLES = ['Editorial Board', 'Editor-in-Chief', 'Associate Editor', 'Section Editor'];
 
 /** Edit / Delete icon buttons shared by the Editorial Board, Reviewers,
- * Publishers and GD Members tables. */
-export function MemberRowActions({ profile, onEdit, onDelete }: { profile: ProfileRow; onEdit: (p: ProfileRow) => void; onDelete: (p: ProfileRow) => void }) {
+ * Publishers and GD Members tables. Pass canEdit/canDelete=false (Access page
+ * permissions) to hide the corresponding icon for people who aren't allowed. */
+export function MemberRowActions({ profile, onEdit, onDelete, canEdit = true, canDelete = true }: { profile: ProfileRow; onEdit: (p: ProfileRow) => void; onDelete: (p: ProfileRow) => void; canEdit?: boolean; canDelete?: boolean }) {
+  if (!canEdit && !canDelete) return null;
   return (
     <span className="inline-flex items-center gap-1">
-      <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(profile); }} title="Edit" aria-label={`Edit ${profile.name}`}
-        className="rounded-full p-2 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
-        <Pencil className="h-4 w-4" />
-      </button>
-      <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(profile); }} title="Delete" aria-label={`Delete ${profile.name}`}
-        className="rounded-full p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition-colors">
-        <Trash2 className="h-4 w-4" />
-      </button>
+      {canEdit && (
+        <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(profile); }} title="Edit" aria-label={`Edit ${profile.name}`}
+          className="rounded-full p-2 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 transition-colors">
+          <Pencil className="h-4 w-4" />
+        </button>
+      )}
+      {canDelete && (
+        <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(profile); }} title="Delete" aria-label={`Delete ${profile.name}`}
+          className="rounded-full p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition-colors">
+          <Trash2 className="h-4 w-4" />
+        </button>
+      )}
     </span>
   );
 }

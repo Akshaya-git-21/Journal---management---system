@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { getSettings } from './settings';
+import { logAuthEvent } from './activityEvents';
 import { Role, ProfileStatus } from '../types';
 
 export interface AuthUser {
@@ -96,11 +97,23 @@ export async function registerAccount(
   return { requiresEmailConfirmation: false, pendingApproval: false, user: toAuthUser(profile) };
 }
 
+// Author/Reviewer/Editor must sign in through the portal matching their own
+// account role; Coordinator/Publisher/GD Member/Admin may sign in through any
+// portal (there's no portal option for their own role to begin with). This is
+// a UX guard only -- the selected portal never changes which role/dashboard
+// the account actually gets; that's still resolved solely from the account's
+// own profile row below.
+const PORTAL_LOCKED_ROLES: Role[] = ['AUTHOR', 'REVIEWER', 'EDITOR'];
+const PORTAL_LABEL: Record<string, string> = { AUTHOR: 'Author', REVIEWER: 'Reviewer', EDITOR: 'Editor' };
+
 /**
  * Logs in with real credentials only. Role is resolved from the account's
- * own profile row -- it is never taken from client input.
+ * own profile row -- it is never taken from client input. `selectedPortal`
+ * (the portal button the person picked on the login screen) is used only to
+ * reject a mismatched portal for Author/Reviewer/Editor accounts; passing it
+ * never grants or changes access.
  */
-export async function loginAccount(email: string, password: string): Promise<AuthUser> {
+export async function loginAccount(email: string, password: string, selectedPortal?: Role): Promise<AuthUser> {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
@@ -108,6 +121,7 @@ export async function loginAccount(email: string, password: string): Promise<Aut
     // and an email with no account -- ask the server which one it is.
     if (error.code === 'invalid_credentials' || /invalid login credentials/i.test(error.message || '')) {
       if ((await accountExists(email)) === false) throw new Error('Account not exists');
+      void logAuthEvent('sign_in_failed', { email, reason: 'invalid_credentials' });
     }
     throw new Error(error.message || 'Invalid email or password.');
   }
@@ -122,25 +136,37 @@ export async function loginAccount(email: string, password: string): Promise<Aut
   }
 
   if (profile.status === 'PENDING_APPROVAL') {
+    void logAuthEvent('sign_in_failed', { email, reason: 'awaiting_approval' });
     await supabase.auth.signOut();
-    throw new Error(`Your ${profile.requested_role.toLowerCase()} account is awaiting Coordinator approval.`);
+    throw new Error(`Your ${profile.requested_role.toLowerCase()} account is awaiting approval from an Admin.`);
   }
 
   if (profile.status === 'REJECTED') {
+    void logAuthEvent('sign_in_failed', { email, reason: 'request_rejected' });
     await supabase.auth.signOut();
     throw new Error('This account request was rejected. Contact your Coordinator.');
   }
 
   if (profile.status === 'INACTIVE') {
+    void logAuthEvent('sign_in_failed', { email, reason: 'account_deactivated' });
     await supabase.auth.signOut();
     throw new Error('Account is deactivated. Contact your Coordinator to reactivate it.');
   }
 
   if (profile.status === 'DELETED') {
+    void logAuthEvent('sign_in_failed', { email, reason: 'account_closed' });
     await supabase.auth.signOut();
     throw new Error('Account not exists');
   }
 
+  const actualRole = (profile.role || profile.requested_role) as Role;
+  if (selectedPortal && PORTAL_LOCKED_ROLES.includes(actualRole) && selectedPortal !== actualRole) {
+    void logAuthEvent('sign_in_failed', { email, reason: 'portal_mismatch' });
+    await supabase.auth.signOut();
+    throw new Error(`This account is registered as ${PORTAL_LABEL[actualRole]}. Please choose the ${PORTAL_LABEL[actualRole]} portal to sign in.`);
+  }
+
+  void logAuthEvent('sign_in');
   return toAuthUser(profile);
 }
 
@@ -162,6 +188,7 @@ async function accountExists(email: string): Promise<boolean | null> {
 }
 
 export async function logoutAccount(): Promise<void> {
+  await logAuthEvent('sign_out');
   await supabase.auth.signOut();
 }
 
@@ -174,7 +201,7 @@ export async function logoutAccount(): Promise<void> {
  * what produces "Unauthorized: session invalid or expired" from the server,
  * even though the user never actually signed out.
  */
-async function getFreshAccessToken(): Promise<string | null> {
+export async function getFreshAccessToken(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
   let session = data.session;
   const expiresInMs = session ? session.expires_at! * 1000 - Date.now() : -Infinity;
@@ -366,6 +393,7 @@ export async function requestPasswordReset(email: string): Promise<void> {
     redirectTo: `${window.location.origin}/?mode=reset-password`
   });
   if (error) throw new Error(error.message);
+  void logAuthEvent('password_reset_requested', { email });
 }
 
 export async function resetPasswordWithToken(newPassword: string, confirmPassword: string): Promise<void> {
@@ -383,6 +411,7 @@ export async function resetPasswordWithToken(newPassword: string, confirmPasswor
 
   const { error } = await supabase.auth.updateUser({ password: newPassword });
   if (error) throw new Error(error.message || 'Failed to update password.');
+  void logAuthEvent('password_changed', { method: 'reset_link' });
 }
 
 export async function verifyResetToken(): Promise<boolean> {

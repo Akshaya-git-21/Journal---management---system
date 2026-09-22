@@ -20,6 +20,25 @@ import {
   FileText
 } from 'lucide-react';
 
+// Public-facing role options only -- Coordinator, Publisher, GD Member and
+// Admin are internal roles, created only through the existing authorized
+// user-management flows (Coordinator's "Invite ..." actions, Admin's People
+// page), never through this public screen. Kept as two separately named
+// lists (even though their values match today) so Login and Sign Up can
+// diverge later without one accidentally changing the other -- neither list
+// determines authorization; that's resolved from the account's own stored
+// role after sign-in, same as before.
+const LOGIN_PUBLIC_ROLES: { role: Role; label: string }[] = [
+  { role: 'AUTHOR', label: 'Author' },
+  { role: 'REVIEWER', label: 'Reviewer' },
+  { role: 'EDITOR', label: 'Editor' },
+];
+const SIGNUP_PUBLIC_ROLES: { role: Role; label: string }[] = [
+  { role: 'AUTHOR', label: 'Author' },
+  { role: 'REVIEWER', label: 'Reviewer' },
+  { role: 'EDITOR', label: 'Editor' },
+];
+
 interface AuthPortalsProps {
   activeRole: Role;
   initialMode: 'LOGIN' | 'REGISTER' | 'FORGOT_PASSWORD';
@@ -149,6 +168,19 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
           label: 'Project Coordinator Console',
           focusBorder: 'focus:border-[#008751] focus:ring-[#008751]',
         };
+      case 'ADMIN':
+        return {
+          primary: 'emerald',
+          bg: 'bg-[#008751]',
+          hover: 'hover:bg-[#007043]',
+          ring: 'focus:ring-[#008751]',
+          border: 'border-slate-200',
+          text: 'text-[#008751]',
+          labelText: 'text-[#008751]',
+          labelBg: 'bg-[#f0fdf4] border border-[#bbf7d0]/60',
+          label: 'Administration Console',
+          focusBorder: 'focus:border-[#008751] focus:ring-[#008751]',
+        };
       case 'GD_MEMBER':
         return {
           primary: 'emerald',
@@ -252,7 +284,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
           setEmail('');
           setPassword('');
         } else if (result.pendingApproval) {
-          setSuccessMsg(`Account request submitted. A Coordinator must approve ${localRole.toLowerCase()} access before you can log in.`);
+          setSuccessMsg(`Account request submitted. An Admin must approve ${localRole.toLowerCase()} access before you can log in.`);
           setMode('LOGIN');
           setEmail('');
           setPassword('');
@@ -264,7 +296,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
         }
       } else {
         const cleanEmail = email.trim().toLowerCase();
-        const user = await loginAccount(cleanEmail, password);
+        const user = await loginAccount(cleanEmail, password, localRole);
         setSuccessMsg(`Signed in as ${user.name}.`);
         setTimeout(() => {
           onSuccessAuth({ name: user.name, email: user.email, role: user.role });
@@ -757,6 +789,25 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                   </>
                 )}
 
+                {/* ADMIN SPECIFIC REGISTRATION */}
+                {localRole === 'ADMIN' && (
+                  <div className="sm:col-span-2">
+                    <label className={labelStyle}>Full Name</label>
+                    <div className="relative flex items-center shadow-xs rounded-lg">
+                      <User className="absolute left-3 w-4 h-4 text-slate-400" />
+                      <input
+                        id="reg-admin-fullname"
+                        type="text"
+                        required
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder="Alex Morgan"
+                        className={inputStyle}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* PUBLISHER SPECIFIC REGISTRATION */}
                 {localRole === 'PUBLISHER' && (
                   <>
@@ -883,14 +934,8 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
               <label className="block text-[10px] font-sans font-medium uppercase tracking-wider text-slate-500 select-none">
                 {mode === 'REGISTER' ? 'Register As' : 'Portal'}
               </label>
-              <div className="grid grid-cols-5 gap-1">
-                {[
-                  { role: 'AUTHOR' as Role, label: 'Author' },
-                  { role: 'REVIEWER' as Role, label: 'Reviewer' },
-                  { role: 'EDITOR' as Role, label: 'Editor' },
-                  { role: 'PUBLISHER' as Role, label: 'Publisher' },
-                  { role: 'COORDINATOR' as Role, label: 'Coordinator' }
-                ].map(({ role, label }) => {
+              <div className="grid grid-cols-3 gap-1">
+                {(mode === 'LOGIN' ? LOGIN_PUBLIC_ROLES : SIGNUP_PUBLIC_ROLES).map(({ role, label }) => {
                   const isSelected = localRole === role;
                   return (
                     <button
@@ -912,12 +957,12 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
               </div>
               {mode === 'REGISTER' && localRole !== 'AUTHOR' && (
                 <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 font-semibold">
-                  {localRole.charAt(0) + localRole.slice(1).toLowerCase()} accounts require Coordinator approval before login.
+                  {`${localRole.charAt(0) + localRole.slice(1).toLowerCase()} accounts require approval from an Admin before login.`}
                 </p>
               )}
               {mode === 'LOGIN' && (
                 <p className="text-[10px] text-slate-400 font-semibold px-0.5">
-                  This selects the portal look only -- your account's own role decides what you can access.
+                  Author, Reviewer and Editor accounts must sign in through their own portal. Your account's own role always decides what you can access.
                 </p>
               )}
             </div>

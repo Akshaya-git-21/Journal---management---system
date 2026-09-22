@@ -22,6 +22,7 @@ import { NavGroup, NavItem } from './SidebarNavGroup';
 import { SidebarBrand, SidebarDecoration, TopBar } from './RoleChrome';
 import { StatusStatCard } from './StatusStatCard';
 import { SidebarThemeContext, LIGHT_SIDEBAR_SURFACE, LIGHT_PAGE_SURFACE } from './sidebarTheme';
+import { usePermissions } from '../lib/permissions';
 import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, AlertCircle, ChevronDown, Settings, Trash2, User, Send, Eye, Pencil, CheckCircle2, Newspaper } from 'lucide-react';
 
 interface AuthorWorkspaceProps {
@@ -44,6 +45,7 @@ function getProgressTimeline(status: ManuscriptStatus) {
 }
 
 export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorkspaceProps) {
+  const { can } = usePermissions();
   const [items, setItems] = useState<ManuscriptRow[]>([]);
   const [selectedDetail, setSelectedDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -609,6 +611,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
           {/* Menu */}
           <div className="space-y-3">
+            {can('MY_SUBMISSIONS', 'VIEW') && (
             <NavGroup title="My Submissions" icon={<Send className="w-4 h-4" />} expanded={submissionsGroupExpanded} onToggle={() => setSubmissionsGroupExpanded((v) => !v)}>
               {([
                 { id: 'active', label: 'Active', count: items.filter(m => !['DRAFT', 'REJECTED', 'PUBLISHED'].includes(m.status)).length, icon: <Send className="w-4 h-4" /> },
@@ -629,6 +632,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                 />
               ))}
             </NavGroup>
+            )}
           </div>
           </div>
           <SidebarDecoration />
@@ -646,7 +650,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
           left={
             <h1 className="whitespace-nowrap text-2xl font-black leading-tight text-[#0a2e22]">My Manuscripts</h1>
           }
-          leading={view !== 'new' ? (
+          leading={view !== 'new' && can('MY_SUBMISSIONS', 'CREATE') ? (
             <button
               onClick={() => { setResumeDraft(null); setView('new'); }}
               className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer"

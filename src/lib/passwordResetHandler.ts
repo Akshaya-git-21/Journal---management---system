@@ -10,6 +10,22 @@
  */
 import { supabaseAdmin } from './supabaseAdmin.js';
 
+/** Appends one entry to the activity log. Never throws: logging must not break the action. */
+async function recordActivity(client: any, actor: any, entry: { action: string; target?: any; details?: Record<string, unknown> }) {
+  try {
+    const { error } = await client.from('activity_log').insert({
+      category: 'user_management',
+      action: entry.action,
+      actor_id: actor?.id ?? null, actor_name: actor?.name ?? null, actor_email: actor?.email ?? null, actor_role: actor?.role ?? null,
+      target_id: entry.target?.id ?? null, target_name: entry.target?.name ?? null, target_email: entry.target?.email ?? null, target_role: entry.target?.role ?? null,
+      details: entry.details ?? {},
+    });
+    if (error) console.error('[activity] could not write the activity log:', error.message);
+  } catch (e: any) {
+    console.error('[activity] could not write the activity log:', e?.message);
+  }
+}
+
 export interface PasswordResetResult {
   status: number;
   body: { error: string } | { success: true; message: string };
@@ -44,7 +60,7 @@ export async function handlePasswordResetRequest(
 
   const { data: callerProfile, error: profileError } = await supabaseAdmin
     .from('profiles')
-    .select('role, status')
+    .select('id, name, email, role, status')
     .eq('id', callerUserId)
     .single();
 
@@ -61,7 +77,7 @@ export async function handlePasswordResetRequest(
   // instead of an opaque Supabase Auth failure.
   const { data: targetProfile, error: targetError } = await supabaseAdmin
     .from('profiles')
-    .select('id, role')
+    .select('id, name, email, role')
     .eq('id', userId)
     .maybeSingle();
 
@@ -78,5 +94,6 @@ export async function handlePasswordResetRequest(
     return { status: 400, body: { error: `Supabase Auth error: ${updateError.message}` } };
   }
 
+  await recordActivity(supabaseAdmin, callerProfile, { action: 'password_reset', target: targetProfile, details: { by: 'coordinator' } });
   return { status: 200, body: { success: true, message: 'Password updated successfully.' } };
 }

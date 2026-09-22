@@ -46,6 +46,7 @@ import EditorEvaluationSidebar from './EditorEvaluationSidebar';
 import FilePreviewModal from './FilePreviewModal';
 import EditorRevisionReview from './EditorRevisionReview';
 import EditorProductionVerification from './production/EditorProductionVerification';
+import { usePermissions } from '../lib/permissions';
 import { getProduction, getCorrections, subscribeToProduction, ProductionRow, CorrectionRow } from '../lib/production';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 
@@ -227,6 +228,7 @@ function ReviewerReplacementInline({ assignment, excludedEmails, hasPendingRepla
 }
 
 export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorkspaceProps) {
+  const { can } = usePermissions();
   const [rows, setRows] = useState<EditorManuscriptDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
@@ -460,6 +462,7 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
         <SidebarBrand />
 
         <nav className="flex-1 px-3 pb-6 overflow-y-auto">
+          {can('SUBMISSIONS', 'VIEW') && (
           <div className="border-t border-[#d9dccb] first:border-t-0 py-3">
             <button
               onClick={() => toggleSection('submissions')}
@@ -492,7 +495,9 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
               </div>
             )}
           </div>
+          )}
 
+          {can('REVIEW_STAGES', 'VIEW') && (
           <div className="border-t border-[#d9dccb] first:border-t-0 py-3">
             <button
               onClick={() => toggleSection('reviewStages')}
@@ -525,7 +530,9 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
               </div>
             )}
           </div>
+          )}
 
+          {can('COPYEDIT_PRODUCTION', 'VIEW') && (
           <div className="border-t border-[#d9dccb] first:border-t-0 py-3">
             <button
               onClick={() => toggleSection('copyedit')}
@@ -558,6 +565,7 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
               </div>
             )}
           </div>
+          )}
         </nav>
         <SidebarDecoration />
         </SidebarThemeContext.Provider>

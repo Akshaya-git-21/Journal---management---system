@@ -98,6 +98,35 @@ async function startServer() {
     }
   });
 
+  // Admin: create / edit / reset password / delete users and review Admin sign-ups
+  // (Admin only). The Vercel function at api/admin-users.ts serves the same route
+  // in production.
+  app.post("/api/admin-users", async (req, res) => {
+    try {
+      const { handleAdminUsersRequest } = await import("./src/lib/adminUsersHandler.ts");
+      const result = await handleAdminUsersRequest(req.headers.authorization, req.body || {});
+      return res.status(result.status).json(result.body);
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || 'Unable to manage users.' });
+    }
+  });
+
+  // Activity log: sign-in / sign-out / failed sign-in / password events. The Vercel
+  // function at api/activity.ts serves the same route in production.
+  app.post("/api/activity", async (req, res) => {
+    try {
+      const { handleActivityRequest } = await import("./src/lib/activityHandler.ts");
+      const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+      const result = await handleActivityRequest(req.headers.authorization, req.body || {}, {
+        ip: forwarded || req.socket.remoteAddress || undefined,
+        userAgent: String(req.headers["user-agent"] || ""),
+      });
+      return res.status(result.status).json(result.body);
+    } catch (error: any) {
+      return res.status(500).json({ error: "Unable to record the event." });
+    }
+  });
+
   // Public: does an account exist for this email? (login form only -- returns a boolean)
   app.post("/api/account-status", async (req, res) => {
     try {

@@ -15,6 +15,7 @@ import { NavGroup, NavItem } from './SidebarNavGroup';
 import { SidebarBrand, SidebarDecoration, TopBar } from './RoleChrome';
 import { SidebarThemeContext, LIGHT_SIDEBAR_SURFACE, LIGHT_PAGE_SURFACE } from './sidebarTheme';
 import FilePreviewModal from './FilePreviewModal';
+import { usePermissions } from '../lib/permissions';
 import {
   Loader2, Check, X as XIcon, ChevronDown, User, AlertTriangle, ClipboardList, CheckCircle2, XCircle,
   FileText, Lock, Eye, History, Star, BarChart3, Download, ClipboardCheck, Upload, Trash2
@@ -57,6 +58,7 @@ const TAB_META: Record<string, { title: string; subtitle: string }> = {
 };
 
 export default function ReviewerWorkspace({ currentUser, onSignOut }: ReviewerWorkspaceProps) {
+  const { can } = usePermissions();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
@@ -181,28 +183,34 @@ export default function ReviewerWorkspace({ currentUser, onSignOut }: ReviewerWo
 
         {/* Menu */}
         <div className="space-y-3">
-          <NavGroup title="My Active Assignments" icon={<AlertTriangle className="w-4 h-4" />} expanded={expandedNavGroups.assignments} onToggle={() => toggleNavGroup('assignments')}>
-            {menuItems.slice(0, 2).map((item) => (
-              <NavItem key={item.id} icon={item.icon} label={item.label} count={item.count} active={activeTab === item.id} onClick={() => setActiveTab(item.id)} />
-            ))}
-          </NavGroup>
+          {can('MY_ASSIGNMENTS', 'VIEW') && (
+            <NavGroup title="My Active Assignments" icon={<AlertTriangle className="w-4 h-4" />} expanded={expandedNavGroups.assignments} onToggle={() => toggleNavGroup('assignments')}>
+              {menuItems.slice(0, 2).map((item) => (
+                <NavItem key={item.id} icon={item.icon} label={item.label} count={item.count} active={activeTab === item.id} onClick={() => setActiveTab(item.id)} />
+              ))}
+            </NavGroup>
+          )}
 
-          <NavGroup title="Review Status" icon={<CheckCircle2 className="w-4 h-4" />} expanded={expandedNavGroups.status} onToggle={() => toggleNavGroup('status')}>
-            {menuItems.slice(2).map((item) => (
-              <NavItem key={item.id} icon={item.icon} label={item.label} count={item.count} active={activeTab === item.id} onClick={() => setActiveTab(item.id)} />
-            ))}
-          </NavGroup>
+          {can('REVIEW_STATUS', 'VIEW') && (
+            <NavGroup title="Review Status" icon={<CheckCircle2 className="w-4 h-4" />} expanded={expandedNavGroups.status} onToggle={() => toggleNavGroup('status')}>
+              {menuItems.slice(2).map((item) => (
+                <NavItem key={item.id} icon={item.icon} label={item.label} count={item.count} active={activeTab === item.id} onClick={() => setActiveTab(item.id)} />
+              ))}
+            </NavGroup>
+          )}
 
-          <NavGroup title="Additional Modules" icon={<Star className="w-4 h-4" />} expanded={expandedNavGroups.modules} onToggle={() => toggleNavGroup('modules')}>
-            {([
-              { id: 'INVITES' as const, label: 'Active Review Invites', count: counts.invites, icon: <Eye className="w-4 h-4" /> },
-              { id: 'HISTORY' as const, label: 'Historic Logs', count: 0, icon: <History className="w-4 h-4" /> },
-              { id: 'RUBRIC' as const, label: 'Scoring Rubric', count: 0, icon: <Star className="w-4 h-4" /> },
-              { id: 'PERFORMANCE' as const, label: 'Performance Score', count: 0, icon: <BarChart3 className="w-4 h-4" /> },
-            ]).map((item) => (
-              <NavItem key={item.id} icon={item.icon} label={item.label} count={item.count} active={activeTab === item.id} onClick={() => { setActiveTab(item.id); setSelectedManuscriptId(null); }} />
-            ))}
-          </NavGroup>
+          {can('ADDITIONAL_MODULES', 'VIEW') && (
+            <NavGroup title="Additional Modules" icon={<Star className="w-4 h-4" />} expanded={expandedNavGroups.modules} onToggle={() => toggleNavGroup('modules')}>
+              {([
+                { id: 'INVITES' as const, label: 'Active Review Invites', count: counts.invites, icon: <Eye className="w-4 h-4" /> },
+                { id: 'HISTORY' as const, label: 'Historic Logs', count: 0, icon: <History className="w-4 h-4" /> },
+                { id: 'RUBRIC' as const, label: 'Scoring Rubric', count: 0, icon: <Star className="w-4 h-4" /> },
+                { id: 'PERFORMANCE' as const, label: 'Performance Score', count: 0, icon: <BarChart3 className="w-4 h-4" /> },
+              ]).map((item) => (
+                <NavItem key={item.id} icon={item.icon} label={item.label} count={item.count} active={activeTab === item.id} onClick={() => { setActiveTab(item.id); setSelectedManuscriptId(null); }} />
+              ))}
+            </NavGroup>
+          )}
         </div>
         </div>
         <SidebarDecoration />
@@ -859,6 +867,7 @@ function ManuscriptDetail({ row, onBack, onChanged, onReviewSubmitted, onAssignm
 }
 
 function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisionNumber, open, onOpenChange }: { manuscript: ManuscriptRow; assignmentId: string; onSubmitted: () => void; isReReview: boolean; revisionNumber: number; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { can } = usePermissions();
   const [responses, setResponses] = useState<Record<string, { answer: boolean | null; reason: string }>>(
     () => Object.fromEntries(PEER_REVIEW_QUESTIONS.map(q => [q.id, { answer: null, reason: '' }]))
   );
@@ -1226,9 +1235,11 @@ function ReviewForm({ manuscript, assignmentId, onSubmitted, isReReview, revisio
                           <Eye className="w-4 h-4 text-slate-600" />
                         </a>
                       )}
-                      <button onClick={() => handleRemoveAttachment(a.id)} className="p-1.5 hover:bg-red-50 rounded transition" title="Remove">
-                        <Trash2 className="w-4 h-4 text-red-500" />
-                      </button>
+                      {can('MY_ASSIGNMENTS', 'DELETE') && (
+                        <button onClick={() => handleRemoveAttachment(a.id)} className="p-1.5 hover:bg-red-50 rounded transition" title="Remove">
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}

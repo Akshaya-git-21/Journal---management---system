@@ -11,6 +11,7 @@ import {
 import { listProduction, subscribeToProduction, setPublisherTaskStatus, getProofs, ProductionRow } from '../lib/production';
 import { supabase } from '../lib/supabase';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
+import { usePermissions } from '../lib/permissions';
 import {
   FileText, CheckCircle2, XCircle, AlertTriangle, Hash, BookOpen, Settings, Users, CheckSquare,
   LayoutGrid, ClipboardList, Clock, History, Eye, ExternalLink, BarChart3, Download, ShieldAlert,
@@ -80,6 +81,7 @@ async function analyzePdf(file: File): Promise<PdfAnalysis> {
 }
 
 export default function PublisherWorkspace({ currentUser, onSignOut }: PublisherWorkspaceProps) {
+  const { can } = usePermissions();
   const [manuscripts, setManuscripts] = useState<ManuscriptRow[]>([]);
   // Needed to scope Scheduled Publications / Publication Queue to manuscripts
   // actually assigned to THIS Publisher -- without it, every active
@@ -394,9 +396,9 @@ export default function PublisherWorkspace({ currentUser, onSignOut }: Publisher
                   (the tab content for those still exists below, just
                   unreachable, in case that restriction is ever lifted). */}
               <NavGroup title="Publication Management" icon={<ClipboardList className="w-4 h-4" />} expanded={expandedNavGroups.publication} onToggle={() => toggleNavGroup('publication')}>
-                <NavItem icon={<Clock className="w-4 h-4" />} label="Scheduled Publications" active={activeTab === 'SCHEDULED'} count={scheduled.length} onClick={() => setActiveTab('SCHEDULED')} />
-                <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Publication Queue" active={activeTab === 'QUEUE'} count={queue.length} onClick={() => setActiveTab('QUEUE')} />
-                <NavItem icon={<CheckCircle2 className="w-4 h-4" />} label="Published Articles" active={activeTab === 'PUBLISHED'} count={published.length} onClick={() => setActiveTab('PUBLISHED')} />
+                {can('SCHEDULED_PUBLICATIONS', 'VIEW') && <NavItem icon={<Clock className="w-4 h-4" />} label="Scheduled Publications" active={activeTab === 'SCHEDULED'} count={scheduled.length} onClick={() => setActiveTab('SCHEDULED')} />}
+                {can('PUBLICATION_QUEUE', 'VIEW') && <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Publication Queue" active={activeTab === 'QUEUE'} count={queue.length} onClick={() => setActiveTab('QUEUE')} />}
+                {can('PUBLISHED_ARTICLES', 'VIEW') && <NavItem icon={<CheckCircle2 className="w-4 h-4" />} label="Published Articles" active={activeTab === 'PUBLISHED'} count={published.length} onClick={() => setActiveTab('PUBLISHED')} />}
               </NavGroup>
             </nav>
           </div>
@@ -586,14 +588,20 @@ export default function PublisherWorkspace({ currentUser, onSignOut }: Publisher
               <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400 font-bold">Download Reports</p>
                 <p className="text-sm text-slate-500">Export the published-articles register as a CSV file.</p>
-                <button
-                  disabled={published.length === 0}
-                  onClick={() => downloadPublishedCsv(published)}
-                  className="inline-flex items-center gap-2 bg-[#008751] hover:bg-[#007043] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold px-5 py-2.5 rounded-xl"
-                >
-                  <Download className="w-4 h-4" /> Download Published Articles (CSV)
-                </button>
-                {published.length === 0 && <p className="text-xs text-slate-400">No published articles to export yet.</p>}
+                {can('PUBLISHED_ARTICLES', 'EXPORT') ? (
+                  <>
+                    <button
+                      disabled={published.length === 0}
+                      onClick={() => downloadPublishedCsv(published)}
+                      className="inline-flex items-center gap-2 bg-[#008751] hover:bg-[#007043] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold px-5 py-2.5 rounded-xl"
+                    >
+                      <Download className="w-4 h-4" /> Download Published Articles (CSV)
+                    </button>
+                    {published.length === 0 && <p className="text-xs text-slate-400">No published articles to export yet.</p>}
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-400">You don't have permission to export this data.</p>
+                )}
               </div>
             ) : activeTab === 'JOURNAL_SETTINGS' ? (
               <PlaceholderScreen title="Journal Settings" text="No journal configuration data is connected to this workspace yet." />

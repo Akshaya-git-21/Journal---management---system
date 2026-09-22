@@ -903,7 +903,7 @@ export async function listManagedProfilesByRole(role: 'EDITOR' | 'REVIEWER' | 'P
 }
 
 export async function listPendingApprovals(): Promise<ProfileRow[]> {
-  const { data, error } = await supabase.from('profiles').select('id, name, email, role, requested_role, status').eq('status', 'PENDING_APPROVAL').order('created_at', { ascending: true });
+  const { data, error } = await supabase.from('profiles').select('id, name, email, role, requested_role, status').eq('status', 'PENDING_APPROVAL').or('requested_role.is.null,requested_role.neq.ADMIN').order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
 }

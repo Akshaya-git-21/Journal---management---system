@@ -6,7 +6,7 @@ import { createEditorAccount, createReviewerAccount, createAndActivatePublisherA
 import {
   ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, StatusHistoryRow, SuggestedReviewerRow, ProfileRow, AuditLogRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getStatusHistory, getSuggestedReviewers,
-  listManagedProfilesByRole, listPendingApprovals, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished, sendToPublisher,
+  listManagedProfilesByRole, approveUserRole, getProfilesByIds, assignEditor, assignReviewers, publishDecision, markPublished, sendToPublisher,
   subscribeToManuscripts, PublishDecision, getRevisions, RevisionRow, getReviewerAssignmentCounts,
   getRecentStatusHistory, getOverdueReviewerAssignments, OverdueReviewRow, getRecentAuditLog,
   notifyExpiredReviewerReplacements, deleteManuscripts
@@ -25,6 +25,7 @@ import { NavGroup, NavItem } from './SidebarNavGroup';
 import { AssignmentConfirmationDialog } from './AssignmentConfirmationDialog';
 import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
 import { MemberRowActions, EditMemberModal, DeleteMemberModal } from "./MemberManagement";
+import { usePermissions } from '../lib/permissions';
 import ReportsAnalyticsDashboard from './ReportsAnalyticsDashboard';
 import SettingsScreen from './SettingsScreen';
 import { loadSettings, useJournalSettings } from '../lib/settings';
@@ -74,8 +75,8 @@ function StatusBadge({ manuscript, latestRevision, productionStatus }: { manuscr
 }
 
 export default function CoordinatorWorkspace({ currentUser, onSignOut }: CoordinatorWorkspaceProps) {
+  const { can } = usePermissions();
   const [items, setItems] = useState<ManuscriptRow[]>([]);
-  const [pendingApprovals, setPendingApprovals] = useState<ProfileRow[]>([]);
   const [editorialBoardProfiles, setEditorialBoardProfiles] = useState<ProfileRow[]>([]);
   const [reviewerProfiles, setReviewerProfiles] = useState<ProfileRow[]>([]);
   const [publisherProfiles, setPublisherProfiles] = useState<ProfileRow[]>([]);
@@ -91,8 +92,21 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
   const [productionByManuscript, setProductionByManuscript] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('ALL');
-  const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'PUBLISHERS' | 'GD_MEMBERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PENDING_APPROVALS' | 'PRODUCTION_QUEUE' | 'IN_PRODUCTION' | 'PROOFS_AWAITING_AUTHOR' | 'CORRECTIONS' | 'READY_FOR_PUBLICATION' | 'PDF_TEMPLATE'>('DASHBOARD');
+  const [activeSection, setActiveSection] = useState<'DASHBOARD' | 'MANUSCRIPT_QUEUE' | 'REVISIONS' | 'EDITORIAL_BOARD' | 'REVIEWERS' | 'PUBLISHERS' | 'GD_MEMBERS' | 'REPORTS' | 'PROTOCOLS' | 'COMMUNICATIONS' | 'SETTINGS' | 'AUDIT_TRAIL' | 'PRODUCTION_QUEUE' | 'IN_PRODUCTION' | 'PROOFS_AWAITING_AUTHOR' | 'CORRECTIONS' | 'READY_FOR_PUBLICATION' | 'PDF_TEMPLATE'>('DASHBOARD');
   const [expandedNavGroups, setExpandedNavGroups] = useState<Record<string, boolean>>({ workspace: true, people: true, system: true, production: true });
+  // Defense in depth: if an Admin revokes View on the section a Coordinator is
+  // currently sitting on (or it was restored from a stale cached state),
+  // bounce back to the Dashboard rather than leaving forbidden content up
+  // with its nav item hidden.
+  useEffect(() => {
+    const moduleForSection: Partial<Record<string, string>> = {
+      DASHBOARD: 'DASHBOARD', MANUSCRIPT_QUEUE: 'MANUSCRIPT_QUEUE', EDITORIAL_BOARD: 'EDITORIAL_BOARD',
+      REVIEWERS: 'REVIEWERS', PUBLISHERS: 'PUBLISHERS', GD_MEMBERS: 'GD_MEMBERS',
+      REPORTS: 'REPORTS', SETTINGS: 'SETTINGS', AUDIT_TRAIL: 'AUDIT_TRAIL',
+    };
+    const moduleKey = moduleForSection[activeSection];
+    if (moduleKey && !can(moduleKey, 'VIEW')) setActiveSection('DASHBOARD');
+  }, [activeSection, can]);
   const toggleNavGroup = (key: string) => setExpandedNavGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedManuscriptForRevision, setSelectedManuscriptForRevision] = useState<ManuscriptRow | null>(null);
@@ -406,9 +420,8 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
 
   const load = async () => {
     try {
-      const [rows, approvals, editors, reviewers, publishers, gdMembers, activity, overdue, production] = await Promise.all([
+      const [rows, editors, reviewers, publishers, gdMembers, activity, overdue, production] = await Promise.all([
         listManuscripts(),
-        listPendingApprovals(),
         listManagedProfilesByRole('EDITOR'),
         listManagedProfilesByRole('REVIEWER'),
         listManagedProfilesByRole('PUBLISHER'),
@@ -424,7 +437,6 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
       // 0085_hide_draft_manuscripts_from_coordinator.sql); this filter is
       // just defense-in-depth on the client.
       setItems(rows.filter((m) => m.status !== 'DRAFT'));
-      setPendingApprovals(approvals);
       setEditorialBoardProfiles(editors);
       setReviewerProfiles(reviewers);
       setPublisherProfiles(publishers);
@@ -503,7 +515,6 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
   const isCommunicationsSection = activeSection === 'COMMUNICATIONS';
   const isSettingsSection = activeSection === 'SETTINGS';
   const isAuditTrailSection = activeSection === 'AUDIT_TRAIL';
-  const isPendingApprovalsSection = activeSection === 'PENDING_APPROVALS';
   const isProductionQueueSection = activeSection === 'PRODUCTION_QUEUE';
   const isInProductionSection = activeSection === 'IN_PRODUCTION';
   const isProofsAwaitingAuthorSection = activeSection === 'PROOFS_AWAITING_AUTHOR';
@@ -518,23 +529,22 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
           <SidebarThemeContext.Provider value="light">
           <SidebarBrand />
           <div className="px-5 pb-6">
-            <NavGroup title="Workspace" icon={<LayoutGrid className="w-4 h-4" />} hasActive={isDashboardSection || isManuscriptQueueSection || isPendingApprovalsSection} expanded={expandedNavGroups.workspace} onToggle={() => toggleNavGroup('workspace')}>
-              <NavItem icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" active={isDashboardSection} onClick={() => { setActiveSection('DASHBOARD'); setSelectedId(null); }} />
-              <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Manuscript Queue" active={isManuscriptQueueSection} onClick={() => { setActiveSection('MANUSCRIPT_QUEUE'); setSelectedId(null); }} />
-              <NavItem icon={<ShieldCheck className="w-4 h-4" />} label="Pending Approvals" active={isPendingApprovalsSection} onClick={() => { setActiveSection('PENDING_APPROVALS'); setSelectedId(null); }} />
+            <NavGroup title="Workspace" icon={<LayoutGrid className="w-4 h-4" />} hasActive={isDashboardSection || isManuscriptQueueSection} expanded={expandedNavGroups.workspace} onToggle={() => toggleNavGroup('workspace')}>
+              {can('DASHBOARD', 'VIEW') && <NavItem icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" active={isDashboardSection} onClick={() => { setActiveSection('DASHBOARD'); setSelectedId(null); }} />}
+              {can('MANUSCRIPT_QUEUE', 'VIEW') && <NavItem icon={<ClipboardList className="w-4 h-4" />} label="Manuscript Queue" active={isManuscriptQueueSection} onClick={() => { setActiveSection('MANUSCRIPT_QUEUE'); setSelectedId(null); }} />}
             </NavGroup>
 
             <NavGroup title="People" icon={<Users className="w-4 h-4" />} hasActive={isEditorialBoardSection || isReviewersSection || isPublishersSection || isGDMembersSection} expanded={expandedNavGroups.people} onToggle={() => toggleNavGroup('people')}>
-              <NavItem icon={<BookOpen className="w-4 h-4" />} label="Editorial Board" active={isEditorialBoardSection} onClick={() => { setActiveSection('EDITORIAL_BOARD'); setSelectedId(null); }} />
-              <NavItem icon={<Users className="w-4 h-4" />} label="Reviewers" active={isReviewersSection} onClick={() => { setActiveSection('REVIEWERS'); setSelectedId(null); }} />
-              <NavItem icon={<Building2 className="w-4 h-4" />} label="Publishers" active={isPublishersSection} onClick={() => { setActiveSection('PUBLISHERS'); setSelectedId(null); }} />
-              <NavItem icon={<PackageCheck className="w-4 h-4" />} label="GD Members" active={isGDMembersSection} onClick={() => { setActiveSection('GD_MEMBERS'); setSelectedId(null); }} />
+              {can('EDITORIAL_BOARD', 'VIEW') && <NavItem icon={<BookOpen className="w-4 h-4" />} label="Editorial Board" active={isEditorialBoardSection} onClick={() => { setActiveSection('EDITORIAL_BOARD'); setSelectedId(null); }} />}
+              {can('REVIEWERS', 'VIEW') && <NavItem icon={<Users className="w-4 h-4" />} label="Reviewers" active={isReviewersSection} onClick={() => { setActiveSection('REVIEWERS'); setSelectedId(null); }} />}
+              {can('PUBLISHERS', 'VIEW') && <NavItem icon={<Building2 className="w-4 h-4" />} label="Publishers" active={isPublishersSection} onClick={() => { setActiveSection('PUBLISHERS'); setSelectedId(null); }} />}
+              {can('GD_MEMBERS', 'VIEW') && <NavItem icon={<PackageCheck className="w-4 h-4" />} label="GD Members" active={isGDMembersSection} onClick={() => { setActiveSection('GD_MEMBERS'); setSelectedId(null); }} />}
             </NavGroup>
 
             <NavGroup title="System" icon={<Cog className="w-4 h-4" />} hasActive={isReportsSection || isCommunicationsSection || isSettingsSection || isAuditTrailSection} expanded={expandedNavGroups.system} onToggle={() => toggleNavGroup('system')}>
-              <NavItem icon={<BarChart3 className="w-4 h-4" />} label="Reports & Analytics" active={isReportsSection} onClick={() => { setActiveSection('REPORTS'); setSelectedId(null); }} />
-              <NavItem icon={<Settings className="w-4 h-4" />} label="Settings" active={isSettingsSection} onClick={() => { setActiveSection('SETTINGS'); setSelectedId(null); }} />
-              <NavItem icon={<Activity className="w-4 h-4" />} label="Audit Trail" active={isAuditTrailSection} onClick={() => { setActiveSection('AUDIT_TRAIL'); setSelectedId(null); }} />
+              {can('REPORTS', 'VIEW') && <NavItem icon={<BarChart3 className="w-4 h-4" />} label="Reports & Analytics" active={isReportsSection} onClick={() => { setActiveSection('REPORTS'); setSelectedId(null); }} />}
+              {can('SETTINGS', 'VIEW') && <NavItem icon={<Settings className="w-4 h-4" />} label="Settings" active={isSettingsSection} onClick={() => { setActiveSection('SETTINGS'); setSelectedId(null); }} />}
+              {can('AUDIT_TRAIL', 'VIEW') && <NavItem icon={<Activity className="w-4 h-4" />} label="Audit Trail" active={isAuditTrailSection} onClick={() => { setActiveSection('AUDIT_TRAIL'); setSelectedId(null); }} />}
             </NavGroup>
           </div>
           <SidebarDecoration />
@@ -548,7 +558,6 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
               <DashboardOverviewScreen
                 items={items}
                 stageCounts={stageCounts}
-                pendingApprovals={pendingApprovals.length}
                 recentActivity={recentActivity}
                 overdueReviews={overdueReviews}
                 profiles={activityProfiles}
@@ -621,7 +630,7 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
                 onDelete={setMemberToDelete}
               />
             ) : isReportsSection ? (
-              <ReportsAnalyticsDashboard items={items} editors={editorialBoardProfiles.filter((p) => p.status === 'ACTIVE')} reviewers={reviewerProfiles.filter((p) => p.status === 'ACTIVE')} pendingApprovals={pendingApprovals.length} overdueReviews={overdueReviews.length} productionByManuscript={productionByManuscript} />
+              <ReportsAnalyticsDashboard items={items} editors={editorialBoardProfiles.filter((p) => p.status === 'ACTIVE')} reviewers={reviewerProfiles.filter((p) => p.status === 'ACTIVE')} overdueReviews={overdueReviews.length} productionByManuscript={productionByManuscript} />
             ) : isCommunicationsSection ? (
               <NotAvailableScreen title="Communications" text="Coordinator-wide messaging is not connected to a data source yet." />
             ) : isSettingsSection ? (
@@ -641,21 +650,7 @@ export default function CoordinatorWorkspace({ currentUser, onSignOut }: Coordin
             ) : isPdfTemplateSection ? (
               <JournalTemplateSection canUpload />
             ) : (
-              <PendingApprovalsScreen
-                approvals={pendingApprovals}
-                loading={loading}
-                onAction={async (id, approve) => {
-                  setLoading(true);
-                  try {
-                    await approveUserRole(id, approve);
-                    await load();
-                  } catch (e: any) {
-                    console.error(e.message);
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
-              />
+              null
             )}
             {generatedInviteCredentials ? (
               <div className="rounded-3xl border border-emerald-100 bg-emerald-50 p-5 shadow-sm">
@@ -986,44 +981,6 @@ function QueueTable({ items, onOpen, onDeleted, selectMode, onExitSelectMode, pr
   );
 }
 
-function PendingApprovalsScreen({ approvals, loading, onAction }: { approvals: ProfileRow[]; loading: boolean; onAction: (id: string, approve: boolean) => Promise<void> }) {
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-slate-900">Pending Approvals</h1>
-          <p className="text-sm text-slate-500 mt-1">Review and approve or reject new elevated-role account requests.</p>
-        </div>
-        <span className="inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-3 py-1 text-[11px] font-bold uppercase tracking-wide">{approvals.length} pending</span>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>
-      ) : approvals.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-slate-500">
-          There are no pending approvals at the moment.
-        </div>
-      ) : (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-          {approvals.map((profile) => (
-            <div key={profile.id} className="border border-slate-100 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="space-y-1 text-xs text-slate-700">
-                <p className="font-bold text-slate-900">{profile.name || profile.email}</p>
-                <p>{profile.email}</p>
-                <p className="text-slate-500">Requested role: <span className="font-semibold text-slate-700">{profile.requested_role || 'AUTHOR'}</span></p>
-              </div>
-              <div className="flex gap-2">
-                <button disabled={loading} onClick={() => onAction(profile.id, true)} className="bg-[#008751] hover:bg-[#007043] text-white text-[11px] font-bold px-3 py-2 rounded-lg disabled:opacity-50">Approve</button>
-                <button disabled={loading} onClick={() => onAction(profile.id, false)} className="border border-red-200 text-red-600 hover:bg-red-50 text-[11px] font-bold px-3 py-2 rounded-lg disabled:opacity-50">Reject</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 type EditorialCategory = 'CHIEF' | 'BOARD' | 'ASSOCIATE' | 'SECTION';
 
 /** The member's "Editorial board role" (stored in metadata.editorial_role when the
@@ -1044,6 +1001,7 @@ const EDITORIAL_CATEGORY_LABELS: Record<EditorialCategory, string> = {
 };
 
 function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, onExport, onEditorDetails, onEdit, onDelete }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInvite: () => void; onExport: () => void; onEditorDetails: (editor: ProfileRow) => void; onEdit: (member: ProfileRow) => void; onDelete: (member: ProfileRow) => void; }) {
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState<'ALL' | EditorialCategory>('ALL');
   const totalMembers = profiles.length;
   const activeMembers = profiles.filter((p) => p.status === 'ACTIVE').length;
@@ -1071,12 +1029,16 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm">
             <Clock className="w-3.5 h-3.5 text-slate-400" /> June 25, 2026
           </div>
-          <button onClick={onExport} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">
-            <Download className="w-4 h-4 text-slate-500" /> Export
-          </button>
-          <button onClick={onInvite} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] transition">
-            <UserPlus className="w-4 h-4" /> Invite Member
-          </button>
+          {can('EDITORIAL_BOARD', 'EXPORT') && (
+            <button onClick={onExport} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">
+              <Download className="w-4 h-4 text-slate-500" /> Export
+            </button>
+          )}
+          {can('EDITORIAL_BOARD', 'CREATE') && (
+            <button onClick={onInvite} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] transition">
+              <UserPlus className="w-4 h-4" /> Invite Member
+            </button>
+          )}
         </div>
       </div>
 
@@ -1174,7 +1136,7 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
                           </span>
                         </td>
                         <td className="px-4 py-4 text-slate-600">{joinedOn}</td>
-                        <td className="px-4 py-4 text-right whitespace-nowrap"><span className="inline-flex items-center gap-1"><button type="button" title="View" aria-label={`View ${profile.name}`} onClick={() => onEditorDetails(profile)} className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"><Eye className="h-4 w-4" /></button><MemberRowActions profile={profile} onEdit={onEdit} onDelete={onDelete} /></span></td>
+                        <td className="px-4 py-4 text-right whitespace-nowrap"><span className="inline-flex items-center gap-1"><button type="button" title="View" aria-label={`View ${profile.name}`} onClick={() => onEditorDetails(profile)} className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"><Eye className="h-4 w-4" /></button><MemberRowActions profile={profile} onEdit={onEdit} onDelete={onDelete} canEdit={can('EDITORIAL_BOARD', 'EDIT')} canDelete={can('EDITORIAL_BOARD', 'DELETE')} /></span></td>
                       </tr>
                     );
                   })
@@ -1245,20 +1207,22 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
             </div>
           </div>
 
-          <div className="rounded-3xl bg-emerald-50/70 border border-emerald-100 p-6 shadow-sm">
-            <div className="flex items-start gap-4">
-              <div className="rounded-2xl bg-emerald-100 p-3 text-emerald-700">
-                <FileQuestionMark className="h-5 w-5" />
+          {can('EDITORIAL_BOARD', 'CREATE') && (
+            <div className="rounded-3xl bg-emerald-50/70 border border-emerald-100 p-6 shadow-sm">
+              <div className="flex items-start gap-4">
+                <div className="rounded-2xl bg-emerald-100 p-3 text-emerald-700">
+                  <FileQuestionMark className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-lg font-black text-slate-900">Need more editorial support?</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">Invite qualified clinical informatics or diagnostic AI experts to strengthen your specialized review sub-boards.</p>
+                </div>
               </div>
-              <div>
-                <p className="text-lg font-black text-slate-900">Need more editorial support?</p>
-                <p className="mt-2 text-sm leading-6 text-slate-600">Invite qualified clinical informatics or diagnostic AI experts to strengthen your specialized review sub-boards.</p>
-              </div>
+              <button onClick={onInvite} className="mt-6 inline-flex items-center justify-center rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043] transition">
+                Invite Member
+              </button>
             </div>
-            <button onClick={onInvite} className="mt-6 inline-flex items-center justify-center rounded-full bg-[#008751] px-5 py-3 text-sm font-bold text-white hover:bg-[#007043] transition">
-              Invite Member
-            </button>
-          </div>
+          )}
         </div>
       </div>
     </div>
@@ -1501,10 +1465,9 @@ const ACTIVITY_LABELS: Record<ManuscriptStatus, string> = {
   REJECTED: 'was rejected',
 };
 
-function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentActivity, overdueReviews, profiles, loading, onOpenManuscript, onOpenUnassigned }: {
+function DashboardOverviewScreen({ items, stageCounts, recentActivity, overdueReviews, profiles, loading, onOpenManuscript, onOpenUnassigned }: {
   items: ManuscriptRow[];
   stageCounts: { submitted: number; underReview: number; awaitingDecision: number; done: number };
-  pendingApprovals: number;
   recentActivity: StatusHistoryRow[];
   overdueReviews: OverdueReviewRow[];
   profiles: Record<string, ProfileRow>;
@@ -1661,6 +1624,7 @@ function DashboardOverviewScreen({ items, stageCounts, pendingApprovals, recentA
 }
 
 function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onOpen, onRefresh, tab, setTab, stageCounts, productionByManuscript }: { items: ManuscriptRow[]; filtered: ManuscriptRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onOpen: (id: string | null) => void; onRefresh: () => void; tab: string; setTab: (value: string) => void; stageCounts?: { all: number; submitted: number; editorReview: number; underReview: number; awaitingDecision: number; done: number }; productionByManuscript?: Record<string, string>; }) {
+  const { can } = usePermissions();
   const [selectMode, setSelectMode] = useState(false);
   const getStageCount = (stageKey: string) => {
     if (!stageCounts) return 0;
@@ -1686,7 +1650,9 @@ function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onO
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <button onClick={onRefresh} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-[#007043]"><RefreshCcw className="w-4 h-4" /> Refresh</button>
-            <button onClick={() => setSelectMode((v) => !v)} className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-bold shadow-sm transition ${selectMode ? "border-rose-600 bg-rose-600 text-white hover:bg-rose-700" : "border-rose-200 bg-white text-rose-600 hover:bg-rose-50"}`}><Trash2 className="w-4 h-4" /> {selectMode ? "Cancel" : "Delete"}</button>
+            {can('MANUSCRIPT_QUEUE', 'DELETE') && (
+              <button onClick={() => setSelectMode((v) => !v)} className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-bold shadow-sm transition ${selectMode ? "border-rose-600 bg-rose-600 text-white hover:bg-rose-700" : "border-rose-200 bg-white text-rose-600 hover:bg-rose-50"}`}><Trash2 className="w-4 h-4" /> {selectMode ? "Cancel" : "Delete"}</button>
+            )}
             <div className="relative w-full max-w-sm">
               <input
                 value={search}
@@ -1730,6 +1696,7 @@ function ManuscriptQueueScreen({ items, filtered, loading, search, onSearch, onO
 }
 
 function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, onSearch, onInviteReviewer, onReviewerDetails, onEdit, onDelete }: { profiles: ProfileRow[]; assignmentCounts: Record<string, { invited: number; accepted: number; completed: number }>; loading: boolean; search: string; onSearch: (value: string) => void; onInviteReviewer: () => void; onReviewerDetails: (reviewer: ProfileRow) => void; onEdit: (member: ProfileRow) => void; onDelete: (member: ProfileRow) => void; }) {
+  const { can } = usePermissions();
   const totalReviewers = profiles.length;
   const activeReviewers = profiles.filter((p) => p.status === 'ACTIVE').length;
   const pendingInvitations = profiles.filter((p) => p.status === 'PENDING_APPROVAL' || p.status === 'INVITED').length;
@@ -1756,9 +1723,11 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm">
             <Clock className="w-3.5 h-3.5 text-slate-400" /> June 25, 2026
           </div>
-          <button onClick={onInviteReviewer} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] transition">
-            <UserPlus className="w-4 h-4" /> Invite Reviewer
-          </button>
+          {can('REVIEWERS', 'CREATE') && (
+            <button onClick={onInviteReviewer} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] transition">
+              <UserPlus className="w-4 h-4" /> Invite Reviewer
+            </button>
+          )}
         </div>
       </div>
 
@@ -1840,7 +1809,7 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
                   <td className="px-4 py-4 text-right whitespace-nowrap">
                     <div className="inline-flex items-center gap-1">
                       <button onClick={() => onReviewerDetails(row.profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
-                      <MemberRowActions profile={row.profile} onEdit={onEdit} onDelete={onDelete} />
+                      <MemberRowActions profile={row.profile} onEdit={onEdit} onDelete={onDelete} canEdit={can('REVIEWERS', 'EDIT')} canDelete={can('REVIEWERS', 'DELETE')} />
                     </div>
                   </td>
                 </tr>
@@ -1854,6 +1823,7 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
 }
 
 function PublishersScreen({ profiles, loading, search, onSearch, onInvitePublisher, onPublisherDetails, onEdit, onDelete }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInvitePublisher: () => void; onPublisherDetails: (publisher: ProfileRow) => void; onEdit: (member: ProfileRow) => void; onDelete: (member: ProfileRow) => void; }) {
+  const { can } = usePermissions();
   const totalPublishers = profiles.length;
   const activePublishers = profiles.filter((p) => p.status === 'ACTIVE').length;
   const pendingInvitations = profiles.filter((p) => p.status === 'PENDING_APPROVAL' || p.status === 'INVITED').length;
@@ -1866,9 +1836,11 @@ function PublishersScreen({ profiles, loading, search, onSearch, onInvitePublish
           <p className="text-sm text-slate-500 mt-1">Manage publisher accounts for accepted manuscripts moving into production.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button onClick={onInvitePublisher} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] transition">
-            <UserPlus className="w-4 h-4" /> Invite Publisher
-          </button>
+          {can('PUBLISHERS', 'CREATE') && (
+            <button onClick={onInvitePublisher} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] transition">
+              <UserPlus className="w-4 h-4" /> Invite Publisher
+            </button>
+          )}
         </div>
       </div>
 
@@ -1938,7 +1910,7 @@ function PublishersScreen({ profiles, loading, search, onSearch, onInvitePublish
                     <td className="px-4 py-4 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-1">
                         <button onClick={() => onPublisherDetails(profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
-                        <MemberRowActions profile={profile} onEdit={onEdit} onDelete={onDelete} />
+                        <MemberRowActions profile={profile} onEdit={onEdit} onDelete={onDelete} canEdit={can('PUBLISHERS', 'EDIT')} canDelete={can('PUBLISHERS', 'DELETE')} />
                       </div>
                     </td>
                   </tr>
@@ -2024,6 +1996,7 @@ function InvitePublisherModal({ open, onClose, name, email, organization, passwo
 }
 
 function GDMembersScreen({ profiles, loading, search, onSearch, onInviteGDMember, onGDMemberDetails, onEdit, onDelete }: { profiles: ProfileRow[]; loading: boolean; search: string; onSearch: (value: string) => void; onInviteGDMember: () => void; onGDMemberDetails: (member: ProfileRow) => void; onEdit: (member: ProfileRow) => void; onDelete: (member: ProfileRow) => void; }) {
+  const { can } = usePermissions();
   const totalMembers = profiles.length;
   const activeMembers = profiles.filter((p) => p.status === 'ACTIVE').length;
   const pendingInvitations = profiles.filter((p) => p.status === 'PENDING_APPROVAL' || p.status === 'INVITED').length;
@@ -2036,9 +2009,11 @@ function GDMembersScreen({ profiles, loading, search, onSearch, onInviteGDMember
           <p className="text-sm text-slate-500 mt-1">Manage internal production/copyediting staff accounts, distinct from Publisher accounts.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button onClick={onInviteGDMember} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] transition">
-            <UserPlus className="w-4 h-4" /> Create GD Member
-          </button>
+          {can('GD_MEMBERS', 'CREATE') && (
+            <button onClick={onInviteGDMember} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] transition">
+              <UserPlus className="w-4 h-4" /> Create GD Member
+            </button>
+          )}
         </div>
       </div>
 
@@ -2108,7 +2083,7 @@ function GDMembersScreen({ profiles, loading, search, onSearch, onInviteGDMember
                     <td className="px-4 py-4 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-1">
                         <button onClick={() => onGDMemberDetails(profile)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Profile</button>
-                        <MemberRowActions profile={profile} onEdit={onEdit} onDelete={onDelete} />
+                        <MemberRowActions profile={profile} onEdit={onEdit} onDelete={onDelete} canEdit={can('GD_MEMBERS', 'EDIT')} canDelete={can('GD_MEMBERS', 'DELETE')} />
                       </div>
                     </td>
                   </tr>

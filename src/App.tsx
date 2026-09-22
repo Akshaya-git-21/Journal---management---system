@@ -13,11 +13,14 @@ import ReviewerWorkspace from './components/ReviewerWorkspace';
 import PublisherWorkspace from './components/PublisherWorkspace';
 import CoordinatorWorkspace from './components/CoordinatorWorkspace';
 import GDMemberWorkspace from './components/GDMemberWorkspace';
+import AdminWorkspace from './components/AdminWorkspace';
+import PasswordChangeGate from './components/PasswordChangeGate';
 import AuthPortals from './components/AuthPortals';
 import ResetPasswordScreen from './components/ResetPasswordScreen';
 import { CheckCircle2, LogOut, User, AlertTriangle } from 'lucide-react';
 import { checkSupabaseConnection } from './lib/supabase';
 import { restoreSession, onAuthChange, logoutAccount } from './lib/auth';
+import { PermissionsProvider } from './lib/permissions';
 
 export default function App() {
   // Screen routing state: 'SUBMISSION' | 'AUTH' | 'WORKSPACE'
@@ -143,7 +146,7 @@ export default function App() {
     <div
       id="jms-application-root"
       className={`bg-slate-50 flex flex-col text-slate-800 ${
-        currentScreen === 'WORKSPACE' && loggedInUser?.role === 'COORDINATOR' ? 'h-screen overflow-hidden' : 'min-h-screen'
+        currentScreen === 'WORKSPACE' && (loggedInUser?.role === 'COORDINATOR' || loggedInUser?.role === 'ADMIN') ? 'h-screen overflow-hidden' : 'min-h-screen'
       }`}
     >
 
@@ -351,7 +354,7 @@ export default function App() {
         // the others would clip their content, since they're built assuming
         // the page itself grows and scrolls (min-h-screen), not a
         // fixed-height shell.
-        const isShell = loggedInUser?.role === 'COORDINATOR' || loggedInUser?.role === 'GD_MEMBER' || loggedInUser?.role === 'PUBLISHER';
+        const isShell = loggedInUser?.role === 'COORDINATOR' || loggedInUser?.role === 'GD_MEMBER' || loggedInUser?.role === 'PUBLISHER' || loggedInUser?.role === 'ADMIN';
         const shellClass = isShell ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-grow flex flex-col';
         return (
         <div className={shellClass}>
@@ -359,7 +362,8 @@ export default function App() {
             <div className={`animate-fade-in duration-300 ${shellClass}`}>
               {/* The workspace rendered is always exactly the authenticated
                   user's own role -- there is no client-side role switch. */}
-              <RequireRole role={loggedInUser?.role} allowed={['AUTHOR', 'EDITOR', 'REVIEWER', 'PUBLISHER', 'COORDINATOR', 'GD_MEMBER']}>
+              <RequireRole role={loggedInUser?.role} allowed={['AUTHOR', 'EDITOR', 'REVIEWER', 'PUBLISHER', 'COORDINATOR', 'GD_MEMBER', 'ADMIN']}>
+              <PermissionsProvider role={loggedInUser?.role}>
                 {loggedInUser?.role === 'AUTHOR' && (
                   <AuthorWorkspace currentUser={loggedInUser} onSignOut={handleSignOut} />
                 )}
@@ -383,7 +387,14 @@ export default function App() {
                 {loggedInUser?.role === 'GD_MEMBER' && (
                   <GDMemberWorkspace currentUser={loggedInUser} onSignOut={handleSignOut} />
                 )}
+
+                {loggedInUser?.role === 'ADMIN' && (
+                  <AdminWorkspace currentUser={loggedInUser} onSignOut={handleSignOut} />
+                )}
+              </PermissionsProvider>
               </RequireRole>
+              {/* Only shows for accounts whose password an Admin set or reset. */}
+              <PasswordChangeGate userKey={loggedInUser?.email} onSignOut={handleSignOut} />
             </div>
           </main>
         </div>

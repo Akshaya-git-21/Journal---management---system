@@ -1,4 +1,4 @@
-export type Role = 'AUTHOR' | 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'COORDINATOR' | 'GD_MEMBER';
+export type Role = 'AUTHOR' | 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'COORDINATOR' | 'GD_MEMBER' | 'ADMIN';
 
 export type ProfileStatus = 'ACTIVE' | 'PENDING_APPROVAL' | 'REJECTED' | 'INACTIVE' | 'DELETED';
 
