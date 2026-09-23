@@ -1,5 +1,5 @@
 import React, { useContext } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { AlertTriangle, ChevronDown } from 'lucide-react';
 import { SidebarThemeContext } from './sidebarTheme';
 
 export const NavGroup: React.FC<{
@@ -73,7 +73,9 @@ export const NavItem: React.FC<{
           <span>{label}</span>
         </span>
         {typeof count === 'number' && count > 0 && (
-          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${active ? 'bg-white/25 text-white' : 'bg-[#dcebe0] text-[#1f4d3a]'}`}>{count}</span>
+          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${active ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-700'}`}>
+            <AlertTriangle className="w-3 h-3" /> {count}
+          </span>
         )}
       </button>
     );
@@ -92,7 +94,9 @@ export const NavItem: React.FC<{
         <span>{label}</span>
       </span>
       {typeof count === 'number' && count > 0 && (
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${active ? 'bg-black/10 text-[#002815]' : 'bg-white/10 text-emerald-200'}`}>{count}</span>
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${active ? 'bg-black/10 text-[#002815]' : 'bg-amber-400/20 text-amber-300'}`}>
+          <AlertTriangle className="w-3 h-3" /> {count}
+        </span>
       )}
     </button>
   );

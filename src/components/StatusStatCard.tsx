@@ -1,12 +1,14 @@
 import React from 'react';
 
-export type StatTone = 'emerald' | 'amber' | 'sky' | 'violet';
+export type StatTone = 'emerald' | 'amber' | 'sky' | 'violet' | 'orange' | 'rose';
 
 const TONES: Record<StatTone, { card: string; tile: string; note: string; track: string; fill: string }> = {
   emerald: { card: 'border-emerald-300 bg-gradient-to-br from-emerald-100 via-emerald-50 to-white', tile: 'bg-emerald-700', note: 'text-emerald-700', track: 'bg-emerald-200', fill: 'bg-emerald-700' },
   amber: { card: 'border-amber-300 bg-gradient-to-br from-amber-100 via-amber-50 to-white', tile: 'bg-amber-500', note: 'text-amber-700', track: 'bg-amber-200', fill: 'bg-[#e16e06]' },
   sky: { card: 'border-sky-300 bg-gradient-to-br from-sky-100 via-sky-50 to-white', tile: 'bg-sky-600', note: 'text-sky-700', track: 'bg-sky-200', fill: 'bg-sky-600' },
   violet: { card: 'border-violet-300 bg-gradient-to-br from-violet-100 via-violet-50 to-white', tile: 'bg-violet-600', note: 'text-violet-700', track: 'bg-violet-200', fill: 'bg-violet-600' },
+  orange: { card: 'border-orange-300 bg-gradient-to-br from-orange-100 via-orange-50 to-white', tile: 'bg-orange-500', note: 'text-orange-700', track: 'bg-orange-200', fill: 'bg-orange-500' },
+  rose: { card: 'border-rose-300 bg-gradient-to-br from-rose-100 via-rose-50 to-white', tile: 'bg-rose-600', note: 'text-rose-700', track: 'bg-rose-200', fill: 'bg-rose-600' },
 };
 
 /**
