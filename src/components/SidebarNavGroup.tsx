@@ -55,8 +55,10 @@ export const NavItem: React.FC<{
   label: string;
   active: boolean;
   count?: number;
+  /** Show a warning triangle beside the count (reserved for items needing urgent attention). */
+  alert?: boolean;
   onClick: () => void;
-}> = ({ icon, label, active, count, onClick }) => {
+}> = ({ icon, label, active, count, alert, onClick }) => {
   const light = useContext(SidebarThemeContext) === 'light';
 
   if (light) {
@@ -73,8 +75,8 @@ export const NavItem: React.FC<{
           <span>{label}</span>
         </span>
         {typeof count === 'number' && count > 0 && (
-          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${active ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-700'}`}>
-            <AlertTriangle className="w-3 h-3" /> {count}
+          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${active ? 'bg-white/25 text-white' : alert ? 'bg-amber-100 text-amber-700' : 'bg-[#dcebe0] text-[#2d4a3c]'}`}>
+            {alert && <AlertTriangle className="w-3 h-3" />}{count}
           </span>
         )}
       </button>
@@ -94,8 +96,8 @@ export const NavItem: React.FC<{
         <span>{label}</span>
       </span>
       {typeof count === 'number' && count > 0 && (
-        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${active ? 'bg-black/10 text-[#002815]' : 'bg-amber-400/20 text-amber-300'}`}>
-          <AlertTriangle className="w-3 h-3" /> {count}
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${active ? 'bg-black/10 text-[#002815]' : alert ? 'bg-amber-400/20 text-amber-300' : 'bg-white/10 text-emerald-50'}`}>
+          {alert && <AlertTriangle className="w-3 h-3" />}{count}
         </span>
       )}
     </button>

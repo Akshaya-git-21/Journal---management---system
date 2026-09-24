@@ -1009,6 +1009,30 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
   const inactiveMembers = profiles.filter((p) => p.status === 'INACTIVE').length;
   const categoryCounts: Record<EditorialCategory, number> = { CHIEF: 0, BOARD: 0, ASSOCIATE: 0, SECTION: 0 };
   profiles.forEach((p) => { categoryCounts[editorialCategoryOf(p)] += 1; });
+  // Expertise comes from each member's stored specialization; a member may list several, comma/semicolon separated.
+  const expertiseMap = new Map<string, { label: string; count: number }>();
+  profiles.forEach((p) => {
+    const raw = String(p.metadata?.specialization || p.metadata?.expertise || '');
+    const areas = new Set(raw.split(/[,;]/).map((s) => s.trim()).filter(Boolean));
+    areas.forEach((area) => {
+      const key = area.toLowerCase();
+      const entry = expertiseMap.get(key);
+      if (entry) entry.count += 1;
+      else expertiseMap.set(key, { label: area, count: 1 });
+    });
+  });
+  const topExpertise = [...expertiseMap.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).slice(0, 5);
+  const maxExpertiseCount = topExpertise[0]?.count || 1;
+  const roleSegments = [
+    { label: 'Editor-in-Chief', count: categoryCounts.CHIEF, color: '#047857' },
+    { label: 'Associate Editors', count: categoryCounts.ASSOCIATE, color: '#10b981' },
+    { label: 'Section Editors', count: categoryCounts.SECTION, color: '#6ee7b7' },
+    { label: 'Editorial Board', count: categoryCounts.BOARD, color: '#0f766e' },
+  ].map((s) => ({ ...s, pct: totalMembers ? Math.round((s.count / totalMembers) * 100) : 0 }));
+  let donutCursor = 0;
+  const donutGradient = totalMembers
+    ? `conic-gradient(${roleSegments.map((s) => { const start = donutCursor; donutCursor += (s.count / totalMembers) * 360; return `${s.color} ${start}deg ${donutCursor}deg`; }).join(', ')})`
+    : undefined;
   const categoryTabs: { key: EditorialCategory; label: string }[] = [
     { key: 'CHIEF', label: 'Editor-in-Chief' },
     { key: 'BOARD', label: 'Editorial Board' },
@@ -1027,7 +1051,7 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm">
-            <Clock className="w-3.5 h-3.5 text-slate-400" /> June 25, 2026
+            <Clock className="w-3.5 h-3.5 text-slate-400" /> {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
           </div>
           {can('EDITORIAL_BOARD', 'EXPORT') && (
             <button onClick={onExport} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">
@@ -1159,24 +1183,18 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
               </div>
             </div>
             <div className="mt-5 flex items-center gap-4">
-              <div className="relative h-24 w-24 rounded-full bg-slate-100">
-                <div className="absolute inset-0 rounded-full border border-slate-200" />
+              <div className="relative h-24 w-24 shrink-0 rounded-full bg-slate-100" style={donutGradient ? { background: donutGradient } : undefined}>
                 <div className="absolute inset-3 rounded-full bg-white shadow-sm flex items-center justify-center text-xl font-black text-slate-900">{totalMembers}</div>
               </div>
               <div className="space-y-3 flex-1">
-                {[
-                  { label: 'Editor-in-Chief', count: categoryCounts.CHIEF, pct: totalMembers ? Math.round((categoryCounts.CHIEF / totalMembers) * 100) : 0 },
-                  { label: 'Associate Editors', count: categoryCounts.ASSOCIATE, pct: totalMembers ? Math.round((categoryCounts.ASSOCIATE / totalMembers) * 100) : 0 },
-                  { label: 'Section Editors', count: categoryCounts.SECTION, pct: totalMembers ? Math.round((categoryCounts.SECTION / totalMembers) * 100) : 0 },
-                  { label: 'Editorial Board', count: categoryCounts.BOARD, pct: totalMembers ? Math.round((categoryCounts.BOARD / totalMembers) * 100) : 0 },
-                ].map((item) => (
+                {roleSegments.map((item) => (
                   <div key={item.label} className="space-y-1">
                     <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                      <span>{item.label}</span>
+                      <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />{item.label}</span>
                       <span>{item.count} ({item.pct}%)</span>
                     </div>
                     <div className="h-2 rounded-full bg-slate-100">
-                      <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${item.pct}%` }} />
+                      <div className="h-2 rounded-full" style={{ width: `${item.pct}%`, backgroundColor: item.color }} />
                     </div>
                   </div>
                 ))}
@@ -1187,23 +1205,23 @@ function EditorialBoardScreen({ profiles, loading, search, onSearch, onInvite, o
           <div className="rounded-3xl bg-white border border-slate-200 p-5 shadow-sm">
             <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Top expertise areas</p>
             <div className="mt-4 space-y-4">
-              {[
-                { label: 'AI in Healthcare', count: 12 },
-                { label: 'Medical Imaging', count: 9 },
-                { label: 'Machine Learning', count: 8 },
-                { label: 'Bioinformatics', count: 7 },
-                { label: 'Data Science', count: 6 },
-              ].map((area) => (
-                <div key={area.label}>
-                  <div className="flex items-center justify-between text-sm font-semibold text-slate-900">
-                    <span>{area.label}</span>
-                    <span className="text-slate-500">{area.count} experts</span>
+              {loading ? (
+                <p className="text-sm text-slate-400">Loading expertise...</p>
+              ) : topExpertise.length === 0 ? (
+                <p className="text-sm text-slate-400">No specializations recorded for board members yet.</p>
+              ) : (
+                topExpertise.map((area) => (
+                  <div key={area.label}>
+                    <div className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900">
+                      <span className="truncate">{area.label}</span>
+                      <span className="shrink-0 text-slate-500">{area.count} {area.count === 1 ? 'expert' : 'experts'}</span>
+                    </div>
+                    <div className="mt-2 h-2 rounded-full bg-slate-100">
+                      <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${Math.round((area.count / maxExpertiseCount) * 100)}%` }} />
+                    </div>
                   </div>
-                  <div className="mt-2 h-2 rounded-full bg-slate-100">
-                    <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${Math.min(100, area.count * 8)}%` }} />
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 
@@ -1721,7 +1739,7 @@ function ReviewerDirectoryScreen({ profiles, assignmentCounts, loading, search, 
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm">
-            <Clock className="w-3.5 h-3.5 text-slate-400" /> June 25, 2026
+            <Clock className="w-3.5 h-3.5 text-slate-400" /> {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
           </div>
           {can('REVIEWERS', 'CREATE') && (
             <button onClick={onInviteReviewer} className="inline-flex items-center gap-2 rounded-full bg-[#008751] px-4 py-2 text-xs font-bold text-white hover:bg-[#007043] transition">

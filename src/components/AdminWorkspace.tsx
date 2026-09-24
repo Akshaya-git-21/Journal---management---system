@@ -54,7 +54,7 @@ export default function AdminWorkspace({ currentUser, onSignOut }: AdminWorkspac
               <NavGroup title="Admin" icon={<ShieldCheck className="w-4 h-4" />} hasActive expanded={expanded} onToggle={() => setExpanded((v) => !v)}>
                 <NavItem icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" active={section === 'DASHBOARD'} onClick={() => setSection('DASHBOARD')} />
                 <NavItem icon={<Users className="w-4 h-4" />} label="People" active={section === 'PEOPLE'} onClick={() => setSection('PEOPLE')} />
-                <NavItem icon={<ShieldCheck className="w-4 h-4" />} label="Pending Approvals" count={pendingCount} active={section === 'APPROVALS'} onClick={() => setSection('APPROVALS')} />
+                <NavItem icon={<ShieldCheck className="w-4 h-4" />} label="Pending Approvals" count={pendingCount} alert active={section === 'APPROVALS'} onClick={() => setSection('APPROVALS')} />
                 <NavItem icon={<Activity className="w-4 h-4" />} label="Activity" active={section === 'ACTIVITY'} onClick={() => setSection('ACTIVITY')} />
                 <NavItem icon={<KeyRound className="w-4 h-4" />} label="Access" active={section === 'ACCESS'} onClick={() => setSection('ACCESS')} />
                 <NavItem icon={<Settings className="w-4 h-4" />} label="Settings" active={section === 'SETTINGS'} onClick={() => setSection('SETTINGS')} />
