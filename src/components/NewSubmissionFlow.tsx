@@ -1057,7 +1057,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
   };
 
   return (
-    <div id="new-submission-module-layout" className="w-full flex flex-col md:flex-row gap-0 text-left font-sans text-slate-800">
+    <div id="new-submission-module-layout" className="w-full flex-1 flex flex-col md:flex-row gap-0 text-left font-sans text-slate-800">
       
       {/* ======================= SIDEBAR ACCORDION WORKFLOW STEPPER ======================= */}
       <aside id="new-submission-sidebar-stepper" className="w-full md:w-60 xl:w-72 bg-gradient-to-b from-[#def2ec] via-[#f4f3e8] to-[#e4eedd] border border-[#d9dccb] rounded-xl md:rounded-r-none md:border-r-0 p-5 shadow-xs shrink-0 md:self-stretch">

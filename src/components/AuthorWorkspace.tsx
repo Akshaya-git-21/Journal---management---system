@@ -559,7 +559,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
   if (view === 'new') {
     return (
-      <div key={resumeDraft?.id ?? 'new'} className={`w-full min-h-screen ${LIGHT_PAGE_SURFACE} role-tint`}>
+      <div key={resumeDraft?.id ?? 'new'} className={`w-full min-h-screen flex flex-col ${LIGHT_PAGE_SURFACE} role-tint`}>
         <NewSubmissionFlow
           resumeDraft={resumeDraft}
           currentUser={currentUser ?? null}
