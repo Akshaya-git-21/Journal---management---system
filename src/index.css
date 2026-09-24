@@ -9,10 +9,10 @@
 
 html {
   font-size: 15px;
-  /* The whole interface is designed to be seen at 90%: render it that way at
-     the browser's normal 100% zoom. (Users can still zoom the page further
-     and the responsive layout adapts.) */
-  zoom: 0.9;
+  /* Render the interface at 81% at the browser's normal 100% zoom, so 100%
+     looks the way 90% did before. Browser zoom still scales proportionally
+     from there, and the responsive layout adapts. */
+  zoom: 0.81;
 }
 
 /* With `zoom`, viewport units shrink by the same factor, so full-height

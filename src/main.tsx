@@ -3,7 +3,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-// index.css renders the app at 90% via `zoom`. Browsers differ on whether that
+// index.css renders the app at 81% via `zoom`. Browsers differ on whether that
 // also shrinks 100vh, so measure it and pass the correction to the CSS.
 (() => {
   try {
