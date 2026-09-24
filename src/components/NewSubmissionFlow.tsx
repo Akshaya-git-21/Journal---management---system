@@ -1200,13 +1200,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
 
           {/* Step Header with Back Navigation */}
           {currentStep < 9 && (
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200 sticky top-0 bg-white z-20">
-              <div>
-                <p className="text-xs font-mono text-slate-400 uppercase tracking-wide">Step {currentStep} of 8</p>
-                <h2 className="text-xl font-black text-slate-900 mt-0.5">
-                  {STEPS.find(s => s.number === currentStep)?.label}
-                </h2>
-              </div>
+            <div className="flex items-center gap-4 pb-4 border-b border-slate-200 sticky top-0 bg-white z-20">
               {currentStep > 1 && (
                 <button
                   onClick={handleBack}
@@ -1216,6 +1210,12 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                   Back
                 </button>
               )}
+              <div>
+                <p className="text-xs font-mono text-slate-400 uppercase tracking-wide">Step {currentStep} of 8</p>
+                <h2 className="text-xl font-black text-slate-900 mt-0.5">
+                  {STEPS.find(s => s.number === currentStep)?.label}
+                </h2>
+              </div>
             </div>
           )}
 
