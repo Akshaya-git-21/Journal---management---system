@@ -1211,7 +1211,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                 </button>
               )}
               <div>
-                <p className="text-xs font-mono text-slate-400 uppercase tracking-wide">Step {currentStep} of 8</p>
+                <p className="text-xs font-mono text-slate-400 uppercase tracking-wide">Step {currentStep} of 9</p>
                 <h2 className="text-xl font-black text-slate-900 mt-0.5">
                   {STEPS.find(s => s.number === currentStep)?.label}
                 </h2>
