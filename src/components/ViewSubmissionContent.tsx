@@ -80,9 +80,9 @@ export default function ViewSubmissionContent({
       <h3 className="text-sm font-bold text-slate-900 mb-4 uppercase tracking-wide">Authors & Contributors</h3>
       {manuscriptDetails.contributors && manuscriptDetails.contributors.length > 0 ? (
         <div className="space-y-3">
-          {manuscriptDetails.contributors.map((c) => (
+          {[...manuscriptDetails.contributors].sort((a, b) => a.position - b.position).map((c, i) => (
             <div key={c.id} className="border-l-2 border-emerald-600 pl-3 py-2">
-              <p className="text-sm font-semibold text-slate-900">{c.name}</p>
+              <p className="text-sm font-semibold text-slate-900">{i + 1}. {c.name}</p>
               {c.email && <p className="text-xs text-slate-600">{c.email}</p>}
               {c.department && <p className="text-xs text-slate-600">{c.department}</p>}
               {c.affiliation && <p className="text-xs text-slate-600">{c.affiliation}</p>}

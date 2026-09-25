@@ -65,8 +65,9 @@ export function ManuscriptTab({ manuscript, contributors }: Props) {
           <div className="space-y-3">
             {contributors.map((c, i) => (
               <div key={i} className="border border-slate-200 rounded-lg p-3">
-                <p className="font-semibold text-slate-900">{c.name}</p>
+                <p className="font-semibold text-slate-900">{i + 1}. {c.name}</p>
                 <p className="text-xs text-slate-600">{c.contributor_role}</p>
+                {c.department && <p className="text-xs text-slate-600 mt-1">{c.department}</p>}
                 {c.affiliation && <p className="text-xs text-slate-600 mt-1">{c.affiliation}</p>}
                 {c.email && <p className="text-xs text-slate-600">{c.email}</p>}
               </div>

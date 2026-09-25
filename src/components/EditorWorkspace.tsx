@@ -2345,7 +2345,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                   <div className="space-y-3">
                     {details.contributors.map((contributor, idx) => (
                       <div key={idx} className="border border-slate-200 rounded p-4 hover:bg-slate-50">
-                        <p className="font-semibold text-slate-900">{contributor.name}</p>
+                        <p className="font-semibold text-slate-900">{idx + 1}. {contributor.name}</p>
                         <p className="text-xs text-slate-600">{contributor.email}</p>
                         {contributor.department && <p className="text-xs text-slate-600">{contributor.department}</p>}
                         {contributor.affiliation && <p className="text-xs text-slate-600">{contributor.affiliation}</p>}
