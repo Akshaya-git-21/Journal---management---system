@@ -124,7 +124,7 @@ export default function EditorRevisionReview({
   const peerReviewOriginRounds = revisions.filter(r => r.origin === 'PEER_REVIEW').length;
   const ACTIONS: RevisionAction[] = isPeerReviewOrigin
     ? (peerReviewOriginRounds >= 2 ? ['REJECT', 'NEXT_STAGE'] : ['REJECT', 'NEXT_STAGE', 'SEND_TO_REVIEWER'])
-    : ['RETURN_TO_AUTHOR', 'NEXT_STAGE'];
+    : ['RETURN_TO_AUTHOR', 'NEXT_STAGE', 'REJECT'];
   const metaFor = (act: RevisionAction) => ACTION_META[act];
 
   // The screening-stage revision loop always returns a manuscript with
@@ -135,6 +135,10 @@ export default function EditorRevisionReview({
 
   const handleConfirm = async () => {
     if (!selectedAction) return;
+    if (selectedAction === 'REJECT' && !comments.trim()) {
+      setError('A reason is required to reject this submission. Please enter it in the Editor Comments box above.');
+      return;
+    }
     setSubmitting(true);
     setError('');
     try {
@@ -288,7 +292,7 @@ export default function EditorRevisionReview({
         </div>
 
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor Comments</h3>
+          <h3 className="text-xs font-black text-slate-500 uppercase tracking-wide mb-3">Editor Comments {selectedAction === 'REJECT' && <span className="text-red-600 normal-case">(a reason is required to reject)</span>}</h3>
           <textarea
             value={comments}
             onChange={(e) => setComments(e.target.value)}

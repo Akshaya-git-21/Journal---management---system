@@ -45,6 +45,7 @@ import { ReviewerReplacementAlert } from './ReviewerReplacementAlert';
 import EditorEvaluationSidebar from './EditorEvaluationSidebar';
 import FilePreviewModal from './FilePreviewModal';
 import EditorRevisionReview from './EditorRevisionReview';
+import { RejectReasonDialog } from './RejectReasonDialog';
 import EditorProductionVerification from './production/EditorProductionVerification';
 import { usePermissions } from '../lib/permissions';
 import { getProduction, getCorrections, subscribeToProduction, ProductionRow, CorrectionRow } from '../lib/production';
@@ -912,6 +913,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [decisionError, setDecisionError] = useState('');
   const [editorComments, setEditorComments] = useState('');
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   // Lets the Editor re-open the decision buttons after already submitting a
   // recommendation for a revision-loop/peer-review round, as long as the
   // Coordinator hasn't confirmed it yet -- submit_editor_recommendation
@@ -1018,6 +1020,27 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
   // from the coordinator's final publish_decision -- this is the editor's
   // own recommendation, gated server-side on the evaluation already being
   // submitted (submit_editor_recommendation RPC re-checks assessment_status).
+  // Reject always asks for a required reason + confirmation first; the
+  // recommendation itself is submitted exactly like every other decision.
+  const handleConfirmReject = async (reason: string) => {
+    setDecisionBusy(true);
+    setDecisionError('');
+    try {
+      const extra = editorComments.trim();
+      // reason -> p_reason (required server-side outside revision/peer-review rounds) plus the comments the Coordinator sees.
+      await submitEditorRecommendation(manuscript.id, 'REJECT', extra ? reason + '\n\n' + extra : reason, undefined, reason);
+      setEditorComments('');
+      setRedeciding(false);
+      setRejectDialogOpen(false);
+      showNotification('success', 'Recommendation submitted: REJECT');
+      onChanged();
+    } catch (e: any) {
+      setDecisionError(e.message || 'Failed to submit recommendation');
+    } finally {
+      setDecisionBusy(false);
+    }
+  };
+
   const handleSubmitRecommendation = async (recommendation: ReviewerRecommendation) => {
     setDecisionBusy(true);
     setDecisionError('');
@@ -2151,6 +2174,14 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                                     >
                                       Accept Submission
                                     </button>
+                                    <button
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => setRejectDialogOpen(true)}
+                                      className="sm:col-span-2 px-4 py-3 rounded-xl border-2 border-red-300 hover:bg-red-50 text-red-800 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      Reject Submission
+                                    </button>
                                   </div>
                                 </>
                               );
@@ -2185,7 +2216,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                                       key={opt.value}
                                       type="button"
                                       disabled={decisionBusy}
-                                      onClick={() => handleSubmitRecommendation(opt.value)}
+                                      onClick={() => (opt.value === 'REJECT' ? setRejectDialogOpen(true) : handleSubmitRecommendation(opt.value))}
                                       className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
                                     >
                                       {opt.label}
@@ -2899,6 +2930,14 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                                     >
                                       Accept Submission
                                     </button>
+                                    <button
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => setRejectDialogOpen(true)}
+                                      className="sm:col-span-2 px-4 py-3 rounded-xl border-2 border-red-300 hover:bg-red-50 text-red-800 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      Reject Submission
+                                    </button>
                                   </div>
                                 </>
                               );
@@ -2933,7 +2972,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                                       key={opt.value}
                                       type="button"
                                       disabled={decisionBusy}
-                                      onClick={() => handleSubmitRecommendation(opt.value)}
+                                      onClick={() => (opt.value === 'REJECT' ? setRejectDialogOpen(true) : handleSubmitRecommendation(opt.value))}
                                       className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
                                     >
                                       {opt.label}
@@ -3272,6 +3311,13 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
           </aside>
         </div>
       </main>
+      <RejectReasonDialog
+        isOpen={rejectDialogOpen}
+        busy={decisionBusy}
+        error={decisionError}
+        onCancel={() => setRejectDialogOpen(false)}
+        onConfirm={handleConfirmReject}
+      />
     </div>
   );
 }
