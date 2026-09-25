@@ -325,7 +325,10 @@ export function OverviewTab({
                   Editorial Completion Deadline: {formatTimelineDate(activeEditor.timeline_end_date)}
                 </p>
                 {activeEditor.last_reminder_sent_at && (
-                  <p className="text-xs text-slate-400 mt-1">Last reminder sent {new Date(activeEditor.last_reminder_sent_at).toLocaleString()}</p>
+                  <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800">
+                    <CheckCircle2 className="w-3 h-3" />
+                    Reminder Sent · {new Date(activeEditor.last_reminder_sent_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true })}
+                  </p>
                 )}
               </div>
               <div>
@@ -337,7 +340,7 @@ export function OverviewTab({
                   className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {sendingReminder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bell className="w-3.5 h-3.5" />}
-                  {sendingReminder ? 'Sending...' : 'Send Reminder'}
+                  {sendingReminder ? 'Sending...' : activeEditor.last_reminder_sent_at ? 'Send Another Reminder' : 'Send Reminder'}
                 </button>
                 {reminderError && <p className="mt-1.5 text-xs font-semibold text-red-600">{reminderError}</p>}
               </div>
