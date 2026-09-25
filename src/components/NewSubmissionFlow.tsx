@@ -2005,7 +2005,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
 
                 <div className="space-y-2">
                   <label className="block text-sm font-bold text-slate-800 uppercase tracking-wide">
-                    Subtitle (Optional)
+                    Running Title (Optional)
                   </label>
                   <input
                     type="text"

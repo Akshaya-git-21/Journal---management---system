@@ -3310,9 +3310,9 @@ function AcceptDeclineModal({
             <h3 className="font-bold text-slate-900 text-base leading-tight">{details.manuscript.title}</h3>
           </div>
 
-          {/* Subtitle */}
+          {/* Running Title */}
           <div>
-            <p className="text-xs uppercase tracking-wider font-semibold text-slate-600 mb-2">Subtitle</p>
+            <p className="text-xs uppercase tracking-wider font-semibold text-slate-600 mb-2">Running Title</p>
             <p className="text-sm text-slate-700">{details.manuscript.subtitle || 'Not provided'}</p>
           </div>
 
