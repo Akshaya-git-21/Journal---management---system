@@ -861,14 +861,6 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
                                   </span>
                                 )
                               )}
-                              {m.status !== 'DRAFT' && (
-                                <button
-                                  onClick={() => { setSelectedId(m.id); setView('discussion'); }}
-                                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
-                                >
-                                  Contact
-                                </button>
-                              )}
                               {m.status === 'DRAFT' && (
                                 <button
                                   onClick={() => handleDelete(m.id, m)}
