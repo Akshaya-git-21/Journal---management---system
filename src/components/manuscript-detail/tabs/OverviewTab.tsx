@@ -392,7 +392,7 @@ export function OverviewTab({
                     Replacement Required
                   </button>
                 </div>
-              ) : (
+              ) : activeEditor.status === 'INVITED' && (
               <div>
                 <button
                   type="button"
