@@ -676,6 +676,7 @@ export interface ContributorRow {
   name: string;
   email: string;
   affiliation: string;
+  department?: string;
   contributor_role: string;
   position: number;
 }
@@ -952,7 +953,7 @@ export interface DraftManuscriptInput {
   coverLetter: string;
   language: string;
   manuscriptType?: string;
-  contributors: { name: string; email: string; affiliation: string; role: string }[];
+  contributors: { name: string; email: string; affiliation: string; department?: string; role: string }[];
   suggestedReviewers: { name: string; email: string; note?: string }[];
 }
 
@@ -976,7 +977,7 @@ export async function createDraftManuscript(input: DraftManuscriptInput): Promis
   if (input.contributors.length > 0) {
     const { error } = await supabase.from('manuscript_contributors').insert(
       input.contributors.map((c, i) => ({
-        manuscript_id: id, name: c.name, email: c.email, affiliation: c.affiliation, contributor_role: c.role, position: i
+        manuscript_id: id, name: c.name, email: c.email, affiliation: c.affiliation, department: c.department ?? '', contributor_role: c.role, position: i
       }))
     );
     if (error) throw new Error(error.message);

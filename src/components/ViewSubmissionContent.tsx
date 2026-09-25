@@ -84,6 +84,7 @@ export default function ViewSubmissionContent({
             <div key={c.id} className="border-l-2 border-emerald-600 pl-3 py-2">
               <p className="text-sm font-semibold text-slate-900">{c.name}</p>
               {c.email && <p className="text-xs text-slate-600">{c.email}</p>}
+              {c.department && <p className="text-xs text-slate-600">{c.department}</p>}
               {c.affiliation && <p className="text-xs text-slate-600">{c.affiliation}</p>}
               {c.contributor_role && <p className="text-xs text-emerald-700 font-medium">{c.contributor_role}</p>}
             </div>

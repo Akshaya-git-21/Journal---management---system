@@ -164,6 +164,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
   const [contribLast, setContribLast] = useState('');
   const [contribEmail, setContribEmail] = useState('');
   const [contribAffiliation, setContribAffiliation] = useState('');
+  const [contribDepartment, setContribDepartment] = useState('');
   const [contribCountry, setContribCountry] = useState('United States');
   const [contribRole, setContribRole] = useState('Author');
   const [contribPrincipal, setContribPrincipal] = useState(false);
@@ -782,6 +783,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
     setContribLast('');
     setContribEmail('');
     setContribAffiliation('');
+    setContribDepartment('');
     setContribCountry('United States');
     setContribRole('Author');
     setContribPrincipal(false);
@@ -795,6 +797,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
     setContribLast(c.lastName);
     setContribEmail(c.email);
     setContribAffiliation(c.affiliation);
+    setContribDepartment(c.department || '');
     setContribCountry(c.country || 'United States');
     setContribRole(c.role);
     setContribPrincipal(c.isPrincipalContact || false);
@@ -820,6 +823,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
       lastName: contribLast.trim(),
       email: contribEmail.trim(),
       affiliation: contribAffiliation.trim(),
+      department: contribDepartment.trim(),
       country: contribCountry,
       role: contribRole,
       isPrincipalContact: contribPrincipal
@@ -2175,7 +2179,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                           )}
                         </td>
                         <td className="px-5 py-3.5 font-mono text-gray-500 text-sm whitespace-nowrap">{contrib.email}</td>
-                        <td className="px-5 py-3.5 italic text-sm">{contrib.affiliation}</td>
+                        <td className="px-5 py-3.5 italic text-sm">{contrib.department ? `${contrib.department}, ` : ''}{contrib.affiliation}</td>
                         <td className="px-5 py-3.5 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-2">
                             <button
@@ -2265,6 +2269,19 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                         className="w-full bg-white border border-gray-300 rounded-xl p-3 text-sm focus:ring-2 focus:ring-[#008751] outline-none font-semibold text-slate-800"
                         placeholder="e.g. University of London"
                         required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-sm font-bold text-slate-800 uppercase">
+                        Department (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={contribDepartment}
+                        onChange={(e) => setContribDepartment(e.target.value)}
+                        className="w-full bg-white border border-gray-300 rounded-xl p-3 text-sm focus:ring-2 focus:ring-[#008751] outline-none font-semibold text-slate-800"
+                        placeholder="e.g. Department of Microbiology"
                       />
                     </div>
 

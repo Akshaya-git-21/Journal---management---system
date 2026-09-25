@@ -40,6 +40,7 @@ export interface Contributor {
   name: string;
   email: string;
   affiliation: string;
+  department?: string;
   role: string; // e.g., "Primary Author", "Co-Author"
 }
 

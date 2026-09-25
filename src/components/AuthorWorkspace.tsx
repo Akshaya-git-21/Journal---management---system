@@ -387,6 +387,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
             name: [c.firstName, c.lastName].filter(Boolean).join(' ').trim() || c.name || '',
             email: c.email || '',
             affiliation: c.affiliation || '',
+            department: c.department || '',
             contributor_role: c.role || (c.isPrincipalContact ? 'Primary Author' : 'Co-Author'),
             position: i
           }))
