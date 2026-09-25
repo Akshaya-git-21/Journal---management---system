@@ -2012,7 +2012,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     id="submission-subtitle-input"
                     value={subtitle}
                     onChange={(e) => setSubtitle(e.target.value)}
-                    placeholder="e.g. A Comparative Framework on Multi-Cloud Ephemeral Registers"
+                    placeholder="e.g. Multi-Cloud Ephemeral Registers"
                     className="w-full bg-[#f8fbfe] border border-gray-300 rounded-xl p-3.5 text-sm focus:ring-2 focus:ring-[#008751] focus:bg-white focus:outline-none transition-all placeholder:text-gray-400 font-semibold text-slate-800"
                   />
                 </div>
