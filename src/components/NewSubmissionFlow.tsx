@@ -3047,7 +3047,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
               <div className="space-y-4 pt-2">
                 <span className="text-sm uppercase font-sans font-extrabold text-[#008751] block border-b border-emerald-100 pb-2 flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full bg-[#008751]" />
-                  Suggested Peer Reviewer Board
+                  Recommended Peer Reviewers
                 </span>
 
                 <div className="bg-white border rounded-2xl overflow-hidden shadow-xs">
