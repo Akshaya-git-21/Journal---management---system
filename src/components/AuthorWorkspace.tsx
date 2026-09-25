@@ -380,7 +380,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
 
       // Persist contributors (co-authors) -- previously captured in the
       // wizard but never written to manuscript_contributors.
-      if (paperDetails.contributors && paperDetails.contributors.length > 0) {
+      const saveContributors = async () => {
+        if (!(paperDetails.contributors && paperDetails.contributors.length > 0)) return;
         // A retry after a failed attempt must not duplicate rows.
         await supabase.from('manuscript_contributors').delete().eq('manuscript_id', manuscriptId);
         const contributorRows = paperDetails.contributors.map((c: any, i: number) => ({
@@ -402,11 +403,12 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         if (contributorsError) {
           throw new Error(`Failed to save contributors: ${contributorsError.message}`);
         }
-      }
+      };
 
       // Persist author-suggested reviewers -- same table the Editor's later
       // suggestions land in, discriminated by suggested_by='AUTHOR'.
-      if (paperDetails.reviewerSuggestions && paperDetails.reviewerSuggestions.length > 0) {
+      const saveReviewers = async () => {
+        if (!(paperDetails.reviewerSuggestions && paperDetails.reviewerSuggestions.length > 0)) return;
         await supabase.from('manuscript_suggested_reviewers').delete().eq('manuscript_id', manuscriptId).eq('suggested_by', 'AUTHOR');
         const reviewerRows = paperDetails.reviewerSuggestions.map((r: any) => ({
           manuscript_id: manuscriptId,
@@ -427,7 +429,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         if (reviewersError) {
           throw new Error(`Failed to save suggested reviewers: ${reviewersError.message}`);
         }
-      }
+      };
 
       // Now sync uploaded files to manuscript_files table via server-side RPC
       // -- includes both the main submission files (Title Page, Blind
@@ -436,6 +438,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       // never synced here, so they never appeared in manuscript_files and
       // the Supplementary Files tab always showed "No supplementary files"
       // regardless of what was actually uploaded.
+      const syncFiles = async () => {
       const allFilesToSync = [...(paperDetails.uploadedFiles || []), ...(paperDetails.additionalFiles || [])];
       if (allFilesToSync.length > 0) {
         console.log('[SUBMIT] Syncing files to manuscript_files table:', allFilesToSync);
@@ -481,6 +484,11 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       } else {
         console.warn('[SUBMIT] No files to sync.');
       }
+      };
+
+      // The three saves are independent of each other (the DRAFT row already
+      // exists), so run them together instead of one after another.
+      await Promise.all([saveContributors(), saveReviewers(), syncFiles()]);
 
       // Transition DRAFT -> SUBMITTED through the real workflow RPC. This is
       // the single point where the manuscript actually becomes visible to
@@ -492,10 +500,9 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       console.log('[SUBMIT] Manuscript submitted (DRAFT -> SUBMITTED)');
 
       // Refresh the list to show the new manuscript
-      console.log('[SUBMIT] Calling load() to refresh manuscript list...');
-      await load();
-      console.log('[SUBMIT] Manuscript list refreshed, setting view to list');
-      setView('list');
+      // Refresh the list in the background; the wizard stays open to show its
+      // completion screen (MSS ID), and leaving it reloads the list anyway.
+      void load();
       console.log('[SUBMIT] Submission complete!');
     } catch (err: any) {
       const errorMsg = err.message || 'Failed to submit manuscript';

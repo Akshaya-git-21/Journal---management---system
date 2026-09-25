@@ -3598,6 +3598,18 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
 
       </main>
 
+      {isSubmitting && (
+        <div className="fixed inset-0 z-[60] bg-white/80 backdrop-blur-sm flex items-center justify-center p-4" role="status" aria-live="polite">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-lg max-w-sm w-full p-6 text-center space-y-3">
+            <Loader2 className="w-8 h-8 text-[#008751] mx-auto animate-spin" />
+            <h3 className="text-base font-black text-slate-900">Submitting your manuscript...</h3>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              This can take up to 30 seconds. Please don't close or refresh this page, and don't click again.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Final confirmation gate -- the real submit_manuscript RPC only ever
           fires from this modal's Confirm button, never from the step-8
           "Next" click directly. */}
