@@ -2496,7 +2496,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="block text-xs font-bold text-slate-700">Grant / Award Number *</label>
+                          <label className="block text-xs font-bold text-slate-700">Grant / Award Number (Optional)</label>
                           <input 
                             type="text" 
                             value={grantNumber} 
