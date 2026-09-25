@@ -1766,6 +1766,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     <h4 className="font-extrabold text-sm text-[#002b3d] flex items-center gap-1.5 uppercase">
                       <span className="flex items-center justify-center w-5 h-5 rounded-full bg-[#008751]/10 text-[#008751] text-xs font-bold">D</span>
                       Ethical Certificate Upload
+                      <span className="text-slate-400 font-semibold text-[10px] normal-case">(Optional)</span>
                     </h4>
                     <p className="text-xs text-slate-550 font-medium">
                       If this research required ethics committee/IRB approval, upload the ethical clearance certificate here.
