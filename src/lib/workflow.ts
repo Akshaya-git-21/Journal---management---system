@@ -17,7 +17,9 @@ export interface EditorAssignmentRow {
   manuscript_id: string;
   editor_id: string;
   assigned_by: string | null;
-  status: 'INVITED' | 'ACCEPTED' | 'DECLINED';
+  status: 'INVITED' | 'ACCEPTED' | 'DECLINED' | 'REPLACED';
+  replaced_at?: string | null;
+  replacement_reason?: string | null;
   assigned_at: string;
   responded_at: string | null;
   scientific_merit: number | null;
@@ -1062,7 +1064,7 @@ export async function getEditorWorkloads(): Promise<Record<string, EditorWorkloa
   const today = new Date().toISOString().slice(0, 10);
   const out: Record<string, EditorWorkload> = {};
   for (const a of data ?? []) {
-    if (a.status === 'DECLINED' || a.assessment_status === 'SUBMITTED') continue;
+    if (a.status === 'DECLINED' || a.status === 'REPLACED' || a.assessment_status === 'SUBMITTED') continue;
     const w = (out[a.editor_id] ??= { open: 0, pending: 0, overdue: 0 });
     w.open += 1;
     if (a.status === 'INVITED') w.pending += 1;
@@ -1072,3 +1074,8 @@ export async function getEditorWorkloads(): Promise<Record<string, EditorWorkloa
   }
   return out;
 }
+
+/** Coordinator-only: replaces an editor who never responded within the 4-day
+ * acceptance window. A reason is required. See 0128_replace_overdue_editor.sql. */
+export const coordinatorReplaceEditor = (manuscriptId: string, newEditorId: string, startDate: string, endDate: string, reason: string) =>
+  rpcOrThrow(supabase.rpc('coordinator_replace_editor', { p_manuscript_id: manuscriptId, p_new_editor_id: newEditorId, p_start_date: startDate, p_end_date: endDate, p_reason: reason }));

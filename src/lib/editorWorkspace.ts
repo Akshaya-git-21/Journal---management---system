@@ -98,7 +98,8 @@ async function fetchEditorAssignedManuscripts(editorId: string): Promise<EditorM
     const { data: assignments, error: assignError } = await supabase
       .from('editor_assignments')
       .select('*')
-      .eq('editor_id', editorId);
+      .eq('editor_id', editorId)
+      .neq('status', 'REPLACED');
 
     if (assignError) throw new Error(assignError.message);
     if (!assignments || assignments.length === 0) return [];

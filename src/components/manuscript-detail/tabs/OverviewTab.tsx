@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, getEditorWorkloads, EditorWorkload, assignEditor, getEditorReviewerActions, getPendingEditorSuggestions, coordinatorSendEditorReminder, getManuscriptReviewerPool } from '../../../lib/workflow';
-import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision, EDITOR_DECLINED_LABEL, getReminderAvailability, EDITOR_ACCEPTANCE_RULES_START, EDITOR_OVERDUE_AFTER_MS } from '../../../lib/manuscriptStatusLabel';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, getEditorWorkloads, EditorWorkload, assignEditor, coordinatorReplaceEditor, getEditorReviewerActions, getPendingEditorSuggestions, coordinatorSendEditorReminder, getManuscriptReviewerPool } from '../../../lib/workflow';
+import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision, EDITOR_DECLINED_LABEL, getReminderAvailability, getEditorAcceptanceState, EDITOR_ACCEPTANCE_RULES_START, EDITOR_OVERDUE_AFTER_MS } from '../../../lib/manuscriptStatusLabel';
 import { getReviewerDisplayStatus } from '../../../lib/reviewerStatus';
 import { formatTimelineDate } from '../../../lib/dateFormat';
 import { getProduction, subscribeToProduction } from '../../../lib/production';
@@ -51,7 +51,10 @@ export function OverviewTab({
   // editorAssignments is newest-first. A DECLINED row is history, not the
   // current Editor: the card below tracks the live (invited/accepted)
   // assignment, and declined ones are listed alongside it.
-  const currentEditor = activeEditor && activeEditor.status !== 'DECLINED' ? activeEditor : null;
+  const currentEditor = activeEditor && activeEditor.status !== 'DECLINED' && activeEditor.status !== 'REPLACED' ? activeEditor : null;
+  // Invited editor who never responded within the 4-day window -> Coordinator must replace them.
+  const isOverdueEditor = !!currentEditor && currentEditor.status === 'INVITED' && getEditorAcceptanceState(currentEditor) === 'OVERDUE';
+  const replacedEditors = editorAssignments.filter((a) => a.status === 'REPLACED');
   const declinedEditors = editorAssignments.filter((a) => a.status === 'DECLINED');
   const declinedEditorRows = declinedEditors.map((a) => (
     <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
@@ -141,6 +144,15 @@ export function OverviewTab({
   const [selectedEditorId, setSelectedEditorId] = useState('');
   const [editorWorkloads, setEditorWorkloads] = useState<Record<string, EditorWorkload>>({});
   const [assigning, setAssigning] = useState(false);
+  // Replace an overdue (non-responding) editor
+  const [showReplacePanel, setShowReplacePanel] = useState(false);
+  const [replaceEditorId, setReplaceEditorId] = useState('');
+  const [replaceStart, setReplaceStart] = useState('');
+  const [replaceEnd, setReplaceEnd] = useState('');
+  const [replaceReason, setReplaceReason] = useState('');
+  const [replacing, setReplacing] = useState(false);
+  const [replaceError, setReplaceError] = useState('');
+  const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
   const [assignError, setAssignError] = useState('');
   const [showEditorConfirmation, setShowEditorConfirmation] = useState(false);
   // Module 97 -- the Editorial Timeline (deadline for the first editorial
@@ -154,10 +166,10 @@ export function OverviewTab({
   const [reminderError, setReminderError] = useState('');
 
   useEffect(() => {
-    if (manuscript.status !== 'SUBMITTED') return;
+    if (manuscript.status !== 'SUBMITTED' && !isOverdueEditor) return;
     listActiveProfilesByRole('EDITOR').then(setAvailableEditors).catch((e) => setAssignError(e.message));
     getEditorWorkloads().then(setEditorWorkloads).catch(() => setEditorWorkloads({}));
-  }, [manuscript.status]);
+  }, [manuscript.status, isOverdueEditor]);
 
   const handleAssignEditorClick = () => {
     if (!selectedEditorId) return;
@@ -188,6 +200,35 @@ export function OverviewTab({
       setAssignError(e.message || 'Failed to assign editor');
     } finally {
       setAssigning(false);
+    }
+  };
+
+  const handleReplaceClick = () => {
+    if (!replaceEditorId) { setReplaceError('Please choose a replacement editor.'); return; }
+    if (!replaceStart || !replaceEnd) { setReplaceError('Please set an editorial timeline start and end date.'); return; }
+    if (replaceEnd < replaceStart) { setReplaceError('End date cannot be before the start date.'); return; }
+    if (!replaceReason.trim()) { setReplaceError('A reason for the replacement is required.'); return; }
+    setReplaceError('');
+    setShowReplaceConfirm(true);
+  };
+
+  const handleConfirmReplace = async () => {
+    setReplacing(true);
+    setReplaceError('');
+    try {
+      await coordinatorReplaceEditor(manuscript.id, replaceEditorId, replaceStart, replaceEnd, replaceReason.trim());
+      onWorkflowChange?.();
+      setShowReplaceConfirm(false);
+      setShowReplacePanel(false);
+      setReplaceEditorId('');
+      setReplaceStart('');
+      setReplaceEnd('');
+      setReplaceReason('');
+    } catch (e: any) {
+      setShowReplaceConfirm(false);
+      setReplaceError(e.message || 'Failed to replace editor');
+    } finally {
+      setReplacing(false);
     }
   };
 
@@ -336,6 +377,22 @@ export function OverviewTab({
                   </p>
                 )}
               </div>
+              {isOverdueEditor ? (
+                <div className="flex flex-col items-end gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    Editor Response Overdue
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowReplacePanel((v) => !v)}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-red-700"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Replacement Required
+                  </button>
+                </div>
+              ) : (
               <div>
                 <button
                   type="button"
@@ -349,6 +406,68 @@ export function OverviewTab({
                 </button>
                 {reminderAvail.reason === 'COOLDOWN' && <p className="mt-1.5 text-[11px] text-slate-500 text-right">{reminderLockedReason}</p>}
                 {reminderError && <p className="mt-1.5 text-xs font-semibold text-red-600">{reminderError}</p>}
+              </div>
+              )}
+            </div>
+          )}
+
+          {isOverdueEditor && showReplacePanel && (
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              <p className="text-xs font-bold text-red-700 uppercase tracking-wide mb-2">Replace Editor</p>
+              {replaceError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-3 mb-3">{replaceError}</div>
+              )}
+              <div className="space-y-2">
+                <select
+                  value={replaceEditorId}
+                  onChange={(e) => setReplaceEditorId(e.target.value)}
+                  disabled={replacing}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
+                >
+                  <option value="">-- Select Replacement Editor --</option>
+                  {availableEditors.filter((ed) => ed.id !== currentEditor?.editor_id).map((ed) => (
+                    <option key={ed.id} value={ed.id}>{ed.name} ({ed.email}) — {(editorWorkloads[ed.id]?.open ?? 0)} open · {(editorWorkloads[ed.id]?.pending ?? 0)} pending · {(editorWorkloads[ed.id]?.overdue ?? 0)} overdue</option>
+                  ))}
+                </select>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-[11px] font-semibold text-slate-600 shrink-0">Editorial Timeline</label>
+                  <input type="date" value={replaceStart} onChange={(e) => setReplaceStart(e.target.value)} disabled={replacing} title="Start date" className="border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white" />
+                  <span className="text-xs text-slate-500">to</span>
+                  <input type="date" value={replaceEnd} min={replaceStart || undefined} onChange={(e) => setReplaceEnd(e.target.value)} disabled={replacing} title="End date (deadline)" className="border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white" />
+                </div>
+                <textarea
+                  value={replaceReason}
+                  onChange={(e) => setReplaceReason(e.target.value)}
+                  disabled={replacing}
+                  rows={2}
+                  placeholder="Reason for replacing this editor (required)"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
+                />
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => { setShowReplacePanel(false); setReplaceError(''); }} className="px-4 py-2 text-xs font-bold text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
+                  <button type="button" onClick={handleReplaceClick} disabled={replacing} className="px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 disabled:opacity-50">Replace Editor</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {replacedEditors.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Replaced</p>
+              <div className="space-y-2">
+                {replacedEditors.map((a) => (
+                  <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 opacity-60">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-600">{profiles[a.editor_id]?.name || 'Unknown'}</p>
+                      <p className="text-xs text-slate-500 truncate">{profiles[a.editor_id]?.email}</p>
+                      {a.replacement_reason && <p className="text-[11px] text-slate-500 mt-1">Reason: {a.replacement_reason}</p>}
+                    </div>
+                    <div className="text-right">
+                      <span className="inline-block rounded-full bg-slate-200 border border-slate-300 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-slate-600">Replaced</span>
+                      {a.replaced_at && <p className="text-[11px] text-slate-500 mt-1">{formatTimelineDate(a.replaced_at)}</p>}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -604,6 +723,20 @@ export function OverviewTab({
         )}
       </div>
       )}
+
+      <AssignmentConfirmationDialog
+        isOpen={showReplaceConfirm}
+        title="Confirm Editor Replacement"
+        message={`Replace ${currentEditor ? (profiles[currentEditor.editor_id]?.name || 'the current editor') : 'the current editor'} with the selected editor? The current editor will be marked as replaced and lose access to this manuscript.`}
+        details={replaceStart && replaceEnd ? `Editorial Timeline: ${formatTimelineDate(replaceStart)} - ${formatTimelineDate(replaceEnd)}` : undefined}
+        editorName={replaceEditorId ? profiles[replaceEditorId]?.name : undefined}
+        editorEmail={replaceEditorId ? profiles[replaceEditorId]?.email : undefined}
+        confirmText="Confirm Replace"
+        cancelText="Cancel"
+        isLoading={replacing}
+        onConfirm={handleConfirmReplace}
+        onCancel={() => setShowReplaceConfirm(false)}
+      />
 
       <AssignmentConfirmationDialog
         isOpen={showEditorConfirmation}

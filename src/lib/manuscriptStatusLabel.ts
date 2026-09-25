@@ -2,7 +2,7 @@ import { ManuscriptStatus } from '../types';
 import { RevisionRow } from './workflow';
 
 interface EditorAssignmentStatusLike {
-  status: 'INVITED' | 'ACCEPTED' | 'DECLINED';
+  status: 'INVITED' | 'ACCEPTED' | 'DECLINED' | 'REPLACED';
   assigned_at?: string | null;
 }
 
