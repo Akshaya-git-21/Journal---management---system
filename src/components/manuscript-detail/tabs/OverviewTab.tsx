@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, getEditorWorkloads, EditorWorkload, assignEditor, getEditorReviewerActions, getPendingEditorSuggestions, coordinatorSendEditorReminder, getManuscriptReviewerPool } from '../../../lib/workflow';
-import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision, EDITOR_DECLINED_LABEL, getEditorAcceptanceState, EDITOR_ACCEPTANCE_RULES_START, EDITOR_OVERDUE_AFTER_MS } from '../../../lib/manuscriptStatusLabel';
+import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision, EDITOR_DECLINED_LABEL, getReminderAvailability, EDITOR_ACCEPTANCE_RULES_START, EDITOR_OVERDUE_AFTER_MS } from '../../../lib/manuscriptStatusLabel';
 import { getReviewerDisplayStatus } from '../../../lib/reviewerStatus';
 import { formatTimelineDate } from '../../../lib/dateFormat';
 import { getProduction, subscribeToProduction } from '../../../lib/production';
@@ -42,7 +42,12 @@ export function OverviewTab({
   const evaluationSubmitted = activeEditor?.assessment_status === 'SUBMITTED';
   // Phase 1 acceptance window -- applies to new assignments only.
   const acceptanceApplies = !!activeEditor && new Date(activeEditor.assigned_at).getTime() >= new Date(EDITOR_ACCEPTANCE_RULES_START).getTime();
-  const reminderLocked = getEditorAcceptanceState(activeEditor) === 'AWAITING';
+  const reminderAvail: { allowed: boolean; reason?: string; nextAt?: Date } = getReminderAvailability(activeEditor);
+  const reminderLocked = !reminderAvail.allowed;
+  const reminderLockedReason =
+    reminderAvail.reason === 'TOO_EARLY' ? 'A reminder can be sent 48 hours after the editor was assigned' :
+    reminderAvail.reason === 'WINDOW_CLOSED' ? 'The 4-day acceptance window has passed -- reassign the editor instead' :
+    reminderAvail.reason === 'COOLDOWN' ? `Next reminder available ${reminderAvail.nextAt?.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true })}` : '';
   // editorAssignments is newest-first. A DECLINED row is history, not the
   // current Editor: the card below tracks the live (invited/accepted)
   // assignment, and declined ones are listed alongside it.
@@ -336,12 +341,13 @@ export function OverviewTab({
                   type="button"
                   onClick={handleSendEditorReminder}
                   disabled={sendingReminder || activeEditor.assessment_status === 'SUBMITTED' || reminderLocked}
-                  title={activeEditor.assessment_status === 'SUBMITTED' ? 'Evaluation already submitted -- no reminder needed' : reminderLocked ? 'A reminder can be sent 48 hours after the editor was assigned' : 'Send a reminder to the assigned Editor'}
+                  title={activeEditor.assessment_status === 'SUBMITTED' ? 'Evaluation already submitted -- no reminder needed' : reminderLocked ? reminderLockedReason : 'Send a reminder to the assigned Editor'}
                   className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {sendingReminder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bell className="w-3.5 h-3.5" />}
                   {sendingReminder ? 'Sending...' : activeEditor.last_reminder_sent_at ? 'Send Another Reminder' : 'Send Reminder'}
                 </button>
+                {reminderAvail.reason === 'COOLDOWN' && <p className="mt-1.5 text-[11px] text-slate-500 text-right">{reminderLockedReason}</p>}
                 {reminderError && <p className="mt-1.5 text-xs font-semibold text-red-600">{reminderError}</p>}
               </div>
             </div>

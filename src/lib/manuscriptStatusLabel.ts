@@ -7,7 +7,7 @@ interface EditorAssignmentStatusLike {
 }
 
 import { getEditorAcceptanceState } from './editorAcceptance';
-export { getEditorAcceptanceState, EDITOR_ACCEPTANCE_RULES_START, EDITOR_OVERDUE_AFTER_MS } from './editorAcceptance';
+export { getEditorAcceptanceState, getReminderAvailability, EDITOR_ACCEPTANCE_RULES_START, EDITOR_OVERDUE_AFTER_MS } from './editorAcceptance';
 
 export const EDITOR_AWAITING_LABEL = 'AWAITING EDITOR RESPONSE';
 export const EDITOR_REMINDER_LABEL = 'AWAITING EDITOR RESPONSE – REMINDER AVAILABLE';
