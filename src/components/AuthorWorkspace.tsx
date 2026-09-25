@@ -145,7 +145,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
   // yet (only one reviewer has accepted so far).
   const STATUS_FILTER_PREDICATES: Record<typeof statusFilter, (m: ManuscriptRow) => boolean> = {
     incomplete: (m) => m.status === 'DRAFT',
-    active: (m) => !['DRAFT', 'REJECTED', 'PUBLISHED'].includes(m.status),
+    active: (m) => m.status !== 'DRAFT',
     review: (m) => ['EDITORIAL REVIEW', 'PEER REVIEW'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id])),
     revisions: (m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'IN REVISION',
     accepted: (m) => ['ACCEPTED', 'PROOFREADING'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id])),
@@ -647,7 +647,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
             {can('MY_SUBMISSIONS', 'VIEW') && (
             <NavGroup title="My Submissions" icon={<Send className="w-4 h-4" />} expanded={submissionsGroupExpanded} onToggle={() => setSubmissionsGroupExpanded((v) => !v)}>
               {([
-                { id: 'active', label: 'Active', count: items.filter(m => !['DRAFT', 'REJECTED', 'PUBLISHED'].includes(m.status)).length, icon: <Send className="w-4 h-4" /> },
+                { id: 'active', label: 'Active', count: items.filter(m => m.status !== 'DRAFT').length, icon: <Send className="w-4 h-4" /> },
                 { id: 'review', label: 'Under Review', count: statusCounts.underReview, icon: <Eye className="w-4 h-4" /> },
                 { id: 'revisions', label: 'Revisions', count: statusCounts.revisionRequested, icon: <Pencil className="w-4 h-4" /> },
                 { id: 'accepted', label: 'Accepted', count: statusCounts.accepted, icon: <CheckCircle2 className="w-4 h-4" /> },
