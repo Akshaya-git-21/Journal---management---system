@@ -289,7 +289,7 @@ export function ReviewerSelectionList(state: SelectionState) {
                 <div>
                   <p className="text-sm font-semibold text-slate-900">{r.name}</p>
                   <p className="text-xs text-slate-600">{r.email}</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Expert Focus Area: {focusArea}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Research Area: {focusArea}</p>
                 </div>
                 <SelectionCheckbox checked={isSelected} disabled={submitting} />
               </button>

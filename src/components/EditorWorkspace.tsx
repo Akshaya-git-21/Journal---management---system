@@ -1892,7 +1892,7 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                                       <p className="text-xs text-slate-500 mt-1">Department: {reviewer.department}</p>
                                     )}
                                     {reviewer.note && (
-                                      <p className="text-xs text-slate-500 mt-1">Expert Focus Area: {reviewer.note}</p>
+                                      <p className="text-xs text-slate-500 mt-1">Research Area: {reviewer.note}</p>
                                     )}
                                     <span className="inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
                                       Suggested by author

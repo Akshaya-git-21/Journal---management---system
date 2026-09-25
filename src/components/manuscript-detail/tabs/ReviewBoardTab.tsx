@@ -836,7 +836,7 @@ export function ReviewBoardTab({
                               <p className="text-xs text-slate-600 truncate">{reviewer.metadata?.affiliation || '—'}</p>
                             </div>
                             <div className="min-w-0">
-                              <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Expert Focus Area</p>
+                              <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Research Area</p>
                               <p className="text-xs text-slate-600 truncate">{reviewer.metadata?.specialization || reviewer.metadata?.expertise || '—'}</p>
                             </div>
                           </div>

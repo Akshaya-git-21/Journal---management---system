@@ -3021,7 +3021,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                   </div>
 
                   <div className="space-y-2">
-                    <label className="block text-sm font-bold text-slate-800">Expert Focus Area</label>
+                    <label className="block text-sm font-bold text-slate-800">Research Area</label>
                     <input
                       type="text"
                       value={revReason}
@@ -3059,7 +3059,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                         <th className="px-5 py-3.5">Email ID</th>
                         <th className="px-5 py-3.5">Department</th>
                         <th className="px-5 py-3.5">Affiliation</th>
-                        <th className="px-5 py-3.5">Expert Focus Area</th>
+                        <th className="px-5 py-3.5">Research Area</th>
                         <th className="px-5 py-3.5 w-20 text-center">Delete</th>
                       </tr>
                     </thead>
