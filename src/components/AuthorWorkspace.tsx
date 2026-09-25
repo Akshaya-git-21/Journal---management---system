@@ -309,7 +309,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         authorEmail: currentUser?.email || user.email || '',
         submissionStep: 9,
         editorsNotes: '',
-        language: paperDetails.language || 'English'
+        language: paperDetails.language || 'English',
+        manuscriptType: paperDetails.manuscriptType || ''
       };
 
       console.log('[SUBMIT] Manuscript object created:', { id: newManuscript.id, title: newManuscript.title, authorId: newManuscript.authorId, submittedAt: newManuscript.submittedAt });
@@ -349,7 +350,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               references: newManuscript.references,
               is_double_blind: newManuscript.isDoubleBlind,
               cover_letter: newManuscript.coverLetter,
-              language: newManuscript.language
+              language: newManuscript.language,
+              manuscript_type: newManuscript.manuscriptType
             })
             .eq('id', manuscriptId)).error
         : (await supabase
@@ -366,7 +368,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               author_id: user.id,
               author_name: newManuscript.authorName,
               author_email: newManuscript.authorEmail,
-              language: newManuscript.language
+              language: newManuscript.language,
+              manuscript_type: newManuscript.manuscriptType
             }])).error;
 
       if (insertError) {
@@ -524,6 +527,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
             abstract: paperDetails.abstract || '',
             cover_letter: paperDetails.coverLetter || '',
             language: paperDetails.language || 'English',
+            manuscript_type: paperDetails.manuscriptType || '',
             submission_step: paperDetails.submissionStep || 1
           })
           .eq('id', manuscriptId);
@@ -542,6 +546,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
             author_name: currentUser?.name || 'Unknown Author',
             author_email: currentUser?.email || user.email || '',
             language: paperDetails.language || 'English',
+            manuscript_type: paperDetails.manuscriptType || '',
             submission_step: paperDetails.submissionStep || 1
           }]);
         if (insertError) throw new Error(insertError.message);

@@ -951,6 +951,7 @@ export interface DraftManuscriptInput {
   isDoubleBlind: boolean;
   coverLetter: string;
   language: string;
+  manuscriptType?: string;
   contributors: { name: string; email: string; affiliation: string; role: string }[];
   suggestedReviewers: { name: string; email: string; note?: string }[];
 }
@@ -967,6 +968,7 @@ export async function createDraftManuscript(input: DraftManuscriptInput): Promis
     is_double_blind: input.isDoubleBlind,
     cover_letter: input.coverLetter,
     language: input.language,
+    manuscript_type: input.manuscriptType ?? '',
     status: 'DRAFT'
   });
   if (insertErr) throw new Error(insertErr.message);

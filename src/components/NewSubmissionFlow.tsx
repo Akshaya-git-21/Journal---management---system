@@ -44,6 +44,7 @@ interface NewSubmissionFlowProps {
     abstract: string;
     cover_letter: string;
     language: string;
+    manuscript_type?: string | null;
     submission_step: number;
   } | null;
 }
@@ -52,6 +53,17 @@ interface NewSubmissionFlowProps {
 // the database only holds the core fields and the step; this holds everything
 // else (authors, files, funding, ethics, ...) so Resume restores it exactly.
 const DRAFT_STATE_PREFIX = 'ojs_draft_state_';
+
+const ARTICLE_TYPES = [
+  'Original Research Article',
+  'Review Article',
+  'Systematic Review',
+  'Meta-Analysis',
+  'Case Report',
+  'Short Communication',
+  'Methodology / Methods Article',
+  'Commentary / Perspective',
+];
 
 // Full list of steps representing OJS 3 editorial setup
 const STEPS = [
@@ -108,6 +120,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
   const [checklist4, setChecklist4] = useState(false);
   const [subLanguage, setSubLanguage] = useState('English');
   const [subSection, setSubSection] = useState('Articles');
+  const [articleType, setArticleType] = useState('');
   const [agreeConfidentiality, setAgreeConfidentiality] = useState(false);
   const [agreePrivacy, setAgreePrivacy] = useState(false);
   const [agreeContact, setAgreeContact] = useState(false);
@@ -265,7 +278,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
     ['completedSteps', completedSteps, setCompletedSteps],
     ['checklist1', checklist1, setChecklist1], ['checklist2', checklist2, setChecklist2],
     ['checklist3', checklist3, setChecklist3], ['checklist4', checklist4, setChecklist4],
-    ['subLanguage', subLanguage, setSubLanguage], ['subSection', subSection, setSubSection],
+    ['subLanguage', subLanguage, setSubLanguage], ['subSection', subSection, setSubSection], ['articleType', articleType, setArticleType],
     ['agreeConfidentiality', agreeConfidentiality, setAgreeConfidentiality], ['agreePrivacy', agreePrivacy, setAgreePrivacy],
     ['agreeContact', agreeContact, setAgreeContact], ['agreeInstructions', agreeInstructions, setAgreeInstructions],
     ['uploadedFiles', uploadedFiles, setUploadedFiles], ['additionalFiles', additionalFiles, setAdditionalFiles],
@@ -315,6 +328,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
         abstract: abstract.trim(),
         coverLetter,
         language: subLanguage,
+        manuscriptType: articleType,
         submissionStep: currentStep
       });
       setDraftSavedAt(new Date());
@@ -393,6 +407,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
       setAbstract(resumeDraft.abstract || '');
       setCoverLetter(resumeDraft.cover_letter || '');
       setSubLanguage(resumeDraft.language || 'English');
+      setArticleType(resumeDraft.manuscript_type || '');
       setCompletedSteps(Array.from({ length: step - 1 }, (_, i) => i + 1));
       setCurrentStep(step);
     }
@@ -418,7 +433,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
   const isStepValid = (step: number): boolean => {
     switch (step) {
       case 1:
-        return checklist1 && checklist2 && checklist3 && checklist4 && agreeConfidentiality && agreePrivacy && agreeInstructions;
+        return articleType !== '' && checklist1 && checklist2 && checklist3 && checklist4 && agreeConfidentiality && agreePrivacy && agreeInstructions;
       case 2:
         return uploadedFiles.some(f => f.componentType === 'Title Page')
             && uploadedFiles.some(f => f.componentType === 'Blind Manuscript')
@@ -1012,6 +1027,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
         subtitle: subtitle.trim(),
         stage: "Submission",
         language: subLanguage,
+        manuscriptType: articleType,
         section: subSection,
         abstract: abstract.trim(),
         receivedAt: new Date().toISOString().split('T')[0],
@@ -1251,7 +1267,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                   STEP 1.1: STANDARD LANGUAGE & SCOPE SECTION
                 </h4>
                 
-                <div className="grid grid-cols-1 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="space-y-2">
                     <label className="block text-sm font-bold text-slate-800 uppercase tracking-wide">
                       Submission Language *
@@ -1265,6 +1281,20 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                       <option value="English">English (United States)</option>
                       <option value="Spanish">Spanish (Castilian)</option>
                       <option value="Malay">Malay (Bahasa Melayu)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-sm font-bold text-slate-800 uppercase tracking-wide">
+                      Article Type *
+                    </label>
+                    <select
+                      id="articleType"
+                      value={articleType}
+                      onChange={(e) => setArticleType(e.target.value)}
+                      className="w-full bg-[#f8fbfe] border border-gray-300 rounded-xl p-3.5 text-sm focus:ring-2 focus:ring-[#008751] focus:border-[#008751] focus:bg-white focus:outline-none transition-all placeholder:text-gray-400 font-semibold"
+                    >
+                      <option value="">Select Article Type</option>
+                      {ARTICLE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </div>
                 </div>
@@ -3128,6 +3158,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     </div>
                     <div className="pt-2 text-sm space-y-2 text-slate-700 leading-relaxed font-normal">
                       <div>Language: <strong className="text-slate-900">{subLanguage}</strong></div>
+                      <div>Article Type: <strong className="text-slate-900">{articleType || '—'}</strong></div>
                       <div>Section: <strong className="text-slate-900">{subSection}</strong></div>
                       <div>License: <strong className="text-slate-900">CC BY 4.0</strong></div>
                       <div>Access: <strong className="text-[#008751] font-bold">Immediate Open Access</strong></div>

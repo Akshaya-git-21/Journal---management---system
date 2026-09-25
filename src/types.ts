@@ -135,6 +135,7 @@ export interface Manuscript {
   submissionStep: number; // For the Author wizard (1 to 5)
   editorsNotes: string; // Editors notes section
   language?: string;
+  manuscriptType?: string;
   assignedEditor?: string | null;
   assignedEditorEmail?: string | null;
 }
