@@ -2170,18 +2170,18 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                           <span className="font-bold text-slate-900 block text-sm">
                             {contrib.firstName} {contrib.lastName}
                           </span>
-                          <span className="text-xs text-gray-400 font-mono block mt-0.5">
+                          <span className="text-xs text-gray-500 block mt-0.5">
                             Country: {contrib.country || 'USA'}
                           </span>
                           {contrib.isPrincipalContact && (
-                            <span className="inline-flex bg-emerald-50 border border-emerald-300 text-[#008751] text-xs font-mono px-2 py-0.5 rounded-lg font-extrabold shadow-xs mt-1.5">
+                            <span className="inline-flex bg-emerald-50 border border-emerald-300 text-[#008751] text-xs px-2 py-0.5 rounded-lg font-extrabold shadow-xs mt-1.5">
                               ★ Corresponding Author
                             </span>
                           )}
                         </td>
-                        <td className="px-5 py-3.5 font-mono text-gray-500 text-sm whitespace-nowrap">{contrib.email}</td>
-                        <td className="px-5 py-3.5 text-sm">{contrib.department || <span className="text-slate-400">—</span>}</td>
-                        <td className="px-5 py-3.5 italic text-sm">{contrib.affiliation}</td>
+                        <td className="px-5 py-3.5 text-slate-700 text-sm whitespace-nowrap">{contrib.email}</td>
+                        <td className="px-5 py-3.5 text-slate-700 text-sm">{contrib.department || <span className="text-slate-400">—</span>}</td>
+                        <td className="px-5 py-3.5 text-slate-700 text-sm">{contrib.affiliation}</td>
                         <td className="px-5 py-3.5 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-2">
                             <button
