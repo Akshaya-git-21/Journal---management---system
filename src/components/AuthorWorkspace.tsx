@@ -381,17 +381,24 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       // Persist contributors (co-authors) -- previously captured in the
       // wizard but never written to manuscript_contributors.
       if (paperDetails.contributors && paperDetails.contributors.length > 0) {
-        const { error: contributorsError } = await supabase.from('manuscript_contributors').insert(
-          paperDetails.contributors.map((c: any, i: number) => ({
-            manuscript_id: manuscriptId,
-            name: [c.firstName, c.lastName].filter(Boolean).join(' ').trim() || c.name || '',
-            email: c.email || '',
-            affiliation: c.affiliation || '',
-            department: c.department || '',
-            contributor_role: c.role || (c.isPrincipalContact ? 'Primary Author' : 'Co-Author'),
-            position: i
-          }))
-        );
+        // A retry after a failed attempt must not duplicate rows.
+        await supabase.from('manuscript_contributors').delete().eq('manuscript_id', manuscriptId);
+        const contributorRows = paperDetails.contributors.map((c: any, i: number) => ({
+          manuscript_id: manuscriptId,
+          name: [c.firstName, c.lastName].filter(Boolean).join(' ').trim() || c.name || '',
+          email: c.email || '',
+          affiliation: c.affiliation || '',
+          department: c.department || '',
+          contributor_role: c.role || (c.isPrincipalContact ? 'Primary Author' : 'Co-Author'),
+          position: i
+        }));
+        let { error: contributorsError } = await supabase.from('manuscript_contributors').insert(contributorRows);
+        // Department column (migration 0124) not deployed yet -- save without it.
+        if (contributorsError && /department/i.test(contributorsError.message)) {
+          ({ error: contributorsError } = await supabase.from('manuscript_contributors').insert(
+            contributorRows.map(({ department, ...rest }: any) => rest)
+          ));
+        }
         if (contributorsError) {
           throw new Error(`Failed to save contributors: ${contributorsError.message}`);
         }
@@ -400,17 +407,23 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       // Persist author-suggested reviewers -- same table the Editor's later
       // suggestions land in, discriminated by suggested_by='AUTHOR'.
       if (paperDetails.reviewerSuggestions && paperDetails.reviewerSuggestions.length > 0) {
-        const { error: reviewersError } = await supabase.from('manuscript_suggested_reviewers').insert(
-          paperDetails.reviewerSuggestions.map((r: any) => ({
-            manuscript_id: manuscriptId,
-            suggested_by: 'AUTHOR' as const,
-            suggested_by_user: user.id,
-            name: r.name || '',
-            email: r.email || '',
-            department: r.department || '',
-            note: r.reason || r.note || ''
-          }))
-        );
+        await supabase.from('manuscript_suggested_reviewers').delete().eq('manuscript_id', manuscriptId).eq('suggested_by', 'AUTHOR');
+        const reviewerRows = paperDetails.reviewerSuggestions.map((r: any) => ({
+          manuscript_id: manuscriptId,
+          suggested_by: 'AUTHOR' as const,
+          suggested_by_user: user.id,
+          name: r.name || '',
+          email: r.email || '',
+          department: r.department || '',
+          note: r.reason || r.note || ''
+        }));
+        let { error: reviewersError } = await supabase.from('manuscript_suggested_reviewers').insert(reviewerRows);
+        // Department column (migration 0125) not deployed yet -- save without it.
+        if (reviewersError && /department/i.test(reviewersError.message)) {
+          ({ error: reviewersError } = await supabase.from('manuscript_suggested_reviewers').insert(
+            reviewerRows.map(({ department, ...rest }: any) => rest)
+          ));
+        }
         if (reviewersError) {
           throw new Error(`Failed to save suggested reviewers: ${reviewersError.message}`);
         }
@@ -488,6 +501,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       const errorMsg = err.message || 'Failed to submit manuscript';
       setError(errorMsg);
       console.error('[SUBMIT] Submission error:', errorMsg, err);
+      // Let the wizard show the failure instead of a false "submitted" screen.
+      throw new Error(errorMsg);
     }
   };
 
