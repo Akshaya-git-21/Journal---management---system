@@ -72,7 +72,7 @@ const STEPS = [
   { number: 3, label: 'Metadata Entry', desc: 'Title & Abstract' },
   { number: 4, label: 'List of Authors', desc: 'Co-authors directory' },
   { number: 5, label: 'Additional Files', desc: 'Supps & Cover Letter' },
-  { number: 6, label: 'Reviewers', desc: 'Suggestions panel' },
+  { number: 6, label: 'Recommended Reviewers', desc: 'Suggestions panel' },
   { number: 7, label: 'Publication Details', desc: 'Open access options' },
   { number: 8, label: 'Confirmation', desc: 'Review & submit' },
   { number: 9, label: 'Completion', desc: 'MSS ID issued' }
