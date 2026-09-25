@@ -2119,6 +2119,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                       <th className="px-5 py-3.5 w-16 text-center">Order</th>
                       <th className="px-5 py-3.5">Name</th>
                       <th className="px-5 py-3.5">Email</th>
+                      <th className="px-5 py-3.5">Department</th>
                       <th className="px-5 py-3.5">Affiliation</th>
                       <th className="px-5 py-3.5 w-36 text-center">Actions</th>
                     </tr>
@@ -2179,7 +2180,8 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                           )}
                         </td>
                         <td className="px-5 py-3.5 font-mono text-gray-500 text-sm whitespace-nowrap">{contrib.email}</td>
-                        <td className="px-5 py-3.5 italic text-sm">{contrib.department ? `${contrib.department}, ` : ''}{contrib.affiliation}</td>
+                        <td className="px-5 py-3.5 text-sm">{contrib.department || <span className="text-slate-400">—</span>}</td>
+                        <td className="px-5 py-3.5 italic text-sm">{contrib.affiliation}</td>
                         <td className="px-5 py-3.5 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-2">
                             <button
