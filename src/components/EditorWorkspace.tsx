@@ -273,6 +273,8 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
     'needs-editor': { label: 'Needs Editor', predicate: (r) => r.assignment.status === 'ACCEPTED' && r.manuscript.status === 'EDITOR_REVIEW' && r.assignment.assessment_status === 'NOT_STARTED' },
     // Invited but hasn't accepted yet.
     'in-submission-stage': { label: 'In Submission Stage', predicate: (r) => r.assignment.status === 'INVITED' },
+    // Assignments this Editor declined -- kept here (not deleted) once the manuscript is reopened for reassignment.
+    'declined': { label: 'Declined', predicate: (r) => r.assignment.status === 'DECLINED' },
     // Peer review is running and at least one reviewer still owes a response/report.
     'awaiting-reviews': { label: 'Awaiting Reviews', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' && r.reviewers.some((rv) => rv.status === 'INVITED' || rv.status === 'ACCEPTED') },
     // Every (non-declined) reviewer has submitted and the manuscript is at the decision gate.
@@ -392,6 +394,7 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
             await respondToAssignment(selected.assignment.id, false);
             setShowAcceptModal(false);
             setSelectedManuscriptId(null);
+            setSectionFilter('declined');
             await load();
           } catch (error: any) {
             alert('Error declining assignment: ' + error.message);
@@ -476,7 +479,7 @@ export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorksp
             </button>
             {expandedSections.submissions && (
               <div className="mt-2 space-y-1">
-                {(['active-submissions', 'needs-editor', 'in-submission-stage'] as const).map((id) => {
+                {(['active-submissions', 'needs-editor', 'in-submission-stage', 'declined'] as const).map((id) => {
                   const isActive = sectionFilter === id;
                   const count = rows.filter(SECTION_FILTERS[id].predicate).length;
                   return (
