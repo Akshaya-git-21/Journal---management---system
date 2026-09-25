@@ -2111,12 +2111,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                           `not is_revision_loop_round and not is_peer_review_round`),
                           so the UI shouldn't block those on it either. */}
                       {recommendationIsCurrent && !redeciding ? (
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
-                          <p className="text-sm font-bold text-emerald-900">
+                        <div className={`rounded-xl p-5 border ${assignment.recommendation === 'REJECT' ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                          <p className={`text-sm font-bold ${assignment.recommendation === 'REJECT' ? 'text-red-900' : 'text-emerald-900'}`}>
                             Editor Decision: {assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Peer Review 2' : assignment.recommendation!.replace(/_/g, ' ')}
                           </p>
                           {assignment.recommendation_submitted_at && (
-                            <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
+                            <p className={`text-xs mt-1 ${assignment.recommendation === 'REJECT' ? 'text-red-700' : 'text-emerald-700'}`}>{formatDate(assignment.recommendation_submitted_at)}</p>
                           )}
                         </div>
                       ) : !evaluationSubmitted && !isRevisionDecision && !isPeerReviewRound ? (
@@ -2867,12 +2867,12 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                           `not is_revision_loop_round and not is_peer_review_round`),
                           so the UI shouldn't block those on it either. */}
                       {recommendationIsCurrent && !redeciding ? (
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
-                          <p className="text-sm font-bold text-emerald-900">
+                        <div className={`rounded-xl p-5 border ${assignment.recommendation === 'REJECT' ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                          <p className={`text-sm font-bold ${assignment.recommendation === 'REJECT' ? 'text-red-900' : 'text-emerald-900'}`}>
                             Editor Decision: {assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Peer Review 2' : assignment.recommendation!.replace(/_/g, ' ')}
                           </p>
                           {assignment.recommendation_submitted_at && (
-                            <p className="text-xs text-emerald-700 mt-1">{formatDate(assignment.recommendation_submitted_at)}</p>
+                            <p className={`text-xs mt-1 ${assignment.recommendation === 'REJECT' ? 'text-red-700' : 'text-emerald-700'}`}>{formatDate(assignment.recommendation_submitted_at)}</p>
                           )}
                         </div>
                       ) : !evaluationSubmitted && !isRevisionDecision && !isPeerReviewRound ? (
