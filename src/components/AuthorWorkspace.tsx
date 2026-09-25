@@ -351,7 +351,8 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               is_double_blind: newManuscript.isDoubleBlind,
               cover_letter: newManuscript.coverLetter,
               language: newManuscript.language,
-              manuscript_type: newManuscript.manuscriptType
+              manuscript_type: newManuscript.manuscriptType,
+              draft_state: null
             })
             .eq('id', manuscriptId)).error
         : (await supabase
@@ -530,6 +531,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
             cover_letter: paperDetails.coverLetter || '',
             language: paperDetails.language || 'English',
             manuscript_type: paperDetails.manuscriptType || '',
+            draft_state: paperDetails.draftState ?? null,
             submission_step: paperDetails.submissionStep || 1
           })
           .eq('id', manuscriptId);
@@ -549,6 +551,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
             author_email: currentUser?.email || user.email || '',
             language: paperDetails.language || 'English',
             manuscript_type: paperDetails.manuscriptType || '',
+            draft_state: paperDetails.draftState ?? null,
             submission_step: paperDetails.submissionStep || 1
           }]);
         if (insertError) throw new Error(insertError.message);

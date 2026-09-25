@@ -664,6 +664,7 @@ export interface ManuscriptRow {
   files?: ManuscriptFileRow[];
   section?: string | null;
   manuscript_type?: string | null;
+  draft_state?: Record<string, any> | null;
   keywords?: string | null;
   word_count?: string | number | null;
   num_figures?: string | number | null;

@@ -45,6 +45,7 @@ interface NewSubmissionFlowProps {
     cover_letter: string;
     language: string;
     manuscript_type?: string | null;
+    draft_state?: Record<string, any> | null;
     submission_step: number;
   } | null;
 }
@@ -314,11 +315,12 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
     setIsSavingDraft(true);
     try {
       const id = getOrCreateManuscriptId();
-      // Remember the whole form + the step the author is on, so Resume picks
-      // up exactly here (stored before the list view takes over).
+      // Remember the whole form + the step the author is on (incl. references
+      // to every uploaded file), so Resume picks up exactly here. Saved on the
+      // DRAFT row itself, with a local copy as a fallback.
+      const snapshot: Record<string, any> = { currentStep };
+      draftFields().forEach(([key, value]) => { snapshot[key] = value; });
       try {
-        const snapshot: Record<string, any> = { currentStep };
-        draftFields().forEach(([key, value]) => { snapshot[key] = value; });
         localStorage.setItem(DRAFT_STATE_PREFIX + id, JSON.stringify(snapshot));
       } catch (storageErr) {
         console.warn('Could not store the full draft state locally:', storageErr);
@@ -331,6 +333,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
         coverLetter,
         language: subLanguage,
         manuscriptType: articleType,
+        draftState: snapshot,
         submissionStep: currentStep
       });
       setDraftSavedAt(new Date());
@@ -348,8 +351,8 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
     const first = nameParts[0] || '';
     const last = nameParts.slice(1).join(' ') || '';
     
-    // Default Principal Contributor
-    setContributors([
+    // Default Principal Contributor (a resumed draft brings its own authors)
+    if (!resumeDraft) setContributors([
       {
         id: 'c-default',
         firstName: first,
@@ -392,8 +395,8 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
   useEffect(() => {
     if (!resumeDraft) return;
     setDraftManuscriptId(resumeDraft.id);
-    let snapshot: Record<string, any> | null = null;
-    try {
+    let snapshot: Record<string, any> | null = resumeDraft.draft_state ?? null;
+    if (!snapshot) try {
       const raw = localStorage.getItem(DRAFT_STATE_PREFIX + resumeDraft.id);
       if (raw) snapshot = JSON.parse(raw);
     } catch { snapshot = null; }
