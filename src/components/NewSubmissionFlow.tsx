@@ -240,6 +240,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
   const [revEmail, setRevEmail] = useState('');
   const [revAffiliation, setRevAffiliation] = useState('');
   const [revDepartment, setRevDepartment] = useState('');
+  const [editingRevId, setEditingRevId] = useState<string | null>(null);
   const [revReason, setRevReason] = useState('');
 
   // Step 7: Publishing preferences State
@@ -998,19 +999,24 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
       alert('Please fill out all reviewer fields: Name, Email, Affiliation, and Reason.');
       return;
     }
-    if (reviewerSuggestions.length >= 5) {
+    if (!editingRevId && reviewerSuggestions.length >= 5) {
       alert('You may suggest up to 5 reviewers only.');
       return;
     }
     const newRev = {
-      id: 'rev-' + Date.now(),
+      id: editingRevId ?? 'rev-' + Date.now(),
       name: revName.trim(),
       email: revEmail.trim(),
       affiliation: revAffiliation.trim(),
       department: revDepartment.trim(),
       reason: revReason.trim()
     };
-    setReviewerSuggestions(prev => [...prev, newRev]);
+    setReviewerSuggestions(prev => editingRevId ? prev.map(r => r.id === editingRevId ? newRev : r) : [...prev, newRev]);
+    resetReviewerForm();
+  };
+
+  const resetReviewerForm = () => {
+    setEditingRevId(null);
     setRevName('');
     setRevEmail('');
     setRevAffiliation('');
@@ -1018,8 +1024,19 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
     setRevReason('');
   };
 
+  const handleEditReviewer = (rev: any) => {
+    setEditingRevId(rev.id);
+    setRevName(rev.name || '');
+    setRevEmail(rev.email || '');
+    setRevAffiliation(rev.affiliation || '');
+    setRevDepartment(rev.department || '');
+    setRevReason(rev.reason || '');
+    document.getElementById('reviewer-form-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
   const handleRemoveReviewer = (id: string) => {
     setReviewerSuggestions(prev => prev.filter(r => r.id !== id));
+    if (editingRevId === id) resetReviewerForm();
   };
 
   // Final submit dispatcher with comprehensive validation and error handling
@@ -3078,10 +3095,10 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
               </div>
 
               {/* Suggestions adding panel */}
-              <div className="bg-slate-50 p-6 border border-emerald-100 rounded-2xl space-y-4">
+              <div id="reviewer-form-panel" className="bg-slate-50 p-6 border border-emerald-100 rounded-2xl space-y-4">
                 <span className="text-sm uppercase font-sans font-extrabold text-[#008751] block border-b border-emerald-100 pb-2 flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full bg-[#008751]" />
-                  Add Suggested Peer Reviewers
+                  {editingRevId ? 'Edit Suggested Peer Reviewer' : 'Add Suggested Peer Reviewers'}
                 </span>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -3141,13 +3158,22 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                   </div>
                 </div>
 
-                <div className="pt-2 text-right">
+                <div className="pt-2 text-right flex justify-end gap-2">
+                  {editingRevId && (
+                    <button
+                      type="button"
+                      onClick={resetReviewerForm}
+                      className="px-5 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 rounded-xl text-slate-700 text-sm font-bold transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleAddReviewer}
                     className="px-5 py-2.5 bg-[#008751] hover:bg-emerald-700 rounded-xl text-white text-sm font-bold transition cursor-pointer shadow-xs"
                   >
-                    Insert suggested peer records
+                    {editingRevId ? 'Update suggested peer record' : 'Insert suggested peer records'}
                   </button>
                 </div>
               </div>
@@ -3169,7 +3195,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                         <th className="px-5 py-3.5">Department</th>
                         <th className="px-5 py-3.5">Affiliation</th>
                         <th className="px-5 py-3.5">Research Area</th>
-                        <th className="px-5 py-3.5 w-20 text-center">Delete</th>
+                        <th className="px-5 py-3.5 w-32 text-center">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y text-slate-750 text-sm font-medium">
@@ -3190,7 +3216,14 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                             <td className="px-5 py-3.5 text-slate-700 text-sm">{rev.department || <span className="text-slate-400">—</span>}</td>
                             <td className="px-5 py-3.5 text-slate-700 text-sm">{rev.affiliation}</td>
                             <td className="px-5 py-3.5 text-slate-600 font-normal leading-relaxed text-sm">{rev.reason}</td>
-                            <td className="px-5 py-3.5 text-center">
+                            <td className="px-5 py-3.5 text-center whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => handleEditReviewer(rev)}
+                                className="text-xs font-bold text-[#008751] bg-slate-100 hover:bg-emerald-50 px-3 py-1.5 rounded-lg mr-1 transition"
+                              >
+                                Edit
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleRemoveReviewer(rev.id)}
