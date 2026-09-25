@@ -351,8 +351,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
               is_double_blind: newManuscript.isDoubleBlind,
               cover_letter: newManuscript.coverLetter,
               language: newManuscript.language,
-              manuscript_type: newManuscript.manuscriptType,
-              draft_state: null
+              manuscript_type: newManuscript.manuscriptType
             })
             .eq('id', manuscriptId)).error
         : (await supabase
@@ -521,49 +520,58 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
         .maybeSingle();
       if (lookupError) throw new Error(lookupError.message);
 
-      if (existing) {
-        const { error: updateError } = await supabase
-          .from('manuscripts')
-          .update({
-            title: paperDetails.title || '',
-            subtitle: paperDetails.subtitle || '',
-            abstract: paperDetails.abstract || '',
-            cover_letter: paperDetails.coverLetter || '',
-            language: paperDetails.language || 'English',
-            manuscript_type: paperDetails.manuscriptType || '',
-            draft_state: paperDetails.draftState ?? null,
-            submission_step: paperDetails.submissionStep || 1
-          })
-          .eq('id', manuscriptId);
-        if (updateError) throw new Error(updateError.message);
-      } else {
-        const { error: insertError } = await supabase
-          .from('manuscripts')
-          .insert([{
-            id: manuscriptId,
-            title: paperDetails.title || '',
-            subtitle: paperDetails.subtitle || '',
-            abstract: paperDetails.abstract || '',
-            cover_letter: paperDetails.coverLetter || '',
-            status: 'DRAFT',
-            author_id: user.id,
-            author_name: currentUser?.name || 'Unknown Author',
-            author_email: currentUser?.email || user.email || '',
-            language: paperDetails.language || 'English',
-            manuscript_type: paperDetails.manuscriptType || '',
-            draft_state: paperDetails.draftState ?? null,
-            submission_step: paperDetails.submissionStep || 1
-          }]);
-        if (insertError) throw new Error(insertError.message);
-      }
+      // The full-wizard snapshot lives in manuscripts.draft_state (migration 0126).
+      // If that column isn't deployed yet, still save the basic fields and rely on
+      // the local copy rather than losing the draft entirely.
+      const persist = async (includeState: boolean): Promise<string | null> => {
+        if (existing) {
+          const { error: updateError } = await supabase
+            .from('manuscripts')
+            .update({
+              title: paperDetails.title || '',
+              subtitle: paperDetails.subtitle || '',
+              abstract: paperDetails.abstract || '',
+              cover_letter: paperDetails.coverLetter || '',
+              language: paperDetails.language || 'English',
+              manuscript_type: paperDetails.manuscriptType || '',
+              ...(includeState ? { draft_state: paperDetails.draftState ?? null } : {}),
+              submission_step: paperDetails.submissionStep || 1
+            })
+            .eq('id', manuscriptId);
+          if (updateError) return updateError.message;
+        } else {
+          const { error: insertError } = await supabase
+            .from('manuscripts')
+            .insert([{
+              id: manuscriptId,
+              title: paperDetails.title || '',
+              subtitle: paperDetails.subtitle || '',
+              abstract: paperDetails.abstract || '',
+              cover_letter: paperDetails.coverLetter || '',
+              status: 'DRAFT',
+              author_id: user.id,
+              author_name: currentUser?.name || 'Unknown Author',
+              author_email: currentUser?.email || user.email || '',
+              language: paperDetails.language || 'English',
+              manuscript_type: paperDetails.manuscriptType || '',
+              ...(includeState ? { draft_state: paperDetails.draftState ?? null } : {}),
+              submission_step: paperDetails.submissionStep || 1
+            }]);
+          if (insertError) return insertError.message;
+        }
+        return null;
+      };
+      let persistError = await persist(true);
+      if (persistError && /draft_state/i.test(persistError)) persistError = await persist(false);
+      if (persistError) throw new Error(persistError);
 
       await load();
       setStatusFilter('incomplete');
       setResumeDraft(null);
       setView('list');
     } catch (err: any) {
-      setError(err.message || 'Failed to save draft');
       console.error('[SAVE DRAFT] Error:', err);
+      throw new Error(err.message || 'Failed to save draft');
     }
   };
 
