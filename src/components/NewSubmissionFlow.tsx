@@ -452,7 +452,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
       case 5:
         return true; // Optional sections
       case 6:
-        return reviewerSuggestions.length >= 3;
+        return reviewerSuggestions.length >= 3 && previouslySubmitted !== 'Yes';
       case 7:
         return acceptLicense;
       case 8:
@@ -548,6 +548,10 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
     }
 
     if (currentStep === 6) {
+      if (previouslySubmitted === 'Yes') {
+        setValidationError('Manuscripts previously submitted elsewhere cannot be submitted to this journal.');
+        return;
+      }
       if (reviewerSuggestions.length < 3) {
         setValidationError(`At least 3 suggested reviewers are required (currently ${reviewerSuggestions.length}).`);
         return;
@@ -1003,6 +1007,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
     const validationChecks = [
       { condition: !title.trim(), message: 'Manuscript title is required' },
       { condition: !abstract.trim(), message: 'Abstract is required' },
+      { condition: previouslySubmitted === 'Yes', message: 'Manuscripts previously submitted elsewhere cannot be submitted to this journal' },
       { condition: contributors.length === 0, message: 'At least one author is required' },
       { condition: uploadedFiles.filter(f => f.componentType === 'Blind Manuscript').length === 0, message: 'Blind manuscript file is required' },
       { condition: uploadedFiles.filter(f => f.componentType === 'Title Page').length === 0, message: 'Title page is required' },
@@ -2587,62 +2592,11 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                   </div>
 
                   {previouslySubmitted === 'Yes' && (
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 mt-2 animate-in fade-in-80 duration-150">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <label className="block text-xs font-bold text-slate-700">Previous Journal Name *</label>
-                          <input 
-                            type="text" 
-                            value={prevJournalName} 
-                            onChange={(e) => setPrevJournalName(e.target.value)} 
-                            className="w-full bg-white border border-gray-300 rounded-lg p-2.5 text-sm" 
-                            placeholder="e.g. Nature Microbiology"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block text-xs font-bold text-slate-700">Manuscript ID (if applicable)</label>
-                          <input 
-                            type="text" 
-                            value={prevManuscriptId} 
-                            onChange={(e) => setPrevManuscriptId(e.target.value)} 
-                            className="w-full bg-white border border-gray-300 rounded-lg p-2.5 text-sm" 
-                            placeholder="e.g. NAT-MB-2025-08"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block text-xs font-bold text-slate-700">Submission Date</label>
-                          <input 
-                            type="date" 
-                            value={prevSubmissionDate} 
-                            onChange={(e) => setPrevSubmissionDate(e.target.value)} 
-                            className="w-full bg-white border border-gray-300 rounded-lg p-2.5 text-sm" 
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block text-xs font-bold text-slate-700">Decision Status</label>
-                          <select 
-                            value={prevDecisionStatus} 
-                            onChange={(e) => setPrevDecisionStatus(e.target.value)} 
-                            className="w-full bg-white border border-gray-300 rounded-lg p-2.5 text-sm"
-                          >
-                            <option value="">-- Choose Status --</option>
-                            <option value="Rejected after review">Rejected after review</option>
-                            <option value="Rejected without review (Desk reject)">Rejected without review (Desk reject)</option>
-                            <option value="Withdrawn by author">Withdrawn by author</option>
-                            <option value="Other">Other</option>
-                          </select>
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="block text-xs font-bold text-slate-700">Comments detailing changes made since that submission</label>
-                        <textarea 
-                          value={prevComments} 
-                          onChange={(e) => setPrevComments(e.target.value)} 
-                          rows={2}
-                          className="w-full bg-white border border-gray-300 rounded-lg p-2.5 text-sm" 
-                          placeholder="Explain what additions, extra experiments, or text improvements were performed..."
-                        />
-                      </div>
+                    <div role="alert" className="p-4 bg-amber-50 border border-amber-300 rounded-xl mt-2 text-sm text-amber-900 leading-relaxed">
+                      <p className="font-bold mb-1">Unable to proceed with this submission</p>
+                      <p>
+                        Thank you for your interest in our journal. As per our editorial policy, we can only consider manuscripts that have not been previously submitted elsewhere. We are therefore unable to accept this manuscript for submission at this time.
+                      </p>
                     </div>
                   )}
                 </div>
