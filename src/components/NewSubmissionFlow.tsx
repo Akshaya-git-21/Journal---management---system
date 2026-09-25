@@ -429,6 +429,12 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
     localStorage.setItem('ojs_submission_cached_draft', JSON.stringify(draftData));
   };
 
+  // Keywords are optional, but when filled they must be comma-separated (2+ terms).
+  const keywordsValid = (() => {
+    const v = keywords.trim();
+    return v === '' || v.split(',').filter(t => t.trim() !== '').length >= 2;
+  })();
+
   // Check if a step is valid (can move forward from it)
   const isStepValid = (step: number): boolean => {
     switch (step) {
@@ -439,7 +445,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
             && uploadedFiles.some(f => f.componentType === 'Blind Manuscript')
             && uploadedFiles.some(f => f.componentType === 'Author Form');
       case 3:
-        return title.trim() !== '' && abstract.trim() !== '';
+        return title.trim() !== '' && abstract.trim() !== '' && keywordsValid;
       case 4:
         return contributors.length > 0;
       case 5:
@@ -509,6 +515,10 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
     }
 
     if (currentStep === 3) {
+      if (!keywordsValid) {
+        setValidationError('Keywords must be separated by commas (e.g. distributed systems, clocks).');
+        return;
+      }
       if (!title.trim()) {
         setValidationError('The manuscript title is required.');
         return;
@@ -2068,6 +2078,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     placeholder="distributed-computing, lockless-graph, ojs3"
                     className="w-full bg-[#f8fbfe] border border-gray-300 rounded-xl p-3.5 text-sm focus:ring-2 focus:ring-[#008751] focus:bg-white focus:outline-none transition-all placeholder:text-gray-400 font-semibold"
                   />
+                  {!keywordsValid && (
+                    <p className="text-xs text-red-600 font-semibold">Enter at least two keywords separated by commas.</p>
+                  )}
                 </div>
               </div>
 
