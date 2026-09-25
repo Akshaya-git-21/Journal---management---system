@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { ManuscriptStatus, ReviewerRecommendation } from '../types';
 import { editorSeesReplacementNeeded } from './reviewerStatus';
+import { getEditorAcceptanceState } from './editorAcceptance';
 export type { ReviewerRecommendation };
 
 /**
@@ -1041,3 +1042,33 @@ export async function markAllNotificationsRead(): Promise<void> {
  * many were actually deleted. */
 export const deleteManuscripts = (ids: string[]) =>
   rpcOrThrow<number>(supabase.rpc('coordinator_delete_manuscripts', { p_ids: ids }));
+
+export interface EditorWorkload {
+  open: number;
+  pending: number;
+  overdue: number;
+}
+
+/** Per-editor workload shown next to each name in the Coordinator's editor
+ * picker (read-only; Coordinators can already read every editor_assignments
+ * row). open = not declined and first evaluation not submitted; pending =
+ * invited, awaiting accept/decline; overdue = no response after 96h (new
+ * assignments only) or past the editorial completion deadline. */
+export async function getEditorWorkloads(): Promise<Record<string, EditorWorkload>> {
+  const { data, error } = await supabase
+    .from('editor_assignments')
+    .select('editor_id, status, assessment_status, assigned_at, timeline_end_date');
+  if (error) throw new Error(error.message);
+  const today = new Date().toISOString().slice(0, 10);
+  const out: Record<string, EditorWorkload> = {};
+  for (const a of data ?? []) {
+    if (a.status === 'DECLINED' || a.assessment_status === 'SUBMITTED') continue;
+    const w = (out[a.editor_id] ??= { open: 0, pending: 0, overdue: 0 });
+    w.open += 1;
+    if (a.status === 'INVITED') w.pending += 1;
+    const noResponseOverdue = getEditorAcceptanceState(a) === 'OVERDUE';
+    const pastDeadline = !!a.timeline_end_date && a.timeline_end_date < today;
+    if (noResponseOverdue || pastDeadline) w.overdue += 1;
+  }
+  return out;
+}

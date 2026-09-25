@@ -3,7 +3,15 @@ import { RevisionRow } from './workflow';
 
 interface EditorAssignmentStatusLike {
   status: 'INVITED' | 'ACCEPTED' | 'DECLINED';
+  assigned_at?: string | null;
 }
+
+import { getEditorAcceptanceState } from './editorAcceptance';
+export { getEditorAcceptanceState, EDITOR_ACCEPTANCE_RULES_START, EDITOR_OVERDUE_AFTER_MS } from './editorAcceptance';
+
+export const EDITOR_AWAITING_LABEL = 'AWAITING EDITOR RESPONSE';
+export const EDITOR_REMINDER_LABEL = 'AWAITING EDITOR RESPONSE – REMINDER AVAILABLE';
+export const EDITOR_OVERDUE_LABEL = 'EDITOR RESPONSE OVERDUE';
 
 /**
  * Phase 3 -- standardized user-facing manuscript status. Exactly 8 values,
@@ -192,7 +200,12 @@ export function getCoordinatorStatusLabel(
   ) return EDITOR_DECLINED_LABEL;
   if (label !== 'EDITORIAL REVIEW' || !editorAssignments || editorAssignments.length === 0) return label;
   const activeEditor = editorAssignments.find((a) => a.status === 'ACCEPTED') || editorAssignments[0];
-  return activeEditor.status === 'ACCEPTED' ? label : 'EDITOR ASSIGNED';
+  if (activeEditor.status === 'ACCEPTED') return label;
+  const acceptance = getEditorAcceptanceState(activeEditor);
+  if (acceptance === 'AWAITING') return EDITOR_AWAITING_LABEL;
+  if (acceptance === 'REMINDER_AVAILABLE') return EDITOR_REMINDER_LABEL;
+  if (acceptance === 'OVERDUE') return EDITOR_OVERDUE_LABEL;
+  return 'EDITOR ASSIGNED';
 }
 
 export function getCoordinatorStatusMeta(
@@ -204,6 +217,9 @@ export function getCoordinatorStatusMeta(
   const label = getCoordinatorStatusLabel(manuscript, editorAssignments, latestRevision, productionStatus);
   if (label === 'EDITOR ASSIGNED') return { label, nextStep: 'Waiting for the editor to accept the assignment' };
   if (label === EDITOR_DECLINED_LABEL) return { label, nextStep: 'Assign another editor' };
+  if (label === EDITOR_AWAITING_LABEL) return { label, nextStep: 'Waiting for the editor to accept or decline the assignment' };
+  if (label === EDITOR_REMINDER_LABEL) return { label, nextStep: 'Send the editor a reminder' };
+  if (label === EDITOR_OVERDUE_LABEL) return { label, nextStep: 'Editor has not responded -- reassignment required' };
   return getManuscriptStatusMeta(manuscript, latestRevision, productionStatus, label);
 }
 

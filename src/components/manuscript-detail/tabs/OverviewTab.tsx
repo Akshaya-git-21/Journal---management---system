@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, assignEditor, getEditorReviewerActions, getPendingEditorSuggestions, coordinatorSendEditorReminder, getManuscriptReviewerPool } from '../../../lib/workflow';
-import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision, EDITOR_DECLINED_LABEL } from '../../../lib/manuscriptStatusLabel';
+import { ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, ProfileRow, SuggestedReviewerRow, RevisionRow, EditorReviewerActionRow, listActiveProfilesByRole, getEditorWorkloads, EditorWorkload, assignEditor, getEditorReviewerActions, getPendingEditorSuggestions, coordinatorSendEditorReminder, getManuscriptReviewerPool } from '../../../lib/workflow';
+import { getCoordinatorStatusLabel, getRevisionMeta, getLatestRevision, EDITOR_DECLINED_LABEL, getEditorAcceptanceState, EDITOR_ACCEPTANCE_RULES_START, EDITOR_OVERDUE_AFTER_MS } from '../../../lib/manuscriptStatusLabel';
 import { getReviewerDisplayStatus } from '../../../lib/reviewerStatus';
 import { formatTimelineDate } from '../../../lib/dateFormat';
 import { getProduction, subscribeToProduction } from '../../../lib/production';
@@ -40,6 +40,9 @@ export function OverviewTab({
 
   const activeEditor = editorAssignments.find(a => a.status === 'ACCEPTED') || editorAssignments[0];
   const evaluationSubmitted = activeEditor?.assessment_status === 'SUBMITTED';
+  // Phase 1 acceptance window -- applies to new assignments only.
+  const acceptanceApplies = !!activeEditor && new Date(activeEditor.assigned_at).getTime() >= new Date(EDITOR_ACCEPTANCE_RULES_START).getTime();
+  const reminderLocked = getEditorAcceptanceState(activeEditor) === 'AWAITING';
   // editorAssignments is newest-first. A DECLINED row is history, not the
   // current Editor: the card below tracks the live (invited/accepted)
   // assignment, and declined ones are listed alongside it.
@@ -131,6 +134,7 @@ export function OverviewTab({
   // Assign Editor (SUBMITTED -> EDITOR_REVIEW)
   const [availableEditors, setAvailableEditors] = useState<ProfileRow[]>([]);
   const [selectedEditorId, setSelectedEditorId] = useState('');
+  const [editorWorkloads, setEditorWorkloads] = useState<Record<string, EditorWorkload>>({});
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState('');
   const [showEditorConfirmation, setShowEditorConfirmation] = useState(false);
@@ -147,6 +151,7 @@ export function OverviewTab({
   useEffect(() => {
     if (manuscript.status !== 'SUBMITTED') return;
     listActiveProfilesByRole('EDITOR').then(setAvailableEditors).catch((e) => setAssignError(e.message));
+    getEditorWorkloads().then(setEditorWorkloads).catch(() => setEditorWorkloads({}));
   }, [manuscript.status]);
 
   const handleAssignEditorClick = () => {
@@ -309,7 +314,15 @@ export function OverviewTab({
               <div>
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Editorial Timeline</p>
                 <p className="text-sm text-slate-800">
-                  Start: {formatTimelineDate(activeEditor.timeline_start_date)} &nbsp;&bull;&nbsp; Deadline: {formatTimelineDate(activeEditor.timeline_end_date)}
+                  {formatTimelineDate(activeEditor.timeline_start_date)} – {formatTimelineDate(activeEditor.timeline_end_date)}
+                </p>
+                {acceptanceApplies && (
+                  <p className="text-xs text-slate-600 mt-1">
+                    Editor Acceptance Period: {formatTimelineDate(activeEditor.assigned_at)} – {formatTimelineDate(new Date(new Date(activeEditor.assigned_at).getTime() + EDITOR_OVERDUE_AFTER_MS).toISOString())}
+                  </p>
+                )}
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Editorial Completion Deadline: {formatTimelineDate(activeEditor.timeline_end_date)}
                 </p>
                 {activeEditor.last_reminder_sent_at && (
                   <p className="text-xs text-slate-400 mt-1">Last reminder sent {new Date(activeEditor.last_reminder_sent_at).toLocaleString()}</p>
@@ -319,8 +332,8 @@ export function OverviewTab({
                 <button
                   type="button"
                   onClick={handleSendEditorReminder}
-                  disabled={sendingReminder || activeEditor.assessment_status === 'SUBMITTED'}
-                  title={activeEditor.assessment_status === 'SUBMITTED' ? 'Evaluation already submitted -- no reminder needed' : 'Send a reminder to the assigned Editor'}
+                  disabled={sendingReminder || activeEditor.assessment_status === 'SUBMITTED' || reminderLocked}
+                  title={activeEditor.assessment_status === 'SUBMITTED' ? 'Evaluation already submitted -- no reminder needed' : reminderLocked ? 'A reminder can be sent 48 hours after the editor was assigned' : 'Send a reminder to the assigned Editor'}
                   className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {sendingReminder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bell className="w-3.5 h-3.5" />}
@@ -534,7 +547,7 @@ export function OverviewTab({
                   >
                     <option value="">-- Select Editor --</option>
                     {availableEditors.map((ed) => (
-                      <option key={ed.id} value={ed.id}>{ed.name} ({ed.email})</option>
+                      <option key={ed.id} value={ed.id}>{ed.name} ({ed.email}) — {(editorWorkloads[ed.id]?.open ?? 0)} open · {(editorWorkloads[ed.id]?.pending ?? 0)} pending · {(editorWorkloads[ed.id]?.overdue ?? 0)} overdue</option>
                     ))}
                   </select>
                 </div>
