@@ -174,6 +174,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
   const [coverLetter, setCoverLetter] = useState('');
   const [additionalFiles, setAdditionalFiles] = useState<any[]>([]);
   const [isUploadingAddFile, setIsUploadingAddFile] = useState(false);
+  const [isUploadingFigure, setIsUploadingFigure] = useState(false);
+  const [uploadProgressFigure, setUploadProgressFigure] = useState(0);
+  const [dragActiveFigure, setDragActiveFigure] = useState(false);
   const [addFileProgress, setAddFileProgress] = useState(0);
 
   // New Step 5.3+ detailed form elements
@@ -722,6 +725,21 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
 
   const simulateAuthorFormUpload = (file: File) => {
     performRealUpload(file, 'Author Form', setUploadProgressAuthorForm, setIsUploadingAuthorForm);
+  };
+
+  // F. Figures, diagrams & visual materials -- image/PDF formats, several files allowed
+  const FIGURE_FILE_ACCEPT = '.jpg,.jpeg,.png,.tif,.tiff,.svg,.gif,.pdf';
+  const isFigureFile = (file: File) => /.(jpe?g|png|tiff?|svg|gif|pdf)$/i.test(file.name);
+  const uploadFigureFiles = (files: FileList | File[]) => {
+    Array.from(files).forEach((file) => {
+      if (!isFigureFile(file)) {
+        setValidationError(`"${file.name}" is not an accepted figure format (JPG, PNG, TIFF, SVG, GIF, PDF).`);
+        return;
+      }
+      performRealUpload(file, 'Figure', setUploadProgressFigure, setIsUploadingFigure, (newFile) => {
+        setUploadedFiles(prev => [...prev, newFile]);
+      });
+    });
   };
 
   const simulateEthicalCertificateUpload = (file: File) => {
@@ -1999,6 +2017,94 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+
+              {/* F. Figures, Diagrams & Visual Materials */}
+              <div id="figures-sub-card" className="bg-white border border-slate-200 rounded-2xl p-5.5 space-y-4 shadow-xs text-left">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                  <div className="space-y-0.5 text-left">
+                    <h4 className="font-extrabold text-sm text-[#002b3d] flex items-center gap-1.5 uppercase">
+                      <span className="flex items-center justify-center w-5 h-5 rounded-full bg-[#008751]/10 text-[#008751] text-xs font-bold">F</span>
+                      Figures, Diagrams & Visual Materials
+                      <span className="text-slate-400 font-semibold text-[10px] normal-case">(Optional)</span>
+                    </h4>
+                    <p className="text-xs text-slate-550 font-medium">
+                      Upload figures, diagrams, charts, illustrations, photographs, GIFs, and other visual materials associated with your manuscript. Please upload each file in its original/highest available quality.
+                    </p>
+                  </div>
+                  <span className="text-slate-400 font-mono text-[10px] uppercase font-bold bg-slate-100 px-2 py-0.5 rounded-md self-start sm:self-center">JPG, PNG, TIFF, SVG, GIF, PDF</span>
+                </div>
+
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setDragActiveFigure(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); setDragActiveFigure(false); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragActiveFigure(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) uploadFigureFiles(e.dataTransfer.files);
+                  }}
+                  className={`border-2 border-dashed rounded-xl p-6 text-center transition duration-150 relative ${
+                    dragActiveFigure ? 'border-[#008751] bg-[#008751]/5' : 'border-slate-200 bg-slate-50/50 hover:bg-white'
+                  }`}
+                >
+                  <input
+                    type="file"
+                    id="figure-file-input"
+                    multiple
+                    accept={FIGURE_FILE_ACCEPT}
+                    onChange={(e) => { if (e.target.files) uploadFigureFiles(e.target.files); e.target.value = ''; }}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <div className="flex flex-col items-center justify-center space-y-2">
+                    <Upload className="w-9 h-9 text-[#008751]/75" />
+                    <p className="text-slate-700 font-bold text-xs">
+                      Drag & drop figures here, or <span className="text-[#008751] underline">browse files</span>
+                    </p>
+                    <p className="text-slate-400 text-[10px]">Accepted formats: JPG / JPEG, PNG, TIFF, SVG, GIF, PDF</p>
+                  </div>
+                </div>
+
+                {isUploadingFigure && (
+                  <div className="bg-emerald-50/40 p-3 rounded-lg border space-y-1">
+                    <div className="flex justify-between text-xs text-slate-700 font-mono">
+                      <span>Uploading figure to server...</span>
+                      <span>{uploadProgressFigure}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
+                      <div className="bg-[#008751] h-1" style={{ width: `${uploadProgressFigure}%` }}></div>
+                    </div>
+                  </div>
+                )}
+
+                {uploadedFiles.some(f => f.componentType === 'Figure') && (
+                  <div className="bg-white border border-slate-150 rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b text-[10px] uppercase">
+                        <tr>
+                          <th className="px-4 py-3 w-10">#</th>
+                          <th className="px-4 py-3">File Name</th>
+                          <th className="px-4 py-3">Size</th>
+                          <th className="px-4 py-3 w-24 text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y text-slate-700">
+                        {uploadedFiles.filter(f => f.componentType === 'Figure').map((fig, idx) => (
+                          <tr key={fig.id} className="hover:bg-[#f8fafc]/50">
+                            <td className="px-4 py-3 text-slate-400">{idx + 1}</td>
+                            <td className="px-4 py-3 font-semibold text-slate-800">{fig.fileName}</td>
+                            <td className="px-4 py-3 text-slate-500">{fig.fileSize}</td>
+                            <td className="px-4 py-3 text-center">
+                              <button type="button" onClick={() => deleteUploadedFile(fig.id)} className="text-red-500 hover:text-red-700 p-1">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
             </div>
