@@ -407,6 +407,7 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
             suggested_by_user: user.id,
             name: r.name || '',
             email: r.email || '',
+            department: r.department || '',
             note: r.reason || r.note || ''
           }))
         );

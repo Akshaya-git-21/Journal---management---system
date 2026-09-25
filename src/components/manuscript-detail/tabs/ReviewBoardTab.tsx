@@ -604,6 +604,7 @@ export function ReviewBoardTab({
                         ) : null}
                       </div>
                       <p className="text-xs text-slate-600">{suggestion.email}</p>
+                      {suggestion.department && <p className="text-xs text-slate-500 mt-1">Department: {suggestion.department}</p>}
                       {suggestion.note && <p className="text-xs text-slate-500 mt-1">Expertise: {suggestion.note}</p>}
                     </div>
                   </div>

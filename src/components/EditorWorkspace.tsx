@@ -1888,6 +1888,9 @@ function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab,
                                   <div className="flex-1">
                                     <p className="font-semibold text-slate-900">{reviewer.name}</p>
                                     <p className="text-xs text-slate-600">{reviewer.email}</p>
+                                    {reviewer.department && (
+                                      <p className="text-xs text-slate-500 mt-1">Department: {reviewer.department}</p>
+                                    )}
                                     {reviewer.note && (
                                       <p className="text-xs text-slate-500 mt-1">Expert Focus Area: {reviewer.note}</p>
                                     )}

@@ -235,6 +235,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
   const [revName, setRevName] = useState('');
   const [revEmail, setRevEmail] = useState('');
   const [revAffiliation, setRevAffiliation] = useState('');
+  const [revDepartment, setRevDepartment] = useState('');
   const [revReason, setRevReason] = useState('');
 
   // Step 7: Publishing preferences State
@@ -985,12 +986,14 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
       name: revName.trim(),
       email: revEmail.trim(),
       affiliation: revAffiliation.trim(),
+      department: revDepartment.trim(),
       reason: revReason.trim()
     };
     setReviewerSuggestions(prev => [...prev, newRev]);
     setRevName('');
     setRevEmail('');
     setRevAffiliation('');
+    setRevDepartment('');
     setRevReason('');
   };
 
@@ -3007,6 +3010,17 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                   </div>
 
                   <div className="space-y-2">
+                    <label className="block text-sm font-bold text-slate-800">Department (Optional)</label>
+                    <input
+                      type="text"
+                      value={revDepartment}
+                      onChange={(e) => setRevDepartment(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-xl p-3 text-sm font-semibold"
+                      placeholder="Department of Physics"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
                     <label className="block text-sm font-bold text-slate-800">Expert Focus Area</label>
                     <input
                       type="text"
@@ -3043,6 +3057,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                         <th className="px-5 py-3.5 w-16 text-center">Row</th>
                         <th className="px-5 py-3.5">Name</th>
                         <th className="px-5 py-3.5">Email ID</th>
+                        <th className="px-5 py-3.5">Department</th>
                         <th className="px-5 py-3.5">Affiliation</th>
                         <th className="px-5 py-3.5">Expert Focus Area</th>
                         <th className="px-5 py-3.5 w-20 text-center">Delete</th>
@@ -3063,7 +3078,8 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
                               <strong className="block text-slate-900 text-sm">{rev.name}</strong>
                             </td>
                             <td className="px-5 py-3.5 text-xs text-gray-500 font-mono">{rev.email}</td>
-                            <td className="px-5 py-3.5 italic text-sm">{rev.affiliation}</td>
+                            <td className="px-5 py-3.5 text-slate-700 text-sm">{rev.department || <span className="text-slate-400">—</span>}</td>
+                            <td className="px-5 py-3.5 text-slate-700 text-sm">{rev.affiliation}</td>
                             <td className="px-5 py-3.5 text-slate-600 font-normal leading-relaxed text-sm">{rev.reason}</td>
                             <td className="px-5 py-3.5 text-center">
                               <button

@@ -688,6 +688,7 @@ export interface SuggestedReviewerRow {
   suggested_by_user: string | null;
   name: string;
   email: string;
+  department?: string;
   note: string;
   created_at: string;
   revision_number: number;
