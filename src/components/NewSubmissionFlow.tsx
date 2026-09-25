@@ -450,9 +450,9 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
       case 4:
         return contributors.length > 0;
       case 5:
-        return true; // Optional sections
+        return previouslySubmitted !== 'Yes'; // Otherwise optional sections
       case 6:
-        return reviewerSuggestions.length >= 3 && previouslySubmitted !== 'Yes';
+        return reviewerSuggestions.length >= 3;
       case 7:
         return acceptLicense;
       case 8:
@@ -547,11 +547,14 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
       }
     }
 
-    if (currentStep === 6) {
+    if (currentStep === 5) {
       if (previouslySubmitted === 'Yes') {
-        setValidationError('Manuscripts previously submitted elsewhere cannot be submitted to this journal.');
+        setValidationError('Manuscripts previously submitted elsewhere cannot be submitted to this journal. Please change your answer to No to continue.');
         return;
       }
+    }
+
+    if (currentStep === 6) {
       if (reviewerSuggestions.length < 3) {
         setValidationError(`At least 3 suggested reviewers are required (currently ${reviewerSuggestions.length}).`);
         return;
@@ -3393,7 +3396,7 @@ export default function NewSubmissionFlow({ currentUser, onCancel, onSubmit, onS
               <button
                 type="button"
                 onClick={handleNext}
-                disabled={isSubmitting || (currentStep === 8 && hasSubmitted)}
+                disabled={isSubmitting || (currentStep === 5 && previouslySubmitted === 'Yes') || (currentStep === 8 && hasSubmitted)}
                 className="px-6 py-2.5 bg-[#008751] hover:bg-[#007043] disabled:bg-slate-400 text-white rounded-lg font-bold text-xs shadow-md shadow-emerald-100/80 transition cursor-pointer flex items-center gap-1.5 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? (
