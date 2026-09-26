@@ -93,7 +93,11 @@ async function orcidJson(url: string, accessToken?: string): Promise<any | null>
 }
 
 /** One-time login token for an existing AUTHOR account (the browser exchanges it for a session). */
-async function issueLoginToken(admin: any, userId: string): Promise<{ token?: string; error?: string }> {
+async function issueLoginToken(
+  admin: any,
+  userId: string,
+  mail?: { anon: any; siteUrl: string }
+): Promise<{ token?: string; error?: string }> {
   const { data: profile } = await admin.from('profiles').select('role, requested_role, status').eq('id', userId).single();
   if (!profile) return { error: 'No profile found for this account. Contact your Coordinator.' };
   if ((profile.role || profile.requested_role) !== 'AUTHOR') return { error: 'ORCID sign-in is only available for Author accounts.' };
@@ -104,7 +108,11 @@ async function issueLoginToken(admin: any, userId: string): Promise<{ token?: st
 
   const { data: u } = await admin.auth.admin.getUserById(userId);
   if (!u?.user?.email) return { error: 'Account not exists' };
-  if (!u.user.email_confirmed_at) return { error: 'Please confirm your email first (check your inbox), then sign in with ORCID.' };
+  if (!u.user.email_confirmed_at) {
+    // Email never confirmed: send a fresh confirmation link (it goes back to the site the person is on).
+    if (mail) await mail.anon.auth.signInWithOtp({ email: u.user.email, options: { shouldCreateUser: false, emailRedirectTo: mail.siteUrl } });
+    return { error: 'Please confirm your email first. We sent you a new confirmation link -- open it once, then sign in with ORCID.' };
+  }
 
   const { data, error } = await admin.auth.admin.generateLink({ type: 'magiclink', email: u.user.email });
   const token = data?.properties?.hashed_token;
@@ -127,7 +135,7 @@ function start(req: any, res: any) {
   res.redirect(302, `${ORCID_BASE}/oauth/authorize?${q.toString()}`);
 }
 
-async function callback(req: any, res: any, admin: any) {
+async function callback(req: any, res: any, admin: any, anon: any) {
   const { code, state, error } = req.query || {};
   if (error) return fail(res, 'ORCID sign-in was cancelled.');
   const cookieState = readCookie(req, STATE_COOKIE);
@@ -164,7 +172,7 @@ async function callback(req: any, res: any, admin: any) {
   // Already linked -> sign straight in.
   const { data: link } = await admin.from('orcid_identities').select('user_id').eq('orcid_id', orcid).maybeSingle();
   if (link) {
-    const { token, error: tokenError } = await issueLoginToken(admin, link.user_id);
+    const { token, error: tokenError } = await issueLoginToken(admin, link.user_id, { anon, siteUrl: origin(req) });
     return token ? backToApp(res, { orcid: 'login', t: token }) : fail(res, tokenError || 'Unable to sign you in.');
   }
 
@@ -186,7 +194,7 @@ async function callback(req: any, res: any, admin: any) {
   backToApp(res, { orcid: 'pending', t: pending });
 }
 
-async function complete(body: any, admin: any, anon: any): Promise<{ status: number; body: any }> {
+async function complete(body: any, admin: any, anon: any, siteUrl: string): Promise<{ status: number; body: any }> {
   const pending = verify(body?.pending);
   if (!pending) return { status: 400, body: { error: 'Your ORCID session expired. Please start again.' } };
 
@@ -231,14 +239,14 @@ async function complete(body: any, admin: any, anon: any): Promise<{ status: num
 
   if (!trusted) {
     // Supabase emails a confirmation link; the account only becomes usable once it is clicked.
-    await anon.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+    await anon.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: siteUrl } });
     return { status: 200, body: { status: 'verify_email', email } };
   }
   const { token, error } = await issueLoginToken(admin, created.user.id);
   return token ? { status: 200, body: { status: 'ok', token } } : { status: 403, body: { error } };
 }
 
-async function link(body: any, admin: any, anon: any): Promise<{ status: number; body: any }> {
+async function link(body: any, admin: any, anon: any, siteUrl: string): Promise<{ status: number; body: any }> {
   const pending = verify(body?.pending);
   if (!pending) return { status: 400, body: { error: 'Your ORCID session expired. Please start again.' } };
   const email = String(body?.email || '').trim().toLowerCase();
@@ -252,7 +260,7 @@ async function link(body: any, admin: any, anon: any): Promise<{ status: number;
   const { data: taken } = await admin.from('orcid_identities').select('user_id').eq('orcid_id', pending.orcid).maybeSingle();
   if (taken && taken.user_id !== userId) return { status: 409, body: { error: 'This ORCID iD is already linked to a different account.' } };
 
-  const { token, error } = await issueLoginToken(admin, userId);
+  const { token, error } = await issueLoginToken(admin, userId, { anon, siteUrl });
   if (!token) return { status: 403, body: { error } };
 
   const { error: linkError } = await admin.from('orcid_identities').upsert({ user_id: userId, orcid_id: pending.orcid }, { onConflict: 'user_id' });
@@ -277,13 +285,13 @@ export async function orcidHandler(req: any, res: any, actionOverride?: string) 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
 
     if (req.method === 'GET' && action === 'start') return start(req, res);
-    if (req.method === 'GET' && action === 'callback') return await callback(req, res, admin);
+    if (req.method === 'GET' && action === 'callback') return await callback(req, res, admin, anon);
     if (req.method === 'POST' && action === 'complete') {
-      const r = await complete(body, admin, anon);
+      const r = await complete(body, admin, anon, origin(req));
       return res.status(r.status).json(r.body);
     }
     if (req.method === 'POST' && action === 'link') {
-      const r = await link(body, admin, anon);
+      const r = await link(body, admin, anon, origin(req));
       return res.status(r.status).json(r.body);
     }
     return res.status(404).json({ error: 'Not found.' });
