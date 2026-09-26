@@ -194,7 +194,7 @@ async function complete(body: any, admin: any, anon: any): Promise<{ status: num
   const firstName = String(body?.firstName || '').trim().slice(0, 100);
   const lastName = String(body?.lastName || '').trim().slice(0, 100);
   if (!EMAIL_RE.test(email) || email.length > 320) return { status: 400, body: { error: 'Enter a valid email address.' } };
-  if (!firstName || !lastName) return { status: 400, body: { error: 'First name and family name are required.' } };
+  if (!firstName) return { status: 400, body: { error: 'Given names are required.' } };
 
   const { data: taken } = await admin.from('orcid_identities').select('user_id').eq('orcid_id', pending.orcid).maybeSingle();
   if (taken) return { status: 409, body: { error: 'This ORCID iD is already linked to an account. Sign in with ORCID.' } };
@@ -211,7 +211,7 @@ async function complete(body: any, admin: any, anon: any): Promise<{ status: num
     password: crypto.randomBytes(24).toString('base64url'),
     email_confirm: trusted,
     user_metadata: {
-      full_name: `${firstName} ${lastName}`,
+      full_name: `${firstName} ${lastName}`.trim(),
       first_name: firstName,
       last_name: lastName,
       orcid_id: pending.orcid,

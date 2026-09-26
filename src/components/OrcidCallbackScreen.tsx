@@ -105,12 +105,12 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
             </p>
             {errorBox}
             <div>
-              <label className={labelStyle}>First name</label>
+              <label className={labelStyle}>Given names</label>
               <input className={inputStyle} value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
             </div>
             <div>
               <label className={labelStyle}>Family name</label>
-              <input className={inputStyle} value={lastName} onChange={(e) => setLastName(e.target.value)} required />
+              <input className={inputStyle} value={lastName} onChange={(e) => setLastName(e.target.value)} />
             </div>
             <div>
               <label className={labelStyle}>Email address</label>
