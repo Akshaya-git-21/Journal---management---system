@@ -146,10 +146,16 @@ async function callback(req: any, res: any, admin: any) {
         redirect_uri: redirectUri(req),
       }).toString(),
     });
-    tokenJson = await r.json();
-    if (!r.ok) throw new Error('token');
-  } catch {
-    return fail(res, 'Could not verify your ORCID iD. Please try again.');
+    tokenJson = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      // ORCID's error text (e.g. "invalid_client", "redirect_uri mismatch") holds no secrets.
+      const reason = String(tokenJson?.error_description || tokenJson?.error || `HTTP ${r.status}`).slice(0, 160);
+      console.error('[api/orcid] token exchange failed:', r.status, reason);
+      return fail(res, `Could not verify your ORCID iD (${reason}).`);
+    }
+  } catch (e: any) {
+    console.error('[api/orcid] token exchange error:', e?.message);
+    return fail(res, 'Could not reach ORCID. Please try again.');
   }
 
   const orcid: string = tokenJson.orcid;
