@@ -9,6 +9,23 @@
 
 html {
   font-size: 15px;
+  /* Render the interface at 81% at the browser's normal 100% zoom, so 100%
+     looks the way 90% did before. Browser zoom still scales proportionally
+     from there, and the responsive layout adapts. */
+  zoom: 0.81;
+}
+
+/* With `zoom`, viewport units shrink by the same factor, so full-height
+   screens would stop 10% short of the bottom. main.tsx measures the real
+   factor at startup and stores its inverse in --vh-comp (1 when the browser
+   doesn't scale viewport units), which these rules use to fill the screen. */
+.h-screen { height: calc(100vh * var(--vh-comp, 1)); }
+.min-h-screen { min-height: calc(100vh * var(--vh-comp, 1)); }
+.max-h-screen { max-height: calc(100vh * var(--vh-comp, 1)); }
+@media (min-width: 768px) {
+  .md\:h-screen { height: calc(100vh * var(--vh-comp, 1)); }
+  .md\:min-h-screen { min-height: calc(100vh * var(--vh-comp, 1)); }
+  .md\:max-h-screen { max-height: calc(100vh * var(--vh-comp, 1)); }
 }
 
 body {
@@ -19,3 +36,33 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Scrollbar styling for webkit browsers (Chrome, Safari) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Workspace pages: light off-white surfaces (a faint green cast instead of
+   pure white) for cards, tables and rows, with soft green-grey lines. Scoped to
+   <main class="role-tint"> so nothing outside the role workspaces is affected. */
+.role-tint .bg-white { background-color: #fbfdfb; }
+.role-tint .bg-slate-50 { background-color: #f1f7f2; }
+.role-tint .hover\:bg-slate-50:hover { background-color: #eaf3ec; }
+.role-tint .border-slate-200,
+.role-tint .border-slate-100 { border-color: #dbe8de; }
+.role-tint .divide-slate-100 > :not(:last-child),
+.role-tint .divide-slate-200 > :not(:last-child) { border-color: #dbe8de; }

@@ -1,11 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getRoleAwareStatusLabel, getManuscriptStatusMeta, getLatestRevision, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
 import FilePreviewModal from './FilePreviewModal';
+import SubmissionSidebar from './SubmissionSidebar';
+import AuthorProductionPanel from './production/AuthorProductionPanel';
+import { getProduction, subscribeToProduction } from '../lib/production';
+import RevisionHistoryPanel from './RevisionHistoryPanel';
+import ViewSubmissionContent from './ViewSubmissionContent';
 import {
   uploadManuscriptFile,
   syncManuscriptFilesToSupabase,
   syncManuscriptDiscussionsToSupabase,
-  subscribeToManuscriptsRealtime
+  supabase
 } from '../lib/supabase';
+import {
+  fetchAuthorManuscriptDetails,
+  subscribeToManuscriptDetails,
+  formatDateTime,
+  formatDate,
+  AuthorManuscriptDetails,
+  ManuscriptFileRow,
+  ProfileData
+} from '../lib/authorManuscriptDetails';
+import {
+  getEditorAssignments,
+  getReviewerAssignments,
+  getStatusHistory,
+  postDiscussionMessage,
+  getRevisionFiles
+} from '../lib/workflow';
 import {
   ChevronLeft,
   FileText,
@@ -49,8 +71,7 @@ import {
   Inbox,
   Mail,
   Bell,
-  Calendar,
-  User,
+  Clock,
   Info,
   Pin,
   Lock,
@@ -62,6 +83,15 @@ interface OjsSubmissionDetailProps {
   onBack: () => void;
   onUpdatePaperDiscussions?: (paperId: string, updatedDiscussions: any[]) => void;
   currentUser?: { name: string; email: string; role: string } | null;
+  /** Jumps to the same AuthorRevisionRequest screen the Manuscript Queue's
+   * own "Submit Revision" button opens -- only relevant while the
+   * manuscript is REVISION_REQUESTED. */
+  onSubmitRevision?: () => void;
+  /** Which workflow tab to open on first render -- defaults to 'SUBMISSION'.
+   * Lets the Manuscript Queue's "Review Proofreading" button land straight
+   * on the 'production' tab (AuthorProductionPanel) instead of requiring an
+   * extra click once inside the detail page. */
+  initialTab?: string;
 }
 
 // Predefined OJS templates
@@ -87,10 +117,12 @@ export default function OjsSubmissionDetail({
   paper,
   onBack,
   onUpdatePaperDiscussions,
-  currentUser
+  currentUser,
+  onSubmitRevision,
+  initialTab
 }: OjsSubmissionDetailProps) {
   // Navigation tabs within submission view
-  const [activeTab, setActiveTab] = useState<string>('SUBMISSION');
+  const [activeTab, setActiveTab] = useState<string>(initialTab || 'SUBMISSION');
   const [activeFileDropdown, setActiveFileDropdown] = useState<boolean>(false);
   const [editingFileName, setEditingFileName] = useState<string>(paper.fileName || `${paper.title || 'test'}-publication.pdf`);
   const [showFileEditModal, setShowFileEditModal] = useState<boolean>(false);
@@ -99,46 +131,35 @@ export default function OjsSubmissionDetail({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isUploading, setIsUploading] = useState<boolean>(false);
 
-  const [uploadedFiles, setUploadedFiles] = useState<any[]>(() => {
-    if (paper?.uploadedFiles && Array.isArray(paper.uploadedFiles) && paper.uploadedFiles.length > 0) {
-      return paper.uploadedFiles;
-    }
-    return [
-      { name: paper?.fileName || "Manuscript.pdf", type: "Manuscript", size: paper?.fileSize || "1.2 MB", date: "08 Jun 2026" },
-      { name: "Figures.docx", type: "Figures", size: "850 KB", date: "08 Jun 2026" },
-      { name: "Supplementary.zip", type: "Supplementary File", size: "2.4 MB", date: "08 Jun 2026" }
-    ];
-  });
+  // Real-time data from Supabase
+  const [manuscriptDetails, setManuscriptDetails] = useState<AuthorManuscriptDetails | null>(null);
+  // Task 11: once a proof is with the author, the standard "PROOFREADING"
+  // status applies (see PROOFREADING_PRODUCTION_STATUSES in
+  // lib/manuscriptStatusLabel.ts) -- fetched separately from
+  // manuscriptDetails since it lives in manuscript_production, not
+  // manuscripts. RLS already grants authors SELECT on their own manuscript's
+  // production row (0047_production_module.sql).
+  const [productionStatus, setProductionStatus] = useState<string | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(true);
+  const [detailsError, setDetailsError] = useState<string>('');
+  const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
+  const [revisionUploadedFiles, setRevisionUploadedFiles] = useState<any[]>([]);
+  // Files for EVERY revision cycle (not just the latest), keyed by revision
+  // id, so the Overview page can show "Revision 1 -- Uploaded Files",
+  // "Revision 2 -- Uploaded Files", etc. as their own sections instead of
+  // only ever showing the most recent cycle's files.
+  const [allRevisionFilesById, setAllRevisionFilesById] = useState<Record<string, any[]>>({});
 
   // File Preview States
   const [previewModalOpen, setPreviewModalOpen] = useState<boolean>(false);
   const [previewFileName, setPreviewFileName] = useState<string>("");
   const [previewFileType, setPreviewFileType] = useState<string>("");
   const [previewFileSize, setPreviewFileSize] = useState<string>("");
+  const [previewPublicUrl, setPreviewPublicUrl] = useState<string>("");
 
-  // WhatsApp Messages States
-  const [whatsappMessages, setWhatsappMessages] = useState<any[]>([
-    {
-      id: "wa-1",
-      sender: "Dr. John Smith",
-      senderRole: "Editor",
-      avatar: "JS",
-      avatarBg: "bg-sky-600",
-      text: "Dear Author, Please confirm that the manuscript complies with the journal guidelines.",
-      timestamp: "10:30 AM",
-      isMe: false
-    },
-    {
-      id: "wa-2",
-      sender: "Akshaya G",
-      senderRole: "Author",
-      avatar: "AG",
-      avatarBg: "bg-emerald-600",
-      text: "Thank you for your message. Yes, the manuscript follows all the guidelines.",
-      timestamp: "11:02 AM",
-      isMe: true
-    }
-  ]);
+  // Real discussion messages from Supabase
+  const [allMessages, setAllMessages] = useState<any[]>([]);
+  const [whatsappMessages, setWhatsappMessages] = useState<any[]>([]);
   const [whatsappInput, setWhatsappInput] = useState("");
 
   // Discussion forum list and filter states
@@ -147,404 +168,113 @@ export default function OjsSubmissionDetail({
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
 
-  // Technical Check thread messages
-  const [techCheckMessages, setTechCheckMessages] = useState<any[]>([
-    {
-      id: "tc-1",
-      sender: "System",
-      senderRole: "System",
-      text: "Your file \"Manuscript.pdf\" has been successfully checked.",
-      timestamp: "Yesterday, 3:15 PM",
-      isMe: false
-    },
-    {
-      id: "tc-2",
-      sender: "System",
-      senderRole: "System",
-      text: "PDF formatting matches the LaTeX templates perfectly. DOI link generation initialized.",
-      timestamp: "Yesterday, 3:16 PM",
-      isMe: false
-    }
-  ]);
+  // Thread-specific messages (filtered from allMessages based on thread type)
+  const [techCheckMessages, setTechCheckMessages] = useState<any[]>([]);
   const [techCheckInput, setTechCheckInput] = useState("");
 
-  // Formatting & Style thread messages
-  const [formattingMessages, setFormattingMessages] = useState<any[]>([
+  const [formattingMessages, setFormattingMessages] = useState<any[]>([]);
+  const [formattingInput, setFormattingInput] = useState("");
+
+  // Coordinator chat state
+  const [coordinatorMessages, setCoordinatorMessages] = useState<any[]>([
     {
-      id: "fm-1",
-      sender: "Editor",
-      senderRole: "Editor",
-      text: "Please ensure all references follow the journal format.",
-      timestamp: "02 Jun 2026, 11:20 AM",
+      id: 'init-1',
+      sender: 'Coordinator',
+      senderRole: 'COORDINATOR',
+      text: "Hello! I'm here to assist with your manuscript submission. How can I help you today?",
+      timestamp: new Date().toISOString(),
       isMe: false
     }
   ]);
-  const [formattingInput, setFormattingInput] = useState("");
+  const [coordinatorInput, setCoordinatorInput] = useState("");
 
-  const handleSendWhatsappMessage = () => {
-    if (!whatsappInput.trim()) return;
-    
-    const userMsg = {
-      id: "wa-user-" + Date.now(),
-      sender: currentUser?.name || "Akshaya G",
-      senderRole: "Author",
-      avatar: "AG",
-      avatarBg: "bg-emerald-600",
-      text: whatsappInput.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isMe: true
-    };
-    
-    setWhatsappMessages(prev => [...prev, userMsg]);
-    setWhatsappInput("");
-    
-    // Auto reply after 1.5 seconds from Editor
-    setTimeout(() => {
-      const editorMsg = {
-        id: "wa-editor-reply-" + Date.now(),
-        sender: "Dr. John Smith",
-        senderRole: "Editor",
-        avatar: "JS",
-        avatarBg: "bg-sky-600",
-        text: "Excellent confirmation. I have recorded your acknowledgment. Your manuscript files will now undergo formal reviewer assignment.",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isMe: false
-      };
-      setWhatsappMessages(prev => [...prev, editorMsg]);
-    }, 1500);
-  };
+  // User profiles map for quick lookup
+  const [userProfiles, setUserProfiles] = useState<Map<string, ProfileData>>(new Map());
 
-  const handleSendTechCheckMessage = () => {
-    if (!techCheckInput.trim()) return;
-    const userMsg = {
-      id: "tc-user-" + Date.now(),
-      sender: currentUser?.name || "Akshaya G",
-      senderRole: "Author",
-      text: techCheckInput.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isMe: true
-    };
-    setTechCheckMessages(prev => [...prev, userMsg]);
-    setTechCheckInput("");
-    setTimeout(() => {
-      const autoMsg = {
-        id: "tc-sys-reply-" + Date.now(),
-        sender: "System",
-        senderRole: "System",
-        text: "Technical analysis completed. All structural guidelines are verified as compliant.",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isMe: false
-      };
-      setTechCheckMessages(prev => [...prev, autoMsg]);
-    }, 1500);
-  };
+  const handleSendWhatsappMessage = async () => {
+    if (!whatsappInput.trim() || !paper?.id || !currentUser?.email) return;
 
-  const handleSendFormattingMessage = () => {
-    if (!formattingInput.trim()) return;
-    const userMsg = {
-      id: "fm-user-" + Date.now(),
-      sender: currentUser?.name || "Akshaya G",
-      senderRole: "Author",
-      text: formattingInput.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isMe: true
-    };
-    setFormattingMessages(prev => [...prev, userMsg]);
-    setFormattingInput("");
-    setTimeout(() => {
-      const autoMsg = {
-        id: "fm-editor-reply-" + Date.now(),
-        sender: "Editor",
-        senderRole: "Editor",
-        text: "Thank you for the formatting update. We will review the reference formatting in the copyediting phase.",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isMe: false
-      };
-      setFormattingMessages(prev => [...prev, autoMsg]);
-    }, 1500);
-  };
-
-  // Interface for detailed tracking steps
-  interface WorkflowStageDetail {
-    id: string;
-    label: string;
-    status: 'completed' | 'active' | 'upcoming' | 'skipped';
-    description: string;
-    dateCompleted?: string | null;
-  }
-
-  // Generates complete 12-stage progress mapping automatically based on manuscript state
-  const getDetailedWorkflowState = (paper: any): WorkflowStageDetail[] => {
-    const m = paper.raw || {};
-    const status = m.status || 'SUBMITTED';
-    const hasReviewers = m.reviewers && m.reviewers.length > 0;
-    
-    // Core state flags computed dynamically
-    const isSubmitted = true; 
-    const isEditorAssigned = status !== 'SUBMITTED' && status !== 'DRAFT' || hasReviewers || m.editorsNotes;
-    const isReviewerInvitationSent = hasReviewers;
-    
-    const reviewersAccepted = m.reviewers && m.reviewers.some((r: any) => r.status === 'ACCEPTED' || r.status === 'SUBMITTED');
-    const isUnderReview = status === 'UNDER_REVIEW' && reviewersAccepted;
-    
-    const reviewersCompleted = m.reviewers && m.reviewers.some((r: any) => r.status === 'SUBMITTED');
-    const isReviewsReceived = reviewersCompleted;
-    
-    const isEditorDecisionPending = status === 'AWAITING_DECISION';
-    
-    const isRevisionRequired = (m.editorsNotes || '').includes('REVISE') || 
-                               (m.editorsNotes || '').includes('MINOR_REVISIONS') || 
-                               (m.editorsNotes || '').includes('MAJOR_REVISIONS') ||
-                               paper.stage === 'Revisions Requested' || 
-                               paper.stage === 'Revisions Submitted';
-                               
-    const isRevisedSubmitted = isRevisionRequired && (paper.stage === 'Revisions Submitted' || (m.editorsNotes || '').includes('revision uploaded'));
-    const isFinalReview = isRevisedSubmitted && status === 'UNDER_REVIEW';
-    
-    const isAccepted = status === 'ACCEPTED' || status === 'PUBLISHED';
-    const isProduction = status === 'ACCEPTED';
-    const isPublished = status === 'PUBLISHED';
-    const isRejected = status === 'REJECTED';
-
-    const stages: WorkflowStageDetail[] = [];
-
-    // 1. Submitted
-    stages.push({
-      id: 'submitted',
-      label: 'Submitted',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview || isReviewerInvitationSent || isEditorAssigned ? 'completed' : 'active',
-      description: 'Manuscript successfully registered and files uploaded to the journal database.',
-      dateCompleted: paper.receivedAt
-    });
-
-    // 2. Editor Assigned
-    stages.push({
-      id: 'editor_assigned',
-      label: 'Editor Assigned',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview || isReviewerInvitationSent ? 'completed' : (isEditorAssigned ? 'active' : 'upcoming'),
-      description: 'An editorial board member has been assigned to coordinate peer evaluation.',
-      dateCompleted: isEditorAssigned ? paper.receivedAt : null
-    });
-
-    // 3. Reviewer Invitation Sent
-    stages.push({
-      id: 'reviewer_invited',
-      label: 'Reviewer Invitation Sent',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived || isUnderReview ? 'completed' : (isReviewerInvitationSent ? 'active' : 'upcoming'),
-      description: 'Formal double-blind peer referee requests dispatched to corresponding university experts.',
-      dateCompleted: isReviewerInvitationSent ? paper.receivedAt : null
-    });
-
-    // 4. Under Review
-    stages.push({
-      id: 'under_review',
-      label: 'Under Review',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending || isReviewsReceived ? 'completed' : (isUnderReview ? 'active' : 'upcoming'),
-      description: 'Assigned peer reviewers are currently evaluating methodology, scientific merit, and ethical compliance.',
-      dateCompleted: isUnderReview ? paper.receivedAt : null
-    });
-
-    // 5. Reviews Received
-    stages.push({
-      id: 'reviews_received',
-      label: 'Reviews Received',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired || isEditorDecisionPending ? 'completed' : (isReviewsReceived ? 'active' : 'upcoming'),
-      description: 'Completed evaluation reports received and logged. Minimum consensus thresholds achieved.',
-      dateCompleted: isReviewsReceived ? paper.receivedAt : null
-    });
-
-    // 6. Editor Decision Pending
-    stages.push({
-      id: 'decision_pending',
-      label: 'Editor Decision Pending',
-      status: isAccepted || isPublished || isFinalReview || isRevisedSubmitted || isRevisionRequired ? 'completed' : (isEditorDecisionPending ? 'active' : 'upcoming'),
-      description: 'Editorial board is weighing recommendations to finalize the manuscript decision.',
-      dateCompleted: isEditorDecisionPending ? paper.receivedAt : null
-    });
-
-    // 7. Minor / Major Revision
-    let revisionLabel = 'Minor Revision';
-    if ((m.editorsNotes || '').toLowerCase().includes('major') || (paper.title || '').toLowerCase().includes('major')) {
-      revisionLabel = 'Major Revision';
-    }
-    const revisionStatus = isAccepted || isPublished ? 'completed' : (isRevisedSubmitted ? 'completed' : (isRevisionRequired ? 'active' : 'skipped'));
-    stages.push({
-      id: 'revision_required',
-      label: revisionLabel,
-      status: revisionStatus,
-      description: 'Revisions required to address referee and editor feedback before publication clearance.',
-      dateCompleted: isRevisionRequired ? paper.receivedAt : null
-    });
-
-    // 8. Revised Manuscript Submitted
-    const revSubmittedStatus = isAccepted || isPublished ? 'completed' : (isRevisedSubmitted ? 'active' : (isRevisionRequired ? 'upcoming' : 'skipped'));
-    stages.push({
-      id: 'revised_submitted',
-      label: 'Revised Manuscript Submitted',
-      status: revSubmittedStatus,
-      description: 'Revised files and author reconciliation statement received by the editorial desk.',
-      dateCompleted: isRevisedSubmitted ? paper.receivedAt : null
-    });
-
-    // 9. Final Review
-    const finalReviewStatus = isAccepted || isPublished ? 'completed' : (isFinalReview ? 'active' : (isRevisedSubmitted ? 'upcoming' : 'skipped'));
-    stages.push({
-      id: 'final_review',
-      label: 'Final Review',
-      status: finalReviewStatus,
-      description: 'Editor-in-chief executing final validation checks on the revised manuscript.',
-      dateCompleted: isFinalReview ? paper.receivedAt : null
-    });
-
-    // 10. Accepted
-    stages.push({
-      id: 'accepted',
-      label: 'Accepted',
-      status: isPublished ? 'completed' : (isAccepted ? 'active' : 'upcoming'),
-      description: 'Manuscript approved for publication! Transitioning to typesetting and copyediting.',
-      dateCompleted: isAccepted ? paper.receivedAt : null
-    });
-
-    // 11. Production
-    stages.push({
-      id: 'production',
-      label: 'Production',
-      status: isPublished ? 'completed' : (isProduction ? 'active' : 'upcoming'),
-      description: 'Copyediting, XML tagging (JATS standard), and Galley proof creation in progress.',
-      dateCompleted: isProduction ? paper.receivedAt : null
-    });
-
-    // 12. Published
-    stages.push({
-      id: 'published',
-      label: 'Published',
-      status: isPublished ? 'active' : 'upcoming',
-      description: 'Galley release launched. Digital Object Identifier (DOI) registered with Crossref.',
-      dateCompleted: isPublished ? paper.receivedAt : null
-    });
-
-    if (isRejected) {
-      stages.forEach(st => {
-        if (['revision_required', 'revised_submitted', 'final_review', 'accepted', 'production', 'published'].includes(st.id)) {
-          st.status = 'skipped';
-        }
-      });
-      stages.push({
-        id: 'rejected',
-        label: 'Rejected',
-        status: 'active',
-        description: 'The manuscript was declined for publication by the editorial board.',
-        dateCompleted: paper.receivedAt
-      });
-    }
-
-    return stages;
-  };
-
-  const getDynamicProgress = () => {
-    const rawStatus = paper.raw?.status || 'SUBMITTED';
-    const paperStage = paper.stage || 'Submission';
-
-    const isRejected = rawStatus === 'REJECTED' || paperStage === 'Declined';
-
-    // 1. Submission Step
-    const isSubmissionDone = true; 
-    let submissionStatus = 'Completed';
-
-    // 2. Review Step
-    let isReviewDone = false;
-    let reviewStatus = 'Pending';
-    if (
-      rawStatus === 'AWAITING_DECISION' ||
-      rawStatus === 'ACCEPTED' ||
-      rawStatus === 'PUBLISHED' ||
-      rawStatus === 'REJECTED' ||
-      paperStage === 'Revisions Requested' ||
-      paperStage === 'Revisions Submitted' ||
-      paperStage === 'Scheduled' ||
-      paperStage === 'Published' ||
-      paperStage === 'Declined'
-    ) {
-      isReviewDone = true;
-      reviewStatus = 'Completed';
-    } else if (rawStatus === 'UNDER_REVIEW') {
-      reviewStatus = 'In Progress';
-    }
-
-    // 3. Copyediting Step
-    let isCopyeditingDone = false;
-    let copyeditingStatus = 'Pending';
-    if (
-      rawStatus === 'ACCEPTED' ||
-      rawStatus === 'PUBLISHED' ||
-      rawStatus === 'REJECTED' ||
-      paperStage === 'Scheduled' ||
-      paperStage === 'Published' ||
-      paperStage === 'Declined'
-    ) {
-      isCopyeditingDone = true;
-      copyeditingStatus = 'Completed';
-    } else if (
-      paperStage === 'Revisions Requested' ||
-      paperStage === 'Revisions Submitted' ||
-      rawStatus === 'AWAITING_DECISION'
-    ) {
-      copyeditingStatus = 'In Progress';
-    }
-
-    // 4. Production Step
-    let isProductionDone = false;
-    let productionStatus = 'Pending';
-    if (rawStatus === 'PUBLISHED' || paperStage === 'Published') {
-      isProductionDone = true;
-      productionStatus = 'Completed';
-    } else if (rawStatus === 'ACCEPTED' || paperStage === 'Scheduled') {
-      productionStatus = 'In Progress';
-    }
-
-    // 5. Publication Step
-    let isPublicationDone = false;
-    let publicationStatus = 'Pending';
-    if (rawStatus === 'PUBLISHED' || paperStage === 'Published') {
-      isPublicationDone = true;
-      publicationStatus = 'Completed';
-    } else if (isRejected) {
-      publicationStatus = 'Declined';
-    }
-
-    // Adjust for rejection
-    if (isRejected) {
-      if (!isReviewDone && rawStatus === 'REJECTED') {
-        reviewStatus = 'Declined';
+    try {
+      // Get current user's ID from Supabase (for sender_id)
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (!user || userError) {
+        console.error('Could not get current user');
+        return;
       }
-      if (!isCopyeditingDone) copyeditingStatus = 'Skipped';
-      if (!isProductionDone) productionStatus = 'Skipped';
-      publicationStatus = 'Declined';
+
+      // Post message to Supabase -- this panel is the private Coordinator <->
+      // Author channel, enforced server-side by RLS (see 0016 migration).
+      await postDiscussionMessage(paper.id, user.id, whatsappInput.trim(), 'COORDINATOR_AUTHOR');
+
+      // Clear input - the real-time subscription will update the messages
+      setWhatsappInput("");
+    } catch (error) {
+      console.error('Error sending message:', error);
     }
+  };
 
-    // Calculate percentage
-    let percentage = 20; 
-    if (isPublicationDone) {
-      percentage = 100;
-    } else if (isProductionDone) {
-      percentage = 80;
-    } else if (isCopyeditingDone) {
-      percentage = 60 + (productionStatus === 'In Progress' ? 10 : 0);
-    } else if (isReviewDone) {
-      percentage = 40 + (copyeditingStatus === 'In Progress' ? 10 : 0);
-    } else if (reviewStatus === 'In Progress') {
-      percentage = 20 + 10;
+  const handleSendTechCheckMessage = async () => {
+    if (!techCheckInput.trim() || !paper?.id || !currentUser?.email) return;
+
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (!user || userError) {
+        console.error('Could not get current user');
+        return;
+      }
+
+      await postDiscussionMessage(paper.id, user.id, `[Technical Check] ${techCheckInput.trim()}`);
+      setTechCheckInput("");
+    } catch (error) {
+      console.error('Error sending technical check message:', error);
     }
+  };
 
-    const steps = [
-      { id: 'submission', label: 'Submission', status: submissionStatus, isDone: isSubmissionDone, isActive: false },
-      { id: 'review', label: 'Review', status: reviewStatus, isDone: isReviewDone, isActive: reviewStatus === 'In Progress' },
-      { id: 'copyediting', label: 'Copyediting', status: copyeditingStatus, isDone: isCopyeditingDone, isActive: copyeditingStatus === 'In Progress' },
-      { id: 'production', label: 'Production', status: productionStatus, isDone: isProductionDone, isActive: productionStatus === 'In Progress' },
-      { id: 'publication', label: 'Publication', status: publicationStatus, isDone: isPublicationDone, isActive: publicationStatus === 'In Progress' || (rawStatus === 'PUBLISHED' && !isPublicationDone) }
-    ];
+  const handleSendFormattingMessage = async () => {
+    if (!formattingInput.trim() || !paper?.id || !currentUser?.email) return;
 
-    return { percentage, steps, isRejected };
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (!user || userError) {
+        console.error('Could not get current user');
+        return;
+      }
+
+      await postDiscussionMessage(paper.id, user.id, `[Formatting & Style] ${formattingInput.trim()}`);
+      setFormattingInput("");
+    } catch (error) {
+      console.error('Error sending formatting message:', error);
+    }
+  };
+
+  const handleSendCoordinatorMessage = async () => {
+    if (!coordinatorInput.trim() || !paper?.id || !currentUser?.email) return;
+
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (!user || userError) {
+        console.error('Could not get current user');
+        return;
+      }
+
+      // Add user message
+      const userMessage = {
+        id: 'msg-' + Date.now(),
+        sender: currentUser?.name || 'Author',
+        senderRole: 'AUTHOR',
+        text: coordinatorInput.trim(),
+        timestamp: new Date().toISOString(),
+        isMe: true
+      };
+
+      setCoordinatorMessages([...coordinatorMessages, userMessage]);
+
+      // Post to discussion messages
+      await postDiscussionMessage(paper.id, user.id, `[Coordinator Chat] ${coordinatorInput.trim()}`);
+      setCoordinatorInput("");
+    } catch (error) {
+      console.error('Error sending coordinator message:', error);
+    }
   };
 
   // Discussion thread states
@@ -560,9 +290,264 @@ export default function OjsSubmissionDetail({
     return []; // Empty list per typical default empty state
   });
 
+  // Fetch real manuscript details from Supabase on mount or when paper ID changes
+  useEffect(() => {
+    if (!paper?.id) return;
+
+    let isMounted = true;
+    const loadDetails = async () => {
+      try {
+        setLoadingDetails(true);
+        setDetailsError('');
+        const details = await fetchAuthorManuscriptDetails(paper.id);
+        if (isMounted) {
+          setManuscriptDetails(details);
+          setUserProfiles(details.profiles);
+
+          // Update uploaded files with real data
+          const formattedFiles = details.files.map((f: ManuscriptFileRow) => ({
+            id: f.id,
+            name: f.file_name,
+            type: f.file_type,
+            size: f.file_size,
+            date: formatDate(f.uploaded_at),
+            uploadedAt: f.uploaded_at,
+            uploadedBy: f.uploaded_by,
+            storagePath: f.storage_path,
+            publicUrl: f.public_url
+          }));
+          console.log('[FILE_DEBUG] Formatted files:', formattedFiles.map(f => ({ name: f.name, type: f.type, publicUrl: f.publicUrl })));
+          setUploadedFiles(formattedFiles);
+
+          // Convert discussions to message format -- the Coordinator Discussion
+          // panel is a private channel, so only COORDINATOR_AUTHOR-channel
+          // messages belong there (RLS also enforces this server-side: an
+          // Editor/Reviewer querying this table directly never receives these
+          // rows at all, so this filter is a display concern, not the only guard).
+          const messageList = details.discussions
+            .filter((d) => d.channel === 'COORDINATOR_AUTHOR')
+            .map((d) => ({
+              id: d.id,
+              sender: details.profiles.get(d.sender_id)?.name || 'Unknown',
+              senderEmail: details.profiles.get(d.sender_id)?.email || '',
+              senderRole: details.profiles.get(d.sender_id)?.role || 'User',
+              avatar: (details.profiles.get(d.sender_id)?.name || 'U').substring(0, 2).toUpperCase(),
+              avatarBg: 'bg-slate-500',
+              text: d.message,
+              timestamp: formatDateTime(d.created_at),
+              isMe: currentUser?.email === details.profiles.get(d.sender_id)?.email,
+              fileName: d.file_name,
+              fileSize: d.file_size
+            }));
+          setAllMessages(messageList);
+          setWhatsappMessages(messageList);
+        }
+      } catch (error: any) {
+        if (isMounted) {
+          setDetailsError(error.message || 'Failed to load manuscript details');
+          console.error('Error loading manuscript details:', error);
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingDetails(false);
+        }
+      }
+    };
+
+    loadDetails();
+
+    // Subscribe to real-time updates
+    const unsubscribe = subscribeToManuscriptDetails(paper.id, (updates) => {
+      if (!isMounted) return;
+
+      if (updates.manuscript) {
+        setManuscriptDetails((prev) => prev ? { ...prev, manuscript: updates.manuscript } : null);
+      }
+      if (updates.revisions) {
+        // Without this, allRevisions (sourced from manuscriptDetails.revisions)
+        // stayed frozen at whatever existed on first load -- a new revision
+        // cycle created later (e.g. Revision 2, Revision 3) never showed up
+        // in the "Revision N -- Uploaded Files" sections below until a full
+        // page reload, even though this table is already subscribed to.
+        setManuscriptDetails((prev) => prev ? { ...prev, revisions: updates.revisions! } : null);
+      }
+      if (updates.statusHistory) {
+        // Same gap as revisions above -- the subscription already fires on
+        // every manuscript_status_history insert, but nothing applied it to
+        // state, so getRealSubmissionTimeline() (the Submission Timeline
+        // card) kept computing each stage's timestamp from stale history
+        // until a full page reload.
+        setManuscriptDetails((prev) => prev ? { ...prev, statusHistory: updates.statusHistory! } : null);
+      }
+      if (updates.discussions) {
+        // manuscriptDetails.discussions itself was never updated here before
+        // -- only the WhatsApp-style panel's separate allMessages/
+        // whatsappMessages state was, via the map below. Everything else
+        // that reads manuscriptDetails.discussions directly (the Discussions
+        // count badge, the Pre-Review discussions panel) was staying frozen
+        // at whatever loaded on first mount and never reflecting new
+        // messages in real time.
+        setManuscriptDetails((prev) => prev ? { ...prev, discussions: updates.discussions! } : null);
+
+        const messageList = updates.discussions
+          .filter((d) => d.channel === 'COORDINATOR_AUTHOR')
+          .map((d) => ({
+            id: d.id,
+            sender: userProfiles.get(d.sender_id)?.name || 'Unknown',
+            senderEmail: userProfiles.get(d.sender_id)?.email || '',
+            senderRole: userProfiles.get(d.sender_id)?.role || 'User',
+            avatar: (userProfiles.get(d.sender_id)?.name || 'U').substring(0, 2).toUpperCase(),
+            avatarBg: 'bg-slate-500',
+            text: d.message,
+            timestamp: formatDateTime(d.created_at),
+            isMe: currentUser?.email === userProfiles.get(d.sender_id)?.email,
+            fileName: d.file_name,
+            fileSize: d.file_size
+          }));
+        setAllMessages(messageList);
+        setWhatsappMessages(messageList);
+      }
+      if (updates.files) {
+        const formattedFiles = updates.files.map((f: ManuscriptFileRow) => ({
+          id: f.id,
+          name: f.file_name,
+          type: f.file_type,
+          size: f.file_size,
+          date: formatDate(f.uploaded_at),
+          uploadedAt: f.uploaded_at,
+          uploadedBy: f.uploaded_by,
+          storagePath: f.storage_path,
+          publicUrl: f.public_url
+        }));
+        setUploadedFiles(formattedFiles);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [paper?.id, currentUser?.email]);
+
+  useEffect(() => {
+    if (!paper?.id) { setProductionStatus(null); return; }
+    let cancelled = false;
+    const refetch = () => getProduction(paper.id).then((p) => { if (!cancelled) setProductionStatus(p?.production_status ?? null); }).catch(() => {});
+    refetch();
+    const unsubscribe = subscribeToProduction(refetch);
+    return () => { cancelled = true; unsubscribe(); };
+  }, [paper?.id]);
+
+  // Land the Author straight on the Production & Proofreading panel (view
+  // the proof, approve or request corrections with comments) the moment
+  // there's a proof waiting on them, instead of the generic Submission
+  // overview -- only while they're still sitting on that default tab, so
+  // this doesn't yank them away from a tab they picked themselves.
+  useEffect(() => {
+    if ((productionStatus === 'PROOF_SENT_TO_AUTHOR' || productionStatus === 'AUTHOR_PROOF_REVIEW') && activeTab === 'SUBMISSION') {
+      setActiveTab('production');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productionStatus]);
+
+  // Files uploaded against the current revision cycle (author's revised
+  // manuscript / response to reviewers), shown as their own section below
+  // the original submission's Uploaded Files. Re-fetches and re-subscribes
+  // whenever the latest revision changes (e.g. a new revision cycle starts).
+  const latestRevisionForFiles = getLatestRevision(manuscriptDetails?.revisions);
+  const latestRevisionId = latestRevisionForFiles?.id || null;
+
+  useEffect(() => {
+    if (!latestRevisionId) {
+      setRevisionUploadedFiles([]);
+      return;
+    }
+
+    let isMounted = true;
+    const formatRevisionFiles = (files: ManuscriptFileRow[]) => files.map((f) => ({
+      id: f.id,
+      name: f.file_name,
+      type: f.file_type,
+      size: f.file_size,
+      date: formatDate(f.uploaded_at),
+      uploadedAt: f.uploaded_at,
+      uploadedBy: f.uploaded_by,
+      storagePath: f.storage_path,
+      publicUrl: f.public_url
+    }));
+
+    getRevisionFiles(latestRevisionId).then((files) => {
+      if (isMounted) setRevisionUploadedFiles(formatRevisionFiles(files));
+    }).catch((err) => console.error('Failed to load revision files:', err));
+
+    const revisionFilesChannel = supabase
+      .channel(`revision_files:${latestRevisionId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'manuscript_files', filter: `revision_id=eq.${latestRevisionId}` },
+        async () => {
+          const files = await getRevisionFiles(latestRevisionId);
+          if (isMounted) setRevisionUploadedFiles(formatRevisionFiles(files));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      revisionFilesChannel.unsubscribe();
+    };
+  }, [latestRevisionId]);
+
+  // Files for every revision cycle so far, each shown as its own "Revision N
+  // -- Uploaded Files" section on the Overview page (not just the latest
+  // cycle -- see allRevisionFilesById above).
+  const allRevisions = manuscriptDetails?.revisions || [];
+  const allRevisionIdsKey = allRevisions.map((r) => r.id).join(',');
+
+  useEffect(() => {
+    if (allRevisions.length === 0) {
+      setAllRevisionFilesById({});
+      return;
+    }
+
+    let isMounted = true;
+    const formatRevisionFiles = (files: ManuscriptFileRow[]) => files.map((f) => ({
+      id: f.id,
+      name: f.file_name,
+      type: f.file_type,
+      size: f.file_size,
+      date: formatDate(f.uploaded_at),
+      uploadedAt: f.uploaded_at,
+      uploadedBy: f.uploaded_by,
+      storagePath: f.storage_path,
+      publicUrl: f.public_url
+    }));
+
+    const loadAll = () =>
+      Promise.all(allRevisions.map((r) => getRevisionFiles(r.id).then((files) => [r.id, formatRevisionFiles(files)] as const)))
+        .then((entries) => { if (isMounted) setAllRevisionFilesById(Object.fromEntries(entries)); })
+        .catch((err) => console.error('Failed to load revision files:', err));
+
+    loadAll();
+
+    const channel = supabase
+      .channel(`all_revision_files:${paper?.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'manuscript_files', filter: `manuscript_id=eq.${paper?.id}` },
+        () => { loadAll(); }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      channel.unsubscribe();
+    };
+  }, [allRevisionIdsKey, paper?.id]);
+
   // Keep uploaded files in sync with the latest selected paper
   useEffect(() => {
-    if (Array.isArray(paper?.uploadedFiles) && paper.uploadedFiles.length > 0) {
+    if (Array.isArray(paper?.uploadedFiles) && paper.uploadedFiles.length > 0 && uploadedFiles.length === 0) {
       setUploadedFiles(paper.uploadedFiles);
     }
   }, [paper?.uploadedFiles]);
@@ -593,22 +578,46 @@ export default function OjsSubmissionDetail({
     }
   }, [discussionThreads, paper.id]);
 
-  // Realtime subscription for live database synchronization
+  // Real-time subscription to coordinator messages
   useEffect(() => {
-    const unsubscribe = subscribeToManuscriptsRealtime((updatedMs) => {
-      if (updatedMs.id === paper?.id || updatedMs.id === `OJS-${paper?.id}` || updatedMs.id.replace('OJS-', '') === paper?.id) {
-        if (updatedMs.uploadedFiles && Array.isArray(updatedMs.uploadedFiles) && updatedMs.uploadedFiles.length > 0) {
-          setUploadedFiles(updatedMs.uploadedFiles);
+    if (!paper?.id) return;
+
+    const channel = supabase
+      .channel(`coordinator-messages-${paper.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'discussion_messages',
+          filter: `manuscript_id=eq.${paper.id}`
+        },
+        (payload: any) => {
+          const newMsg = payload.new;
+          if (newMsg.message && newMsg.message.includes('[Coordinator Chat]')) {
+            const coordinatorMsg = {
+              id: newMsg.id,
+              sender: newMsg.sender_name || 'Coordinator',
+              senderRole: 'COORDINATOR',
+              text: newMsg.message.replace('[Coordinator Chat] ', '').trim(),
+              timestamp: newMsg.created_at,
+              isMe: false
+            };
+            setCoordinatorMessages(prev => [...prev, coordinatorMsg]);
+          }
         }
-        if (updatedMs.discussions && Array.isArray(updatedMs.discussions) && updatedMs.discussions.length > 0) {
-          setDiscussionThreads(updatedMs.discussions);
-        }
-      }
-    });
+      )
+      .subscribe();
+
     return () => {
-      unsubscribe();
+      supabase.removeChannel(channel);
     };
   }, [paper?.id]);
+
+  // Note: file/discussion realtime sync is already handled by the
+  // manuscript-id-filtered subscribeToManuscriptDetails() effect above
+  // (dedicated files/discussions channels) -- a second unfiltered
+  // manuscripts-table subscription here would be a duplicate.
 
   // View state: 'DASHBOARD' | 'ADD_DISCUSSION' | 'VIEW_THREAD'
   const [viewState, setViewState] = useState<'DASHBOARD' | 'ADD_DISCUSSION' | 'VIEW_THREAD'>('DASHBOARD');
@@ -628,9 +637,13 @@ export default function OjsSubmissionDetail({
   const [threadReplyText, setThreadReplyText] = useState("");
   const [threadReplyAttached, setThreadReplyAttached] = useState<any[]>([]);
 
-  // Derived user roles & labels
-  const authorDisplayLabel = currentUser ? `${currentUser.name}, Author` : "Dr. Ada Lovelace, Author";
-  const editorDisplayLabel = "Kellye Milhorn, Layout Editor, Proofreader";
+  // Derived user roles & labels -- sourced from real assignment/profile data,
+  // never a placeholder person's name.
+  const assignedEditorProfile = manuscriptDetails?.editorAssignments?.[0]
+    ? userProfiles.get(manuscriptDetails.editorAssignments[0].editor_id)
+    : null;
+  const authorDisplayLabel = currentUser ? `${currentUser.name}, Author` : 'Author';
+  const editorDisplayLabel = assignedEditorProfile ? `${assignedEditorProfile.name}, Editor` : 'No editor assigned yet';
 
   // Handle template selection
   const handleTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -656,15 +669,15 @@ export default function OjsSubmissionDetail({
     const newThread = {
       id: "thread-" + Date.now(),
       subject: subject.trim(),
-      initiator: currentUser?.name || "Dr. Ada Lovelace",
+      initiator: currentUser?.name || 'Author',
       participants: [
-        ...(participants.author ? [currentUser?.name || "Dr. Ada Lovelace"] : []),
-        ...(participants.editor ? ["Kellye Milhorn (Editor)"] : [])
+        ...(participants.author ? [currentUser?.name || 'Author'] : []),
+        ...(participants.editor && assignedEditorProfile ? [`${assignedEditorProfile.name} (Editor)`] : [])
       ],
       messages: [
         {
           id: "msg-" + Date.now(),
-          sender: currentUser?.name || "Dr. Ada Lovelace",
+          sender: currentUser?.name || 'Author',
           senderRole: "Author",
           text: message,
           timestamp: new Date().toISOString(),
@@ -696,7 +709,7 @@ export default function OjsSubmissionDetail({
           ...t.messages,
           {
             id: "msg-" + Date.now(),
-            sender: currentUser?.name || "Dr. Ada Lovelace",
+            sender: currentUser?.name || 'Author',
             senderRole: "Author",
             text: threadReplyText,
             timestamp: new Date().toISOString(),
@@ -762,495 +775,306 @@ export default function OjsSubmissionDetail({
     }
   };
 
-  // Simulation upload file helper
-  const handleSimulateUpload = (forReply = false, forMainList = false) => {
-    const mockFiles = [
-      { name: "supplementary_charts_v2.pdf", size: "1.4 MB", type: "Supplementary File" },
-      { name: "response_to_reviewers.docx", size: "625 KB", type: "Manuscript" },
-      { name: "experimental_dataset.xlsx", size: "3.1 MB", type: "Supplementary File" },
-      { name: "high_res_methodology_flow.png", size: "900 KB", type: "Figures" }
-    ];
-    const picked = mockFiles[Math.floor(Math.random() * mockFiles.length)];
-    const filename = `${Date.now().toString().slice(-4)}_${picked.name}`;
-
-    if (forReply) {
-      setThreadReplyAttached([...threadReplyAttached, { name: filename, size: picked.size }]);
-    } else if (forMainList) {
-      const newFile = {
-        name: filename,
-        type: picked.type,
-        size: picked.size,
-        date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-      };
-      setUploadedFiles(prev => [...prev, newFile]);
-      alert(`Successfully uploaded "${filename}" into active files database.`);
-    } else {
-      setAttachedFiles([...attachedFiles, { name: filename, size: picked.size }]);
-    }
-  };
-
-  const isSubmissionDashboard = activeTab === 'SUBMISSION' && viewState === 'DASHBOARD';
+  const isSubmissionDashboard = (activeTab === 'SUBMISSION' || activeTab === 'overview') && viewState === 'DASHBOARD';
 
   return (
     <div id="ojs-submission-detail-container" className="w-full bg-[#e8f3ed] min-h-screen text-slate-950 flex flex-col md:flex-row items-stretch border-t border-slate-200">
       
-      {/* ======= COLUMN 1: LEFT WORKFLOW & PUBLICATION SIDEBAR ======= */}
-      <aside id="ojs-left-sidebar-navigation" className="w-full md:w-64 bg-white border-r border-[#d1e7dd] flex flex-col shrink-0 p-5 space-y-7 text-left font-sans">
-        
-        {/* Section A: Workflow headings and items */}
-        <div className="space-y-3">
-          <span className="block text-[11px] font-black uppercase tracking-widest text-[#004d2e] font-mono">
-            Workflow
-          </span>
-          <nav className="flex flex-col space-y-1">
-            {[
-              { id: 'SUBMISSION', label: 'Submission', icon: FileText, badge: null },
-              { id: 'REVIEW', label: 'Review', icon: MessageSquare, badge: 2 },
-              { id: 'COPYEDITING', label: 'Copyediting', icon: SquarePen, badge: 1 },
-              { id: 'PRODUCTION', label: 'Production', icon: Printer, badge: 0 }
-            ].map((item) => {
-              const isActive = activeTab === item.id;
-              const IconComp = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  id={`workflow-tab-${item.id}`}
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setViewState('DASHBOARD');
-                  }}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-all duration-150 ${
-                    isActive
-                      ? 'bg-emerald-100/75 text-[#005a36] border-l-[4px] border-[#008751] shadow-3xs'
-                      : 'text-slate-900 hover:bg-emerald-50/50 hover:text-emerald-950'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <IconComp className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-700'}`} />
-                    <span>{item.label}</span>
-                  </div>
-                  {item.badge !== null && (
-                    <span className={`text-[11px] font-black font-mono px-2 py-0.5 rounded-full ${
-                      isActive ? 'bg-[#008751] text-white' : 'bg-slate-200 text-slate-900'
-                    }`}>
-                      {item.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        {/* Section B: Publication headings and items with checkmarks */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="block text-[11px] font-black uppercase tracking-widest text-[#004d2e] font-mono">
-              Publication
-            </span>
-            <ChevronUp className="w-3.5 h-3.5 text-[#004d2e] font-bold" />
-          </div>
-          <nav className="flex flex-col space-y-1">
-            {[
-              { id: 'TITLE_ABSTRACT', label: 'Title & Abstract', icon: FileText },
-              { id: 'CONTRIBUTORS', label: 'Contributors', icon: Globe },
-              { id: 'METADATA', label: 'Metadata', icon: Layers },
-              { id: 'REFERENCES', label: 'References', icon: Sliders },
-              { id: 'GALLEYS', label: 'Galleys', icon: Briefcase }
-            ].map((item) => {
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  id={`publication-tab-${item.id}`}
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setViewState('DASHBOARD');
-                  }}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-all duration-150 ${
-                    isActive
-                      ? 'bg-emerald-100/75 text-[#005a36] border-l-[4px] border-[#008751] shadow-3xs'
-                      : 'text-slate-900 hover:bg-emerald-50/50 hover:text-emerald-950'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <item.icon className={`w-4 h-4 ${isActive ? 'text-[#008751]' : 'text-slate-700'}`} />
-                    <span>{item.label}</span>
-                  </div>
-                  
-                  {/* Circular check mark badge inside a green ring or indicator */}
-                  <div className="w-4 h-4 rounded-full bg-[#008751] text-white flex items-center justify-center shadow-3xs">
-                    <Check className="w-2.5 h-2.5 stroke-[4.5]" />
-                  </div>
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        {/* Section C: Need Help? guideline box card at the bottom */}
-        <div className="mt-auto pt-4">
-          <div id="ojs-help-box-card" className="border border-slate-200 rounded-xl p-4 bg-white space-y-3 text-left">
-            <div className="flex items-center gap-2">
-              <HelpCircle className="w-4.5 h-4.5 text-[#008751]" />
-              <strong className="text-sm font-bold text-slate-800">Need Help?</strong>
-            </div>
-            <p className="text-xs text-slate-500 leading-normal">
-              Read our author guidelines or contact editorial support.
-            </p>
-            <button
-              id="guidelines-button"
-              onClick={() => alert("Simulating scholarly writer and peer review workflow directories.")}
-              className="w-full flex items-center justify-center gap-2 py-2 bg-[#f8fcf9] hover:bg-[#edf7f1] border border-slate-200 text-slate-700 text-xs font-bold rounded-lg transition duration-150 cursor-pointer"
-            >
-              <span>View Guidelines</span>
-              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-            </button>
-          </div>
-        </div>
-
-      </aside>
+      {/* DATA-DRIVEN SIDEBAR - Real submission data */}
+      <SubmissionSidebar
+        manuscript={manuscriptDetails}
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          setViewState('DASHBOARD');
+        }}
+      />
 
       {/* ======= MAIN VIEWPORTS: HERO HEADER CONTAINER + DOUBLE COLUMN STACKS ======= */}
-      <div id="ojs-main-panel-content" className="flex-grow flex flex-col p-6 space-y-6 overflow-y-auto w-full">
-        
+      <div id="ojs-main-panel-content" className="flex-grow flex flex-col p-4 space-y-4 overflow-y-auto w-full">
+
         {isSubmissionDashboard ? (
           /* ======================= PREMIUM IMAGE-MATCHING DASHBOARD ======================= */
-          <div className="space-y-6 w-full animate-in fade-in duration-200">
+          <div className="space-y-4 w-full animate-in fade-in duration-200">
+            {/* Back Button */}
+            <button
+              onClick={onBack}
+              className="inline-flex items-center gap-2 text-[#008751] hover:text-[#007043] font-semibold text-sm mb-2 hover:bg-emerald-50 px-2 py-1.5 rounded-lg transition"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Back to Submissions</span>
+            </button>
+
             {/* Top Header Row with dynamic/stat values matching screenshot */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-emerald-200 gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 border-b border-emerald-200 gap-3">
               <div className="text-left">
-                <h1 className="text-[24px] font-black text-black tracking-tight leading-none">Submission</h1>
-                <p className="text-[14px] text-[#005e38] mt-1.5 font-medium">Track and manage your manuscript submission.</p>
+                <h1 className="text-[20px] font-semibold text-black tracking-tight leading-none">Submission</h1>
+                <p className="text-[12px] text-[#005e38] mt-1 font-medium">Track and manage your manuscript submission.</p>
               </div>
               <div className="flex items-center gap-3">
-                {/* + New Submission Button */}
-                <button
-                  onClick={() => alert("Simulating launching a new academic manuscript submission workflow in TULITICS Author Workspace.")}
-                  className="bg-[#008751] hover:bg-[#007043] text-white text-[14px] font-bold px-5 py-2.5 rounded-full flex items-center gap-1.5 transition duration-150 shadow-md cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
-                >
-                  <Plus className="w-4 h-4 text-white font-bold stroke-[3]" />
-                  <span>New Submission</span>
-                </button>
-                {/* Notification Bell */}
-                <div className="relative p-2.5 bg-white border border-emerald-200 hover:bg-emerald-50 rounded-full transition cursor-pointer shadow-2xs">
-                  <div className="absolute right-1 top-1 w-2 h-2 bg-red-600 rounded-full border border-white" />
-                  <Bell className="w-4 h-4 text-slate-900 stroke-[2.5]" />
-                </div>
-                {/* Profile Avatar Block */}
-                <div className="flex items-center gap-2 cursor-pointer hover:opacity-90 select-none pl-2 border-l border-emerald-200">
-                  <div className="w-9 h-9 rounded-full bg-[#008751] text-white font-bold text-xs flex items-center justify-center font-mono shadow-xs border border-white">
-                    AG
-                  </div>
-                  <span className="text-[14px] font-semibold text-black font-sans hidden sm:inline">Akshaya G</span>
-                  <ChevronDown className="w-4 h-4 text-slate-900 stroke-[2.5]" />
-                </div>
               </div>
             </div>
 
             {/* TWO-COLUMN STACK (Center Column + Right Details Sidebar) */}
-            <div className="w-full flex flex-col lg:flex-row items-start gap-6">
+            <div className="w-full flex flex-col lg:flex-row items-start gap-6 lg:gap-8 -mt-4">
 
               {/* CENTER CORE COLUMN (COLUMN 2) */}
-              <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full lg:max-w-[70%]">
+              <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full lg:min-w-0">
                 
                 {/* Manuscript Detail Banner */}
-                <div className="bg-gradient-to-br from-[#022c22] via-[#047857] to-[#065f46] border border-[#047857]/40 rounded-2xl p-6 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-md text-white">
+                <div className="bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] border border-[#2f7d55]/40 rounded-xl p-4 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-sm text-white">
                   {/* Decorative background radial glow */}
-                  <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-                  
-                  <div className="space-y-2 text-left relative z-10 flex-grow">
-                    <span className="text-emerald-200 text-[13px] font-medium uppercase tracking-widest block font-mono">
-                      Manuscript ID: #{paper.id || "N/A"}
-                    </span>
-                    <h2 className="text-white text-[24px] font-black font-sans tracking-tight leading-snug drop-shadow-xs">
-                      {paper.title || "Artificial Intelligence in Healthcare: Opportunities and Challenges"}
+                  <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none -mr-16 -mt-16" />
+
+                  <div className="space-y-1.5 text-left relative z-10 flex-grow">
+                    <h2 className="text-white text-[18px] font-semibold font-sans tracking-tight leading-snug drop-shadow-xs">
+                      {manuscriptDetails?.manuscript.title || paper.title || 'Untitled manuscript'}
                     </h2>
-                    
-                    {/* Metadata line */}
-                    <div className="flex flex-wrap items-center gap-x-5 gap-y-3 pt-3 text-[13px] text-emerald-100 font-medium">
-                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
-                        <Calendar className="w-4 h-4 text-emerald-300 shrink-0" />
-                        <span>Submitted On <strong className="text-white font-semibold ml-1 text-[14px]">{paper.receivedAt || "08 June 2026"}</strong></span>
-                      </div>
-                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
-                        <BookOpen className="w-4 h-4 text-emerald-300 shrink-0" />
-                        <span>Journal <strong className="text-white font-semibold ml-1 text-[14px]">Journal of AI in Medicine</strong></span>
-                      </div>
-                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
-                        <User className="w-4 h-4 text-emerald-300 shrink-0" />
-                        <span>Author <strong className="text-white font-semibold ml-1 text-[14px]">{paper.author || "Akshaya G"}</strong></span>
-                      </div>
-                      <div className="flex items-center gap-2 bg-black/15 px-3 py-1.5 rounded-lg border border-white/5">
-                        <User className="w-4 h-4 text-emerald-300 shrink-0" />
-                        <span>Corresponding Author <strong className="text-white font-semibold ml-1 text-[14px]">{paper.author || "Akshaya G"}</strong></span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Current Status sub-card on the right */}
-                  <div className="shrink-0 flex items-center gap-4 relative z-10 bg-white border border-emerald-500/20 p-5 rounded-2xl shadow-lg self-stretch md:self-auto flex-row justify-between md:justify-start">
-                    <div className="space-y-1 text-left">
-                      <span className="text-slate-800 text-[11px] font-semibold uppercase tracking-widest block">Current Status</span>
-                      <span className="bg-[#e6f7ef] text-[#008751] border-2 border-emerald-500/30 px-3.5 py-1.5 rounded-full text-[13px] font-bold inline-flex items-center gap-1.5 shadow-3xs">
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#008751]" />
-                        Submitted
-                      </span>
-                    </div>
-                    
-                    {/* Cute document sheet with green check overlay */}
-                    <div className="relative">
-                      <div className="w-12 h-14 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-center shadow-xs relative">
-                        <FileText className="w-6 h-6 text-[#008751]" />
-                        <div className="absolute -bottom-1 -right-1 bg-[#008751] text-white rounded-full p-0.5 border-2 border-white shadow-2xs">
-                          <Check className="w-3 h-3 stroke-[3.5]" />
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 </div>
 
-                {/* 4-Metric Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* Card 1: Files */}
-                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
-                      <FolderOpen className="w-5.5 h-5.5 stroke-[2.5]" />
-                    </div>
-                    <div className="text-left space-y-0.5">
-                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Files</span>
-                      <div className="text-2xl font-black text-black leading-none">{uploadedFiles.length}</div>
-                      <span className="text-slate-900 text-[11px] block font-medium">Files Uploaded</span>
-                      <button 
-                        onClick={() => document.getElementById("uploaded-files-card")?.scrollIntoView({ behavior: 'smooth' })}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <span>View Files</span>
-                        <span>→</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Card 2: Discussions */}
-                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
-                      <MessageSquare className="w-5.5 h-5.5 stroke-[2.5]" />
-                    </div>
-                    <div className="text-left space-y-0.5">
-                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Discussions</span>
-                      <div className="text-2xl font-black text-black leading-none">2</div>
-                      <span className="text-slate-900 text-[11px] block font-medium">New Messages</span>
-                      <button 
-                        onClick={() => document.getElementById("discussions-card")?.scrollIntoView({ behavior: 'smooth' })}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <span>Open</span>
-                        <span>→</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Card 3: Editorial Team */}
-                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
-                      <User className="w-5.5 h-5.5 stroke-[2.5]" />
-                    </div>
-                    <div className="text-left space-y-0.5 overflow-hidden">
-                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Editorial Team</span>
-                      <div className="text-sm font-semibold text-black leading-none truncate font-sans" title="Dr. John Smith">Dr. John Smith</div>
-                      <span className="text-slate-900 text-[11px] block font-medium">Editor Assigned</span>
-                      <button 
-                        onClick={() => alert("Assigned Editorial Contact Panel:\nDr. John Smith (Lead Managing Editor)\nJournal of AI in Medicine.")}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1.5 flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <span>View Details</span>
-                        <span>→</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Card 4: Important Dates */}
-                  <div className="bg-gradient-to-br from-white to-[#f0fbf5] border border-[#a7f3d0] rounded-xl p-5 shadow-xs flex items-center gap-4 hover:border-[#008751] hover:shadow-sm transition duration-150">
-                    <div className="w-11 h-11 rounded-full bg-[#d1f2e1] flex items-center justify-center text-[#004d2e] shrink-0 shadow-3xs border border-[#a7f3d0]">
-                      <Calendar className="w-5.5 h-5.5 stroke-[2.5]" />
-                    </div>
-                    <div className="text-left space-y-0.5">
-                      <span className="text-black text-[13px] font-bold uppercase tracking-wider block">Important Dates</span>
-                      <div className="text-[11px] font-medium text-slate-900 leading-tight">
-                        <div>Submitted <strong className="text-black font-semibold">08 June 2026</strong></div>
-                        <div className="mt-0.5">Expected <strong className="text-black font-semibold">22 June 2026</strong></div>
-                      </div>
-                      <button 
-                        onClick={() => alert("Opening manuscript editorial milestones tracking calendar.")}
-                        className="text-[#008751] hover:text-[#007043] hover:underline font-bold text-[11px] block mt-1 flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <span>View Calendar</span>
-                        <span>→</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Submission Workflow horizontal stepper */}
-                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-6 shadow-xs text-left">
-                  <h3 className="text-black text-[18px] font-black tracking-tight mb-6">Submission Workflow</h3>
-                  
-                  <div className="relative flex items-center justify-between">
-                    {/* Background connecting line */}
-                    <div className="absolute top-4 left-4 right-4 h-0.5 bg-emerald-200 z-0">
-                      {/* Completed progress fill */}
-                      <div className="absolute top-0 left-0 w-[20%] h-full bg-[#008751]" />
-                    </div>
-                    
-                    {[
-                      { label: "Submitted", sub: "08 Jun 2026", status: "completed" },
-                      { label: "Editor Assigned", sub: "In Progress", status: "active" },
-                      { label: "Reviewer Invited", sub: "Pending", status: "pending" },
-                      { label: "Under Review", sub: "Pending", status: "pending" },
-                      { label: "Decision", sub: "Pending", status: "pending" },
-                      { label: "Production", sub: "Pending", status: "pending" }
-                    ].map((step, idx) => {
-                      let circleStyle = "bg-white border-emerald-200 text-[#004d2e]";
-                      let labelStyle = "text-slate-800 font-medium";
-                      let subStyle = "text-slate-900 font-normal";
-                      
-                      if (step.status === "completed") {
-                        circleStyle = "bg-[#008751] border-[#008751] text-white shadow-3xs";
-                        labelStyle = "text-black font-bold text-[12px]";
-                        subStyle = "text-slate-800 font-medium text-[11px]";
-                      } else if (step.status === "active") {
-                        circleStyle = "border-2 border-[#008751] bg-[#eefcf5] text-[#008751] ring-2 ring-[#008751]/10";
-                        labelStyle = "text-[#005a36] font-bold text-[12px] bg-emerald-100/70 px-1.5 py-0.5 rounded border border-emerald-200 shadow-3xs";
-                        subStyle = "text-emerald-800 font-bold text-[11px]";
-                      } else {
-                        circleStyle = "bg-slate-50 border-emerald-100 text-slate-500";
-                        labelStyle = "text-slate-900 font-medium text-[11px]";
-                        subStyle = "text-slate-600 font-normal text-[10px]";
-                      }
-                      
-                      return (
-                        <div key={idx} className="relative z-10 flex flex-col items-center flex-1 text-center">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 text-xs transition duration-150 ${circleStyle}`}>
-                            {step.status === "completed" ? (
-                              <Check className="w-4 h-4 stroke-[4]" />
-                            ) : step.status === "active" ? (
-                              <span className="w-2.5 h-2.5 rounded-full bg-[#008751]" />
-                            ) : (
-                              <span className="w-2 h-2 bg-slate-300 rounded-full" />
-                            )}
-                          </div>
-                          <span className={`text-[10px] sm:text-[11px] mt-2 block tracking-tight ${labelStyle}`}>{step.label}</span>
-                          <span className={`text-[9px] sm:text-[10px] mt-0.5 block ${subStyle}`}>{step.sub}</span>
+                {/* Final decision banner -- shown once the Coordinator has decided */}
+                {manuscriptDetails?.manuscript.status && ['ACCEPTED', 'REVISION_REQUESTED', 'REJECTED'].includes(manuscriptDetails.manuscript.status) && (() => {
+                  const status = manuscriptDetails.manuscript.status;
+                  const latestRevision = getLatestRevision(manuscriptDetails.revisions);
+                  const meta = getManuscriptStatusMeta(manuscriptDetails.manuscript, latestRevision, productionStatus);
+                  const decisionLetterEntry = manuscriptDetails.statusHistory?.find(h => h.to_status === status && h.note);
+                  const isAccepted = status === 'ACCEPTED';
+                  const isRejected = status === 'REJECTED';
+                  // The acceptance decision letter (Editor Comments, e.g. "do
+                  // this corrections") is only relevant while production
+                  // hasn't started yet -- once the GD Member has begun acting
+                  // on it (productionStatus moves past NOT_STARTED), it's
+                  // been addressed and shouldn't keep showing indefinitely.
+                  const justAccepted = isAccepted && (!productionStatus || productionStatus === 'NOT_STARTED');
+                  // manuscripts.status stays REVISION_REQUESTED even after the
+                  // author submits -- only the revision row itself flips from
+                  // AWAITING_AUTHOR_UPLOAD to REVISION_SUBMITTED, until the
+                  // Coordinator forwards it on (see submit_revision() in
+                  // 0038_revision_loop_accept_and_author_response.sql). So
+                  // "still needs a submission" has to check the revision, not
+                  // just the manuscript status.
+                  const revisionPending = status === 'REVISION_REQUESTED' && latestRevision?.status === 'AWAITING_AUTHOR_UPLOAD';
+                  const revisionAlreadySubmitted = status === 'REVISION_REQUESTED' && latestRevision && latestRevision.status !== 'AWAITING_AUTHOR_UPLOAD';
+                  return (
+                    <div className={`rounded-2xl p-5 border-2 ${
+                      isRejected ? 'bg-red-50 border-red-200' :
+                      isAccepted ? 'bg-emerald-50 border-emerald-200' :
+                      'bg-amber-50 border-amber-200'
+                    }`}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className={`text-base font-black ${isRejected ? 'text-red-800' : isAccepted ? 'text-emerald-800' : 'text-amber-800'}`}>
+                            {isAccepted ? 'Manuscript Accepted' : isRejected ? 'Manuscript Rejected' :
+                              revisionAlreadySubmitted ? `Revision ${latestRevision!.revision_number} Submitted` :
+                              `Revision Required — ${meta.label}`}
+                          </p>
+                          <p className="text-sm font-semibold text-slate-700 mt-1">Status: {meta.label}</p>
+                          {justAccepted && <p className="text-sm font-semibold text-slate-700 mt-1">Decision: Accepted</p>}
+                          {revisionAlreadySubmitted && <p className="text-sm text-slate-600 mt-1">Waiting for the editorial team to review your submission.</p>}
+                          {meta.nextStep && <p className="text-sm text-slate-600 mt-1">Next step: {meta.nextStep}</p>}
                         </div>
-                      );
-                    })}
+                        {revisionPending && onSubmitRevision && (
+                          <button
+                            onClick={onSubmitRevision}
+                            className="shrink-0 rounded-lg border border-orange-300 bg-orange-50 px-4 py-2 text-xs font-bold text-orange-700 hover:bg-orange-100 transition"
+                          >
+                            Submit Revision
+                          </button>
+                        )}
+                        {revisionAlreadySubmitted && (
+                          <span className="shrink-0 inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-700">
+                            Revision {latestRevision!.revision_number} — Submitted
+                          </span>
+                        )}
+                        {/* View Proofreading -- straight to AuthorProductionPanel
+                            (view/download the proof, request corrections with
+                            comments, or approve it) once production has
+                            actually started, so this doesn't only depend on
+                            the auto-redirect firing the first time a proof
+                            arrives. */}
+                        {isAccepted && productionStatus && productionStatus !== 'NOT_STARTED' && (
+                          <button
+                            onClick={() => setActiveTab('production')}
+                            className="shrink-0 rounded-lg border border-emerald-300 bg-emerald-100 px-4 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-200 transition"
+                          >
+                            View Proofreading
+                          </button>
+                        )}
+                      </div>
+                      {justAccepted && decisionLetterEntry?.note && (
+                        <p className="text-sm text-slate-700 mt-3 whitespace-pre-wrap border-t border-black/10 pt-3">{decisionLetterEntry.note}</p>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Submission Overview -- one horizontal row for this manuscript.
+                    Status is not hard-coded: it comes from the same
+                    getManuscriptStatusLabel()/STANDARD_STATUS_COLORS pair every
+                    other workspace uses, driven by manuscripts.status +
+                    production_stage, so a Coordinator's status change is
+                    reflected here automatically without any local state. */}
+                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl shadow-xs text-left overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm min-w-[640px]">
+                      <thead>
+                        <tr className="bg-emerald-50/50 border-b border-emerald-100">
+                          <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-600">Manuscript ID</th>
+                          <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-600">Title</th>
+                          <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-600">Author Name</th>
+                          <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-600">Submitted Date</th>
+                          <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-600">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="hover:bg-emerald-50/30 transition">
+                          <td className="px-4 py-4 font-mono text-xs font-bold text-slate-700 whitespace-nowrap align-middle">
+                            #{manuscriptDetails?.manuscript.id || paper.id || 'N/A'}
+                          </td>
+                          <td className="px-4 py-4 font-semibold text-slate-900 max-w-xs truncate align-middle">
+                            {manuscriptDetails?.manuscript.title || paper.title || 'Untitled manuscript'}
+                          </td>
+                          <td className="px-4 py-4 text-slate-700 whitespace-nowrap align-middle">
+                            {manuscriptDetails?.manuscript.author_name || paper.author || 'Unknown author'}
+                          </td>
+                          <td className="px-4 py-4 text-slate-700 whitespace-nowrap align-middle">
+                            {manuscriptDetails?.manuscript.submitted_at ? formatDate(manuscriptDetails.manuscript.submitted_at) : '--'}
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap align-middle">
+                            {(() => {
+                              const statusLabel = manuscriptDetails?.manuscript
+                                ? getRoleAwareStatusLabel(manuscriptDetails.manuscript, 'AUTHOR', getLatestRevision(manuscriptDetails.revisions), productionStatus)
+                                : (paper.raw?.status || 'SUBMITTED').replace(/_/g, ' ');
+                              const colorClass = STANDARD_STATUS_COLORS[statusLabel as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.SUBMITTED;
+                              return (
+                                <span className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold border ${colorClass}`}>
+                                  <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0" />
+                                  {statusLabel}
+                                </span>
+                              );
+                            })()}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 
                 {/* Uploaded Files and Pre-Review Discussions Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 gap-4 w-full">
                   {/* Uploaded Files Panel */}
-                  <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left flex flex-col justify-between">
-                    <div>
-                      <input 
-                        type="file" 
-                        ref={fileInputRef} 
-                        onChange={handleRealFileUpload} 
-                        className="hidden" 
+                  <div id="uploaded-files-card" className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl p-4 shadow-xs text-left flex flex-col">
+                    <div className="shrink-0">
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleRealFileUpload}
+                        className="hidden"
                       />
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3 border-emerald-100">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b pb-2.5 border-emerald-100">
                         <div className="flex items-center gap-2">
-                          <h3 className="text-black text-[18px] font-black tracking-tight">Uploaded Files</h3>
-                          <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                            Supabase Connected
+                          <h3 className="text-black text-[16px] font-semibold tracking-tight">Uploaded Files</h3>
+                          <span className="text-[9px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            Synced
                           </span>
                         </div>
-                        
+
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isUploading}
-                            className="border border-emerald-600 bg-[#008751] hover:bg-[#007043] text-white text-[13px] font-bold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer shadow-3xs disabled:opacity-50"
+                            className="border border-emerald-600 bg-[#008751] hover:bg-[#007043] text-white text-[12px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer shadow-2xs disabled:opacity-50"
                           >
-                            <Plus className="w-4 h-4 text-white stroke-[3]" />
-                            <span>{isUploading ? "Uploading..." : "Upload New File"}</span>
-                          </button>
-                          
-                          <button
-                            onClick={() => handleSimulateUpload(false, true)}
-                            title="Simulate adding sample file"
-                            className="border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[#005a36] text-[12px] font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-3xs"
-                          >
-                            <span>+ Demo</span>
+                            <Plus className="w-3.5 h-3.5 text-white stroke-[3]" />
+                            <span className="hidden sm:inline">{isUploading ? "Uploading..." : "Upload"}</span>
+                            <span className="sm:hidden">Upload</span>
                           </button>
                         </div>
                       </div>
-                      
-                      <div className="mt-4 overflow-x-auto rounded-xl border border-emerald-50">
+                    </div>
+
+                    {/* No height cap/scroll here -- as revisions accumulate
+                        (Revision 1, Revision 2, ...) every one of them needs
+                        to actually be visible without the Author having to
+                        notice and scroll a nested box, even if that makes
+                        this card taller than its Discussions sibling. */}
+                    <div className="mt-3">
+                      <div className="overflow-x-auto rounded-lg border border-emerald-100">
                         <table className="w-full text-left text-xs border-collapse">
                           <thead>
-                            <tr className="text-[13px] font-bold uppercase tracking-wider text-[#004d2e] border-b border-emerald-200 bg-emerald-50/50">
-                              <th className="p-3 font-bold">File Name</th>
-                              <th className="p-3 font-bold">Type</th>
-                              <th className="p-3 font-bold">Size</th>
-                              <th className="p-3 font-bold">Uploaded On</th>
-                              <th className="p-3 text-center font-bold">Actions</th>
+                            <tr className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 border-b border-emerald-100 bg-slate-50">
+                              <th className="px-3 py-2 font-bold">Name</th>
+                              <th className="px-3 py-2 font-bold">Type</th>
+                              <th className="px-3 py-2 font-bold">Size</th>
+                              <th className="px-3 py-2 font-bold">Date</th>
+                              <th className="px-3 py-2 text-center font-bold">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-emerald-50 bg-white">
                             {uploadedFiles.map((file, i) => {
-                              // Icon coloring depending on file type extension
                               let fileIconColor = "text-rose-600";
                               if (file.name.endsWith(".docx")) fileIconColor = "text-blue-600";
                               else if (file.name.endsWith(".zip")) fileIconColor = "text-amber-600";
-                              
+
                               return (
-                                <tr key={file.id || i} className="hover:bg-emerald-50/30 transition">
-                                  <td className="p-3">
-                                    <button 
+                                <tr key={file.id || i} className="hover:bg-emerald-50/50 transition">
+                                  <td className="px-3 py-2">
+                                    <button
                                       onClick={() => {
                                         setPreviewFileName(file.name);
                                         setPreviewFileType(file.type || 'Document');
                                         setPreviewFileSize(file.size || '1.2 MB');
+                                        setPreviewPublicUrl(file.publicUrl || '');
                                         setPreviewModalOpen(true);
                                       }}
                                       className="flex items-center gap-2 max-w-[150px] sm:max-w-none text-left hover:underline cursor-pointer group"
                                     >
-                                      <FileText className={`w-4.5 h-4.5 ${fileIconColor} shrink-0 stroke-[2]`} />
-                                      <span className="text-[14px] font-semibold text-black truncate group-hover:text-[#008751]" title={file.name}>{file.name}</span>
+                                      <FileText className={`w-4 h-4 ${fileIconColor} shrink-0 stroke-[2]`} />
+                                      <span className="text-[12px] font-semibold text-black truncate group-hover:text-[#008751]" title={file.name}>{file.name}</span>
                                     </button>
                                   </td>
-                                  <td className="p-3 text-[14px] font-medium text-slate-900">{file.type}</td>
-                                  <td className="p-3 text-[14px] font-medium text-slate-950 font-mono">{file.size}</td>
-                                  <td className="p-3 text-[14px] font-medium text-slate-950 font-mono">{file.date}</td>
-                                  <td className="p-3">
-                                    <div className="flex items-center justify-center gap-1.5">
-                                      <button 
+                                  <td className="px-3 py-2 text-[12px] font-medium text-slate-700">{file.type}</td>
+                                  <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.size}</td>
+                                  <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.date}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex items-center justify-center gap-1">
+                                      <button
                                         onClick={() => {
+                                          const publicUrlValue = file.publicUrl || '';
+                                          console.log('[EYE_ICON] File preview clicked:', {
+                                            name: file.name,
+                                            type: file.type,
+                                            size: file.size,
+                                            publicUrl: publicUrlValue,
+                                            storagePath: file.storagePath,
+                                            hasPublicUrl: !!publicUrlValue
+                                          });
                                           setPreviewFileName(file.name);
                                           setPreviewFileType(file.type || 'Document');
                                           setPreviewFileSize(file.size || '1.2 MB');
+                                          setPreviewPublicUrl(publicUrlValue);
                                           setPreviewModalOpen(true);
                                         }}
-                                        className="p-1.5 hover:bg-emerald-50 rounded text-slate-900 hover:text-[#008751] transition border border-transparent hover:border-emerald-200 cursor-pointer"
-                                        title="View file"
+                                        className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
+                                        title="View"
                                       >
-                                        <Eye className="w-4 h-4" />
+                                        <Eye className="w-3.5 h-3.5" />
                                       </button>
-                                      <a 
-                                        href={file.url || '#'} 
+                                      <a
+                                        href={file.publicUrl || file.url || '#'}
                                         download={file.name}
                                         onClick={(e) => {
-                                          if (!file.url) {
+                                          if (!file.publicUrl && !file.url) {
                                             e.preventDefault();
-                                            alert(`Downloading document file: ${file.name}`);
+                                            alert(`Downloading: ${file.name}`);
                                           }
                                         }}
-                                        className="p-1.5 hover:bg-emerald-50 rounded text-slate-900 hover:text-[#008751] transition border border-transparent hover:border-emerald-200 cursor-pointer"
-                                        title="Download file"
+                                        className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
+                                        title="Download"
                                       >
-                                        <Download className="w-4.5 h-4.5" />
+                                        <Download className="w-3.5 h-3.5" />
                                       </a>
                                     </div>
                                   </td>
@@ -1260,51 +1084,135 @@ export default function OjsSubmissionDetail({
                           </tbody>
                         </table>
                       </div>
+
+                      {[...allRevisions].sort((a, b) => a.revision_number - b.revision_number).map((rev) => {
+                      const files = allRevisionFilesById[rev.id] || [];
+                      return (
+                        <div key={rev.id} className="mt-4 pt-3 border-t border-emerald-100">
+                          <h4 className="text-black text-[13px] font-semibold tracking-tight mb-2">
+                            Revision {rev.revision_number} — Uploaded Files
+                          </h4>
+                          {files.length === 0 ? (
+                            <p className="text-[11px] text-slate-500">No files uploaded for this revision yet.</p>
+                          ) : (
+                            <div className="overflow-x-auto rounded-lg border border-emerald-100">
+                              <table className="w-full text-left text-xs border-collapse">
+                                <thead>
+                                  <tr className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 border-b border-emerald-100 bg-slate-50">
+                                    <th className="px-3 py-2 font-bold">Name</th>
+                                    <th className="px-3 py-2 font-bold">Type</th>
+                                    <th className="px-3 py-2 font-bold">Size</th>
+                                    <th className="px-3 py-2 font-bold">Date</th>
+                                    <th className="px-3 py-2 text-center font-bold">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-emerald-50 bg-white">
+                                  {files.map((file, i) => {
+                                    let fileIconColor = "text-rose-600";
+                                    if (file.name.endsWith(".docx")) fileIconColor = "text-blue-600";
+                                    else if (file.name.endsWith(".zip")) fileIconColor = "text-amber-600";
+                                    return (
+                                      <tr key={file.id || i} className="hover:bg-emerald-50/50 transition">
+                                        <td className="px-3 py-2">
+                                          <button
+                                            onClick={() => {
+                                              setPreviewFileName(file.name);
+                                              setPreviewFileType(file.type || 'Document');
+                                              setPreviewFileSize(file.size || '1.2 MB');
+                                              setPreviewPublicUrl(file.publicUrl || '');
+                                              setPreviewModalOpen(true);
+                                            }}
+                                            className="flex items-center gap-2 max-w-[150px] sm:max-w-none text-left hover:underline cursor-pointer group"
+                                          >
+                                            <FileText className={`w-4 h-4 ${fileIconColor} shrink-0 stroke-[2]`} />
+                                            <span className="text-[12px] font-semibold text-black truncate group-hover:text-[#008751]" title={file.name}>{file.name}</span>
+                                          </button>
+                                        </td>
+                                        <td className="px-3 py-2 text-[12px] font-medium text-slate-700">{file.type}</td>
+                                        <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.size}</td>
+                                        <td className="px-3 py-2 text-[12px] font-medium text-slate-700 font-mono">{file.date}</td>
+                                        <td className="px-3 py-2">
+                                          <div className="flex items-center justify-center gap-1">
+                                            <button
+                                              onClick={() => {
+                                                setPreviewFileName(file.name);
+                                                setPreviewFileType(file.type || 'Document');
+                                                setPreviewFileSize(file.size || '1.2 MB');
+                                                setPreviewPublicUrl(file.publicUrl || '');
+                                                setPreviewModalOpen(true);
+                                              }}
+                                              className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
+                                              title="View"
+                                            >
+                                              <Eye className="w-3.5 h-3.5" />
+                                            </button>
+                                            <a
+                                              href={file.publicUrl || '#'}
+                                              download={file.name}
+                                              className="p-1 hover:bg-emerald-50 rounded text-slate-600 hover:text-[#008751] transition cursor-pointer"
+                                              title="Download"
+                                            >
+                                              <Download className="w-3.5 h-3.5" />
+                                            </a>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                     </div>
- 
-                    <div className="border-t pt-4 border-emerald-100 mt-4">
+
+                    <div className="shrink-0 border-t pt-3 border-emerald-100 mt-3">
                       <button
                         onClick={() => alert("Downloading all matching document publication files recursively as a single zip file.")}
-                        className="inline-flex items-center gap-2 text-[13px] font-bold text-[#008751] hover:text-[#007043] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-4 py-2 rounded-xl transition cursor-pointer shadow-3xs"
+                        className="inline-flex items-center gap-2 text-[12px] font-bold text-[#008751] hover:text-[#007043] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg transition cursor-pointer shadow-2xs"
                       >
-                        <Download className="w-4.5 h-4.5 text-[#008751] stroke-[2.5]" />
-                        <span>Download All Files</span>
+                        <Download className="w-3.5 h-3.5 text-[#008751] stroke-[2]" />
+                        <span>Download All</span>
                       </button>
                     </div>
                   </div>
 
-                  {/* Discussions Column */}
+                  {/* Discussions Column -- removed from view per request; code kept
+                      intact and disabled rather than deleted. */}
+                  {false && (
                   <div className="flex flex-col gap-3.5">
-                    
+
                     {activeThreadId === null ? (
                       /* ========== DISCUSSION FORUM THREAD LIST (SECOND IMAGE) ========== */
-                      <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl overflow-hidden shadow-xs text-left p-5 flex flex-col justify-between h-[540px] relative">
-                        
+                      <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl overflow-hidden shadow-xs text-left p-4 flex flex-col justify-between h-[500px] relative">
+
                         {/* Header Row */}
-                        <div className="flex items-center justify-between shrink-0">
+                        <div className="flex items-center justify-between shrink-0 gap-2">
                           <div className="flex items-center gap-2">
-                            <span className="w-3 h-3 rounded-full bg-[#008751]"></span>
-                            <h3 className="text-black text-[18px] font-black tracking-tight">
+                            <span className="w-2.5 h-2.5 rounded-full bg-[#008751]"></span>
+                            <h3 className="text-black text-[16px] font-semibold tracking-tight">
                               Discussions
                             </h3>
-                            <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
-                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                              Supabase Synced
+                            <span className="text-[9px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                              Synced
                             </span>
                           </div>
-                          
+
                           <button
-                            onClick={() => setViewState('ADD_DISCUSSION')}
-                            className="bg-[#eefcf4] border-2 border-[#008751]/30 text-[#004d2e] hover:bg-[#e1f9eb] px-4 py-2 rounded-xl text-[14px] font-bold flex items-center gap-1.5 cursor-pointer transition shadow-3xs"
+                            onClick={() => setActiveThreadId('thread-editorial-inquiry')}
+                            className="bg-[#eefcf4] border border-[#008751]/30 text-[#004d2e] hover:bg-[#e1f9eb] px-3 py-1.5 rounded-lg text-[12px] font-bold flex items-center gap-1 cursor-pointer transition shadow-2xs"
+                            title="Message the Coordinator privately"
                           >
-                            <Plus className="w-4 h-4 text-[#008751] stroke-[3]" />
-                            <span>New Discussion</span>
+                            <Plus className="w-3.5 h-3.5 text-[#008751] stroke-[3]" />
+                            <span className="hidden sm:inline">New</span>
                           </button>
                         </div>
 
                         {/* Tabs Row */}
-                        <div className="flex items-center justify-between border-b border-emerald-100 pb-0.5 mt-4 shrink-0">
-                          <div className="flex gap-4 text-[14px] font-semibold text-slate-800">
+                        <div className="flex items-center justify-start border-b border-emerald-100 pb-2 mt-3 shrink-0 gap-4 text-[12px] font-semibold text-slate-700">
                             <button
                               onClick={() => setActiveDiscussionTab('ALL')}
                               className={`pb-2.5 px-0.5 relative cursor-pointer ${
@@ -1363,7 +1271,6 @@ export default function OjsSubmissionDetail({
                               <Filter className="w-4 h-4 stroke-[2.5]" />
                             </button>
                           </div>
-                        </div>
 
                         {/* Search field if active */}
                         {showSearch && (
@@ -1378,134 +1285,80 @@ export default function OjsSubmissionDetail({
                           </div>
                         )}
 
-                        {/* Thread Cards Stack */}
+                        {/* Thread Cards Stack - Real Data from Supabase */}
                         <div className="flex-grow overflow-y-auto mt-4 space-y-3 min-h-0 pr-1">
-                          
-                          {/* Thread 1: Editorial Inquiry (OFFICIAL THREAD) */}
-                          {(activeDiscussionTab === 'ALL' || activeDiscussionTab === 'OFFICIAL') &&
-                           "Editorial Inquiry".toLowerCase().includes(searchQuery.toLowerCase()) && (
-                            <div
-                              onClick={() => setActiveThreadId('thread-editorial-inquiry')}
-                              className="bg-[#f0faf4] border-2 border-[#b8ebd0] hover:bg-[#e2f7eb] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
-                            >
-                              <div className="shrink-0 pt-1">
-                                <Pin className="w-5 h-5 text-[#008751] rotate-45 stroke-[2.5]" />
-                              </div>
-                              <div className="flex-grow space-y-1">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="bg-[#004d2e] text-white text-[9px] font-bold px-2 py-0.5 rounded-md tracking-wider uppercase">
-                                    OFFICIAL THREAD
-                                  </span>
-                                  <Lock className="w-3.5 h-3.5 text-slate-900 stroke-[2.5]" />
-                                </div>
-                                <h4 className="text-[15px] font-bold text-black tracking-tight leading-snug">
-                                  Editorial Inquiry
-                                </h4>
-                                <p className="text-[13px] font-normal text-slate-900 leading-snug line-clamp-1">
-                                  <strong className="text-black font-semibold">Dr. John Smith:</strong> Dear Author, Please confirm that the manuscript complies with the guidelines.
-                                </p>
-                              </div>
-                              <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                <span className="text-[11px] font-semibold text-black font-mono">10:30 AM</span>
-                                <span className="w-5.5 h-5.5 rounded-full bg-[#004d2b] text-white text-[11px] font-bold flex items-center justify-center font-sans mt-1.5">
-                                  2
-                                </span>
-                              </div>
-                            </div>
-                          )}
+                          {manuscriptDetails && manuscriptDetails.discussions && manuscriptDetails.discussions.filter(d => d.channel === 'COORDINATOR_AUTHOR').length > 0 ? (
+                            manuscriptDetails.discussions
+                              // Only the private Coordinator <-> Author channel shows here --
+                              // this Discussions view is exclusively for talking to the
+                              // Coordinator, not a general editor/reviewer forum.
+                              .filter(d => d.channel === 'COORDINATOR_AUTHOR')
+                              .filter(d => d.message.toLowerCase().includes(searchQuery.toLowerCase()))
+                              .map((discussion, idx) => {
+                                const senderProfile = userProfiles.get(discussion.sender_id);
+                                const senderName = senderProfile?.name || 'Unknown';
+                                const senderRole = senderProfile?.role || 'User';
+                                const isOfficial = ['EDITOR', 'COORDINATOR'].includes(senderRole.toUpperCase());
+                                const date = new Date(discussion.created_at);
+                                const displayDate = formatDateTime(discussion.created_at);
 
-                          {/* Thread 2: Technical Check */}
-                          {(activeDiscussionTab === 'ALL') &&
-                           "Technical Check".toLowerCase().includes(searchQuery.toLowerCase()) && (
-                            <div
-                              onClick={() => setActiveThreadId('thread-technical-check')}
-                              className="bg-white border border-emerald-100 hover:border-[#008751] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
-                            >
-                              <div className="shrink-0 pt-0.5">
-                                <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50">
-                                  <Lock className="w-4 h-4 text-[#004d2e] stroke-[2.5]" />
-                                </div>
-                              </div>
-                              <div className="flex-grow space-y-0.5">
-                                <h4 className="text-[15px] font-bold text-black tracking-tight leading-snug">
-                                  Technical Check
-                                </h4>
-                                <p className="text-[13px] font-normal text-slate-900 leading-snug line-clamp-1">
-                                  <strong className="text-black font-semibold">System:</strong> Your file "Manuscript.pdf" has been successfully checked.
-                                </p>
-                              </div>
-                              <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                <span className="text-[11px] font-semibold text-black font-mono">Yesterday</span>
-                                <span className="w-5.5 h-5.5 rounded-full bg-[#004d2b] text-white text-[11px] font-bold flex items-center justify-center font-sans mt-1.5">
-                                  1
-                                </span>
-                              </div>
-                            </div>
-                          )}
+                                // Filter by tab
+                                const shouldShow =
+                                  activeDiscussionTab === 'ALL' ||
+                                  (activeDiscussionTab === 'OFFICIAL' && isOfficial) ||
+                                  (activeDiscussionTab === 'DIRECT' && !isOfficial);
 
-                          {/* Thread 3: Formatting & Style */}
-                          {(activeDiscussionTab === 'ALL' || activeDiscussionTab === 'DIRECT') &&
-                           "Formatting & Style".toLowerCase().includes(searchQuery.toLowerCase()) && (
-                            <div
-                              onClick={() => setActiveThreadId('thread-formatting-style')}
-                              className="bg-white border border-emerald-100 hover:border-[#008751] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
-                            >
-                              <div className="shrink-0 pt-0.5">
-                                <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50">
-                                  <User className="w-4 h-4 text-[#004d2e] stroke-[2.5]" />
-                                </div>
-                              </div>
-                              <div className="flex-grow space-y-0.5">
-                                <h4 className="text-[15px] font-bold text-black tracking-tight leading-snug">
-                                  Formatting & Style
-                                </h4>
-                                <p className="text-[13px] font-normal text-slate-900 leading-snug line-clamp-1">
-                                  <strong className="text-black font-semibold">Editor:</strong> Please ensure all references follow the journal format.
-                                </p>
-                              </div>
-                              <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                <span className="text-[11px] font-semibold text-black font-mono">2 Jun 2026</span>
-                              </div>
-                            </div>
-                          )}
+                                if (!shouldShow) return null;
 
-                          {/* Render custom threads added by user */}
-                          {discussionThreads.length > 0 && (activeDiscussionTab === 'ALL' || activeDiscussionTab === 'DIRECT') && (
-                            discussionThreads
-                              .filter(t => t.subject.toLowerCase().includes(searchQuery.toLowerCase()))
-                              .map(thread => (
-                                <div
-                                  key={thread.id}
-                                  onClick={() => setActiveThreadId(thread.id)}
-                                  className="bg-white border border-emerald-100 hover:border-[#008751] rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left"
-                                >
-                                  <div className="shrink-0 pt-0.5">
-                                    <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50 font-black text-xs">
-                                      {thread.initiator ? thread.initiator.substring(0, 2).toUpperCase() : "UT"}
+                                return (
+                                  <div
+                                    key={discussion.id}
+                                    onClick={() => {
+                                      // This list only ever shows COORDINATOR_AUTHOR-channel
+                                      // messages now, so every card opens the same private
+                                      // Coordinator Discussion panel.
+                                      setActiveThreadId('thread-editorial-inquiry');
+                                    }}
+                                    className={`border rounded-xl p-4 flex items-start gap-3 cursor-pointer transition duration-150 shadow-3xs text-left ${
+                                      isOfficial
+                                        ? 'bg-[#f0faf4] border-2 border-[#b8ebd0] hover:bg-[#e2f7eb]'
+                                        : 'bg-white border border-emerald-100 hover:border-[#008751]'
+                                    }`}
+                                  >
+                                    <div className="shrink-0 pt-0.5">
+                                      {isOfficial ? (
+                                        <Pin className="w-5 h-5 text-[#008751] rotate-45 stroke-[2.5]" />
+                                      ) : (
+                                        <div className="w-8.5 h-8.5 rounded-full border border-emerald-200 text-[#004d2e] flex items-center justify-center bg-emerald-50 font-semibold text-xs">
+                                          {senderName.substring(0, 2).toUpperCase()}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="flex-grow space-y-1 min-w-0">
+                                      {isOfficial && (
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="bg-[#004d2e] text-white text-[9px] font-bold px-2 py-0.5 rounded-md tracking-wider uppercase">
+                                            {senderRole.toUpperCase()}
+                                          </span>
+                                          <Lock className="w-3.5 h-3.5 text-slate-900 stroke-[2.5]" />
+                                        </div>
+                                      )}
+                                      <h4 className="text-[15px] font-bold text-black tracking-tight leading-snug">
+                                        {senderName}
+                                      </h4>
+                                      <p className="text-[13px] font-normal text-slate-900 leading-snug line-clamp-2 break-words">
+                                        {discussion.message}
+                                      </p>
+                                    </div>
+                                    <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
+                                      <span className="text-[11px] font-semibold text-black font-mono whitespace-nowrap">{displayDate}</span>
                                     </div>
                                   </div>
-                                  <div className="flex-grow space-y-0.5">
-                                    <h4 className="text-[15px] font-black text-black tracking-tight leading-snug">
-                                      {thread.subject}
-                                    </h4>
-                                    <p className="text-[13px] font-bold text-slate-950 leading-snug line-clamp-1">
-                                      <strong className="text-black font-black">{thread.initiator}:</strong> {thread.messages[0]?.text || "No messages yet."}
-                                    </p>
-                                  </div>
-                                  <div className="shrink-0 flex flex-col items-end justify-between h-full min-h-[40px]">
-                                    <span className="text-[11px] font-black text-black font-mono">
-                                      {new Date(thread.createdAt || Date.now()).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                                    </span>
-                                  </div>
-                                </div>
-                              ))
-                          )}
-
-                          {/* Fallback Empty State */}
-                          {((activeDiscussionTab === 'OFFICIAL' && searchQuery !== "" && !"Editorial Inquiry".toLowerCase().includes(searchQuery.toLowerCase())) ||
-                           (activeDiscussionTab === 'DIRECT' && searchQuery !== "" && !"Formatting & Style".toLowerCase().includes(searchQuery.toLowerCase()) && discussionThreads.length === 0)) && (
-                            <div className="text-center py-10 text-slate-900 font-bold text-xs">
-                              No discussions match your filter or search.
+                                );
+                              })
+                          ) : (
+                            <div className="text-center py-10 text-slate-500 font-semibold text-sm">
+                              No discussions yet. Start the conversation!
                             </div>
                           )}
 
@@ -1513,17 +1366,6 @@ export default function OjsSubmissionDetail({
 
                         {/* View All footer link */}
                         <div className="pt-3 border-t border-emerald-100 flex justify-center mt-auto shrink-0 bg-white">
-                          <button
-                            onClick={() => {
-                              setActiveDiscussionTab('ALL');
-                              setSearchQuery('');
-                              alert("Showing all discussions. Click on any discussion item to enter its dedicated communication channel.");
-                            }}
-                            className="text-[#008751] hover:text-[#007043] font-black hover:underline text-[13px] flex items-center gap-1 cursor-pointer bg-emerald-50/50 hover:bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl"
-                          >
-                            <span>View All Discussions</span>
-                            <span className="font-extrabold">→</span>
-                          </button>
                         </div>
 
                       </div>
@@ -1532,7 +1374,7 @@ export default function OjsSubmissionDetail({
                       <div id="discussions-card" className="bg-[#fafdfb] border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
                         
                         {/* Elegant Academic Header Bar */}
-                        <div className="bg-gradient-to-r from-[#004d2e] to-[#047857] text-white px-4 py-3.5 flex items-center justify-between shrink-0 shadow-sm z-10">
+                        <div className="bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] text-white px-4 py-3.5 flex items-center justify-between shrink-0 shadow-sm z-10">
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => setActiveThreadId(null)}
@@ -1544,22 +1386,22 @@ export default function OjsSubmissionDetail({
                             
                             {/* Group Icon Avatar */}
                             <div className="w-9 h-9 rounded-full bg-[#d1f2e1] text-[#004d2e] font-bold text-xs flex items-center justify-center border-2 border-white shadow-xs">
-                              FI
+                              CD
                             </div>
                             <div>
-                              <h4 className="font-black text-[14px] text-white tracking-tight flex items-center gap-1.5">
-                                Editorial Inquiry Forum
+                              <h4 className="font-semibold text-[14px] text-white tracking-tight flex items-center gap-1.5">
+                                Coordinator Discussion
                                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
                               </h4>
-                              <p className="text-[11.5px] text-emerald-100/90 font-medium">
-                                Editorial Board Panel • Active Conversation
+                              <p className="text-[11.5px] text-emerald-100/90 font-medium flex items-center gap-1">
+                                <Lock className="w-3 h-3" /> Private • Only you and the Coordinator can see this
                               </p>
                             </div>
                           </div>
 
                           <div className="flex items-center gap-3">
                             <button
-                              onClick={() => setViewState('ADD_DISCUSSION')}
+                              disabled style={{display: 'none'}}
                               className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl transition cursor-pointer"
                               title="New Thread Inquiry"
                             >
@@ -1571,39 +1413,14 @@ export default function OjsSubmissionDetail({
                         {/* Academic Message Scroll Pane */}
                         <div className="flex-grow p-4 overflow-y-auto space-y-4 flex flex-col justify-start bg-[#f3faf5] relative min-h-0">
                           <div className="mx-auto bg-emerald-100 border-2 border-[#b8deb3] text-[#004d2e] text-[11px] font-bold px-3 py-1.5 rounded-lg uppercase tracking-wider text-center select-none shadow-3xs z-10 font-mono">
-                            OFFICIAL PEER COMMUNICATION STREAM
+                            PRIVATE COORDINATOR-AUTHOR CHANNEL — NOT VISIBLE TO EDITOR OR REVIEWERS
                           </div>
 
-                          {/* Base messages */}
-                          <div className="flex flex-col max-w-[90%] rounded-2xl p-4 shadow-sm relative leading-relaxed z-10 transition self-start bg-white text-black rounded-tl-none border-2 border-emerald-100/50 text-left">
-                            <div className="flex items-center gap-2 mb-1.5">
-                              <span className="text-[12px] font-bold block text-sky-800">Dr. John Smith</span>
-                              <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded font-sans tracking-wider border-2 bg-emerald-50 border-emerald-200 text-[#004d2e]">EDITOR</span>
-                            </div>
-                            <p className="text-[14px] font-medium text-black leading-relaxed font-sans">
-                              Dear Author, Please confirm that the manuscript complies with the journal guidelines.
-                            </p>
-                            <div className="flex items-center justify-end gap-1 mt-2 text-slate-800 select-none border-t pt-1.5 border-emerald-50">
-                              <span className="text-[10px] font-medium font-mono">10:30 AM</span>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col max-w-[90%] rounded-2xl p-4 shadow-sm relative leading-relaxed z-10 transition self-end bg-[#e8fbf1] text-black rounded-tr-none border-2 border-[#b8ebd0] text-left">
-                            <div className="flex items-center gap-2 mb-1.5">
-                              <span className="text-[12px] font-bold block text-[#004d2e]">Akshaya G</span>
-                              <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded font-sans tracking-wider border-2 bg-[#d1f2e1] border-[#a2ecd5] text-emerald-800">AUTHOR</span>
-                            </div>
-                            <p className="text-[14px] font-medium text-black leading-relaxed font-sans">
-                              Thank you for your message. Yes, the manuscript follows all the guidelines.
-                            </p>
-                            <div className="flex items-center justify-end gap-1 mt-2 text-slate-800 select-none border-t pt-1.5 border-emerald-100">
-                              <span className="text-[10px] font-medium font-mono">11:02 AM</span>
-                              <span className="text-[#008751] text-[12px] leading-none font-bold tracking-tighter" title="Read status">✓✓</span>
-                            </div>
-                          </div>
-
-                          {/* Additional dynamic user messages */}
-                          {whatsappMessages.slice(2).map((msg) => (
+                          {/* Real messages loaded from Supabase (manuscript_discussions) */}
+                          {whatsappMessages.length === 0 && (
+                            <p className="text-center text-xs text-slate-400 py-6">No messages yet.</p>
+                          )}
+                          {whatsappMessages.map((msg) => (
                             <div
                               key={msg.id}
                               className={`flex flex-col max-w-[90%] rounded-2xl p-4 shadow-sm relative leading-relaxed z-10 transition text-left ${
@@ -1639,7 +1456,7 @@ export default function OjsSubmissionDetail({
                         <div className="bg-[#eefcf4] px-4 py-3.5 border-t border-emerald-100 flex items-center gap-2 shrink-0 z-10">
                           <button
                             onClick={() => {
-                              alert("This is a secure peer-to-peer discussion workspace for certified author-editor communication.");
+                              alert("This is a private, one-on-one channel between you and the Coordinator. Editors and reviewers cannot see these messages.");
                             }}
                             className="text-slate-900 hover:text-emerald-700 transition cursor-pointer p-1.5 rounded-lg hover:bg-emerald-100"
                             title="Discussion Information"
@@ -1648,7 +1465,7 @@ export default function OjsSubmissionDetail({
                           </button>
 
                           <button
-                            onClick={() => handleSimulateUpload(false, true)}
+                            onClick={() => fileInputRef.current?.click()}
                             className="text-slate-900 hover:text-emerald-700 transition cursor-pointer p-1.5 rounded-lg hover:bg-emerald-100"
                             title="Attach manuscript file"
                           >
@@ -1662,7 +1479,7 @@ export default function OjsSubmissionDetail({
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') handleSendWhatsappMessage();
                             }}
-                            placeholder="Type an official response..."
+                            placeholder="Message the Coordinator..."
                             className="flex-grow bg-white border-2 border-emerald-200 rounded-xl px-4 py-2 text-[13px] outline-none focus:ring-2 focus:ring-[#008751]/20 text-black font-medium placeholder-slate-500 shadow-3xs"
                           />
 
@@ -1679,7 +1496,7 @@ export default function OjsSubmissionDetail({
                         {/* Pre-review custom links footer bar */}
                         <div className="bg-white px-4 py-2 border-t border-slate-100 flex items-center justify-between text-[10.5px] font-mono shrink-0">
                           <button
-                            onClick={() => setViewState('ADD_DISCUSSION')}
+                            disabled style={{display: 'none'}}
                             className="text-[#008751] hover:underline font-extrabold flex items-center gap-1 cursor-pointer"
                           >
                             <span>+ Official Thread Inquiry</span>
@@ -1815,7 +1632,7 @@ export default function OjsSubmissionDetail({
                                 Formatting & Style Desk
                               </h4>
                               <p className="text-[10px] text-sky-200 font-medium">
-                                Kellye Milhorn (Editor) • Away
+                                {assignedEditorProfile ? `${assignedEditorProfile.name} (Editor)` : 'No editor assigned yet'}
                               </p>
                             </div>
                           </div>
@@ -1890,11 +1707,114 @@ export default function OjsSubmissionDetail({
                         </div>
 
                       </div>
+                    ) : activeThreadId === 'coordinator-chat' ? (
+                      /* ========== COORDINATOR DIRECT CHAT ========== */
+                      <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl overflow-hidden shadow-xs text-left p-4 flex flex-col justify-between h-[500px] relative">
+
+                        {/* Header Row */}
+                        <div className="flex items-center justify-between shrink-0 gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-[#008751]"></span>
+                            <h3 className="text-black text-[16px] font-semibold tracking-tight">
+                              Coordinator Chat
+                            </h3>
+                            <span className="text-[9px] font-mono font-semibold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                              Live
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={() => setActiveThreadId(null)}
+                            className="text-[#008751] hover:text-[#007043] font-bold text-sm transition cursor-pointer"
+                            title="Back to Discussions list"
+                          >
+                            ← Back
+                          </button>
+                        </div>
+
+                        {/* Chat Messages Area */}
+                        <div className="flex-grow overflow-y-auto space-y-3 flex flex-col justify-start bg-[#f8fcf9] relative min-h-0 mt-3">
+                          {coordinatorMessages.map((msg) => (
+                            <div
+                              key={msg.id}
+                              className={`flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition text-left ${
+                                msg.isMe
+                                  ? 'self-end bg-[#d9fdd3] text-slate-900 rounded-tr-none border border-[#c6ecbf]'
+                                  : 'self-start bg-white text-slate-900 rounded-tl-none border border-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className={`text-[11px] font-bold block ${msg.isMe ? 'text-[#075e54]' : 'text-[#008751]'}`}>
+                                  {msg.sender}
+                                </span>
+                                <span className={`text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border ${
+                                  msg.isMe
+                                    ? 'bg-[#e9f7e5] border-[#b0e2a7] text-emerald-700'
+                                    : 'bg-emerald-100 border-emerald-200 text-emerald-700'
+                                }`}>
+                                  {msg.senderRole}
+                                </span>
+                              </div>
+                              <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">{msg.text}</p>
+                              <div className="flex items-center justify-end gap-1 mt-1 text-slate-400 select-none">
+                                <span className="text-[9px] font-mono font-medium">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Input bar */}
+                        <div className="bg-[#f8fcf9] px-3 py-2.5 border-t border-slate-200 flex items-center gap-2 shrink-0 z-10">
+                          <input
+                            type="text"
+                            value={coordinatorInput}
+                            onChange={(e) => setCoordinatorInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSendCoordinatorMessage();
+                            }}
+                            placeholder="Type your message to coordinator..."
+                            className="flex-grow bg-white border border-slate-200 rounded-lg px-3.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-[#008751] text-slate-800 font-bold shadow-3xs"
+                          />
+                          <button
+                            onClick={handleSendCoordinatorMessage}
+                            disabled={!coordinatorInput.trim()}
+                            className="bg-[#008751] hover:bg-[#007043] disabled:bg-slate-300 text-white p-2 rounded-lg transition cursor-pointer"
+                          >
+                            <Send className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                      </div>
                     ) : (
                       /* ========== GENERIC CHAT CHANNELS FOR CUSTOM USER CREATED THREADS ========== */
                       (() => {
+                        // Check if this is a coordinator chat message
+                        if (activeThreadId && activeThreadId.includes('coordinator')) {
+                          setActiveThreadId('coordinator-chat');
+                          return null;
+                        }
+
                         const thread = discussionThreads.find(t => t.id === activeThreadId);
-                        if (!thread) return null;
+                        if (!thread) {
+                          // If thread not found, show the coordinator chat instead
+                          return (
+                            <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-xl overflow-hidden shadow-xs text-left p-4 flex flex-col justify-between h-[500px] relative">
+                              <div className="flex items-center justify-center h-full">
+                                <div className="text-center text-slate-500">
+                                  <MessageSquare className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+                                  <p className="text-sm">Click on a message to view or reply</p>
+                                  <button
+                                    onClick={() => setActiveThreadId(null)}
+                                    className="mt-4 text-[#008751] hover:text-[#007043] font-bold text-sm transition cursor-pointer"
+                                  >
+                                    ← Back to Discussions
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
                         return (
                           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs text-left flex flex-col justify-between h-[540px] relative">
                             
@@ -1933,7 +1853,7 @@ export default function OjsSubmissionDetail({
                                 <div
                                   key={msg.id}
                                   className={`flex flex-col max-w-[85%] rounded-xl px-3 py-2 shadow-xs relative leading-relaxed z-10 transition text-left ${
-                                    msg.sender === (currentUser?.name || "Akshaya G")
+                                    msg.sender === (currentUser?.name || 'Author')
                                       ? 'self-end bg-[#d9fdd3] text-slate-900 rounded-tr-none border border-[#c6ecbf]'
                                       : 'self-start bg-white text-slate-900 rounded-tl-none border border-slate-200'
                                   }`}
@@ -1943,7 +1863,7 @@ export default function OjsSubmissionDetail({
                                       {msg.sender}
                                     </span>
                                     <span className="text-[8px] font-semibold uppercase px-1 py-0.2 rounded font-sans tracking-wide border bg-slate-100 border-slate-200 text-slate-500">
-                                      {msg.sender === (currentUser?.name || "Akshaya G") ? "AUTHOR" : "PARTICIPANT"}
+                                      {msg.sender === (currentUser?.name || 'Author') ? "AUTHOR" : "PARTICIPANT"}
                                     </span>
                                   </div>
                                   <p className="text-[13px] sm:text-[14px] font-bold text-slate-800 leading-relaxed font-sans">{msg.text}</p>
@@ -1975,7 +1895,7 @@ export default function OjsSubmissionDetail({
                                             ...t.messages,
                                             {
                                               id: "msg-" + Date.now(),
-                                              sender: currentUser?.name || "Akshaya G",
+                                              sender: currentUser?.name || 'Author',
                                               senderRole: "Author",
                                               text: val.trim(),
                                               timestamp: new Date().toISOString()
@@ -2010,106 +1930,10 @@ export default function OjsSubmissionDetail({
                     )}
 
                   </div>
+                  )}
                 </div>
 
               </div>
-
-               {/* RIGHT DETAILS SIDEBAR (COLUMN 3) */}
-              <aside id="ojs-column-right-details-dashboard" className="w-full lg:w-80 shrink-0 space-y-6 text-left leading-normal">
-                
-                {/* Submission Timeline */}
-                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left">
-                  <h3 className="text-black text-[18px] font-black tracking-tight mb-5 border-b pb-3 border-emerald-100">Submission Timeline</h3>
-                  
-                  <div className="relative pl-5 ml-2.5 space-y-6 text-xs border-l-2 border-emerald-100">
-                    {[
-                      { label: "Manuscript Submitted", sub: "08 June 2026, 10:20 AM", status: "completed" },
-                      { label: "Editor Assigned", sub: "08 June 2026, 11:15 AM", status: "active" },
-                      { label: "Reviewer Invited", sub: "Pending", status: "pending" },
-                      { label: "Under Review", sub: "Pending", status: "pending" },
-                      { label: "Decision", sub: "Pending", status: "pending" },
-                      { label: "Production", sub: "Pending", status: "pending" }
-                    ].map((item, idx) => {
-                      let markerStyle = "bg-white border-slate-300 text-slate-400";
-                      let textStyle = "text-slate-950 font-bold text-[14px]";
-                      let subStyle = "text-slate-700 font-bold text-[12px] font-mono";
-                      
-                      if (item.status === "completed") {
-                        markerStyle = "bg-[#008751] border-[#008751] text-white";
-                        textStyle = "text-black font-black text-[14px]";
-                        subStyle = "text-[#004d2b] font-bold text-[12px] font-mono";
-                      } else if (item.status === "active") {
-                        markerStyle = "border-2 border-[#008751] bg-[#eefcf5] text-[#008751]";
-                        textStyle = "text-[#008751] font-black text-[14px]";
-                        subStyle = "text-emerald-800 font-bold text-[12px] font-mono";
-                      }
-                      
-                      return (
-                        <div key={idx} className="relative">
-                          {/* Timeline marker */}
-                          <div className={`absolute -left-[30.5px] top-0.5 w-5 h-5 rounded-full flex items-center justify-center border-2 transition duration-150 ${markerStyle}`}>
-                            {item.status === "completed" ? (
-                              <Check className="w-2.5 h-2.5 stroke-[3.5]" />
-                            ) : item.status === "active" ? (
-                              <span className="w-1.5 h-1.5 bg-[#008751] rounded-full" />
-                            ) : (
-                              <span className="w-1.5 h-1.5 bg-slate-300 rounded-full" />
-                            )}
-                          </div>
-                          
-                          <div className="space-y-0.5 text-left">
-                            <span className={`block ${textStyle}`}>{item.label}</span>
-                            <span className={`block ${subStyle}`}>{item.sub}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Recent Activity */}
-                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left space-y-4">
-                  <h3 className="text-black text-[18px] font-black tracking-tight border-b pb-3 border-emerald-100">Recent Activity</h3>
-                  
-                  <div className="space-y-3.5 text-xs">
-                    {[
-                      { label: "Manuscript submitted", time: "10:20 AM", icon: FileText, color: "bg-[#eefcf4] text-[#008751] border border-emerald-100" },
-                      { label: "Files uploaded", time: "10:22 AM", icon: Download, color: "bg-blue-50 text-blue-700 border border-blue-100", rotate: true },
-                      { label: "Metadata completed", time: "10:40 AM", icon: Check, color: "bg-[#eefcf4] text-[#008751] border border-emerald-100" },
-                      { label: "Editor assigned", time: "11:15 AM", icon: User, color: "bg-[#eefcf4] text-[#008751] border border-emerald-100" }
-                    ].map((act, i) => {
-                      const Icon = act.icon;
-                      return (
-                        <div key={i} className="flex items-center justify-between gap-3 hover:bg-emerald-50/40 p-1.5 rounded-lg transition">
-                          <div className="flex items-center gap-2.5 overflow-hidden">
-                            <div className={`w-7 h-7 rounded-lg ${act.color} flex items-center justify-center shrink-0`}>
-                              <Icon className={`w-3.5 h-3.5 ${act.rotate ? 'rotate-180' : ''}`} />
-                            </div>
-                            <span className="font-black text-black truncate">{act.label}</span>
-                          </div>
-                          <span className="text-[11px] text-black font-mono shrink-0 font-extrabold">{act.time}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Need Help? */}
-                <div className="bg-white border-t-4 border-t-[#008751] border-x border-b border-emerald-100 rounded-2xl p-5 shadow-xs text-left space-y-3">
-                  <h3 className="text-black text-[18px] font-black tracking-tight border-b pb-3 border-emerald-100">Need Help?</h3>
-                  <p className="text-[14px] text-slate-950 leading-relaxed font-bold">
-                    If you have any questions, please contact the editorial office.
-                  </p>
-                  <button
-                    onClick={() => alert("Connecting you with TULITICS Scholarly Publishing Editorial Desk. A support ticket is logged.")}
-                    className="bg-[#008751] text-white hover:bg-[#007043] border-2 border-[#004d2e] px-4 py-2.5 text-[14.5px] font-black rounded-xl transition duration-150 cursor-pointer w-full flex items-center justify-center gap-2 mt-2 shadow-xs hover:scale-[1.01] active:scale-[0.99]"
-                  >
-                    <HelpCircle className="w-4 h-4 text-white stroke-[2.5]" />
-                    <span>Contact Support</span>
-                  </button>
-                </div>
-
-              </aside>
 
             </div>
 
@@ -2117,7 +1941,7 @@ export default function OjsSubmissionDetail({
         ) : (
           /* ======================= ORIGINAL DEFAULT WORKFLOW LAYOUT ======================= */
           <>
-        <div id="ojs-hero-panel-banner" className="bg-[#005c35] bg-gradient-to-r from-[#005230] to-[#007043] rounded-2xl p-6 text-white relative overflow-hidden flex flex-col md:flex-row md:items-center md:justify-between shadow-sm min-h-[110px]">
+        <div id="ojs-hero-panel-banner" className="bg-[#2f7d55] bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] rounded-2xl p-6 text-white relative overflow-hidden flex flex-col md:flex-row md:items-center md:justify-between shadow-sm min-h-[110px]">
           
           {/* Wave Curve Abstract SVG Background overlay matching screenshot */}
           <div className="absolute right-0 top-0 h-full w-2/3 pointer-events-none opacity-30 select-none">
@@ -2197,8 +2021,8 @@ export default function OjsSubmissionDetail({
         <div className="w-full flex flex-col lg:flex-row items-start gap-6">
           
           {/* ======= CENTER CORE COLUMN (COLUMN 2) ======= */}
-          <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full lg:max-w-[70%]">
-            
+          <div id="ojs-column-center-main" className="flex-grow space-y-6 w-full">
+
             {/* Sub-heading info indicator */}
             <div className="flex items-center gap-2 text-slate-800">
               <span className="w-2.5 h-2.5 rounded-full bg-[#008751]" />
@@ -2263,7 +2087,7 @@ export default function OjsSubmissionDetail({
 
                         <button
                           id="upload-file-button"
-                          onClick={() => handleSimulateUpload(false)}
+                          onClick={() => fileInputRef.current?.click()}
                           className="flex items-center gap-2 border border-[#008751] text-[#008751] hover:bg-emerald-50 px-4 py-2 text-xs font-extrabold rounded-lg transition duration-150 cursor-pointer shadow-xs select-none"
                         >
                           <Download className="w-3.5 h-3.5 text-[#008751] rotate-180" />
@@ -2283,103 +2107,77 @@ export default function OjsSubmissionDetail({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-xs">
-                          <tr className="hover:bg-slate-50/50 transition duration-100">
-                            
-                            {/* file index */}
-                            <td className="px-5 py-5 text-center font-mono font-bold text-slate-400">
-                              1511
-                            </td>
+                          {uploadedFiles.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-5 py-10 text-center text-slate-400 font-medium">
+                                No files uploaded
+                              </td>
+                            </tr>
+                          ) : uploadedFiles.map((file, idx) => (
+                            <tr key={file.id || idx} className="hover:bg-slate-50/50 transition duration-100">
 
-                            {/* file link details */}
-                            <td className="px-5 py-5">
-                              <div className="flex items-center gap-3">
-                                <FileText className="w-5 h-5 text-rose-500 shrink-0" />
-                                <div className="text-left">
+                              {/* file index */}
+                              <td className="px-5 py-5 text-center font-mono font-bold text-slate-400">
+                                {idx + 1}
+                              </td>
+
+                              {/* file link details */}
+                              <td className="px-5 py-5">
+                                <div className="flex items-center gap-3">
+                                  <FileText className="w-5 h-5 text-rose-500 shrink-0" />
+                                  <div className="text-left">
+                                    <button
+                                      id="download-asset-handle-btn"
+                                      onClick={() => {
+                                        setPreviewFileName(file.name);
+                                        setPreviewFileType(file.type || 'Manuscript');
+                                        setPreviewFileSize(file.size || '');
+                                        setPreviewPublicUrl(file.publicUrl || file.url || '');
+                                        setPreviewModalOpen(true);
+                                      }}
+                                      className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-sm text-left transition"
+                                    >
+                                      {file.name}
+                                    </button>
+                                    <span className="block text-[10px] text-slate-400 font-medium mt-0.5">{file.size ? `Size: ${file.size}` : ''}</span>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* upload date */}
+                              <td className="px-5 py-5 text-center font-mono text-slate-450 font-semibold text-slate-500">
+                                {file.date || (file.uploadedAt ? formatDate(file.uploadedAt) : '--')}
+                              </td>
+
+                              {/* File type badge */}
+                              <td className="px-5 py-5 text-center">
+                                <span className="inline-block bg-[#eefcf4] text-[#008751] border border-emerald-100 px-3 py-1 font-bold text-[10.5px] rounded-full uppercase tracking-wider font-mono">
+                                  {file.type || 'File'}
+                                </span>
+                              </td>
+
+                              {/* Options ellipsis */}
+                              <td className="px-5 py-5 text-center relative">
+                                <div className="inline-flex items-center gap-2">
                                   <button
-                                    id="download-asset-handle-btn"
+                                    id="view-file-quick"
                                     onClick={() => {
-                                      setPreviewFileName(editingFileName);
-                                      setPreviewFileType('Manuscript');
-                                      setPreviewFileSize('1.24 MB');
+                                      setPreviewFileName(file.name);
+                                      setPreviewFileType(file.type || 'Manuscript');
+                                      setPreviewFileSize(file.size || '');
+                                      setPreviewPublicUrl(file.publicUrl || file.url || '');
                                       setPreviewModalOpen(true);
                                     }}
-                                    className="text-[#008751] hover:text-[#007043] hover:underline font-extrabold text-sm text-left transition"
+                                    className="p-1.5 bg-slate-100 hover:bg-[#eefcf4] text-slate-500 hover:text-[#008751] rounded-lg transition cursor-pointer"
+                                    title="View file"
                                   >
-                                    {editingFileName}
-                                  </button>
-                                  <span className="block text-[10px] text-slate-400 font-medium mt-0.5">Size: 1.24 MB</span>
-                                </div>
-                              </div>
-                            </td>
-
-                            {/* upload date */}
-                            <td className="px-5 py-5 text-center font-mono text-slate-450 font-semibold text-slate-500">
-                              {paper.receivedAt || "2026-06-08"}
-                            </td>
-
-                            {/* Article Text teal representation badge */}
-                            <td className="px-5 py-5 text-center">
-                              <span className="inline-block bg-[#eefcf4] text-[#008751] border border-emerald-100 px-3 py-1 font-bold text-[10.5px] rounded-full uppercase tracking-wider font-mono">
-                                Article Text
-                              </span>
-                            </td>
-
-                            {/* Options ellipsis */}
-                            <td className="px-5 py-5 text-center relative">
-                              <div className="inline-flex items-center gap-2">
-                                <button
-                                  id="view-file-quick"
-                                  onClick={() => {
-                                    setPreviewFileName(editingFileName);
-                                    setPreviewFileType('Manuscript');
-                                    setPreviewFileSize('1.24 MB');
-                                    setPreviewModalOpen(true);
-                                  }}
-                                  className="p-1.5 bg-slate-100 hover:bg-[#eefcf4] text-slate-500 hover:text-[#008751] rounded-lg transition cursor-pointer"
-                                  title="View galley document"
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </button>
-                                <button
-                                  id="actions-ellipsis-button"
-                                  onClick={() => setActiveFileDropdown(!activeFileDropdown)}
-                                  className={`p-1.5 rounded-lg border text-slate-500 hover:bg-slate-50 transition cursor-pointer ${
-                                    activeFileDropdown ? 'bg-slate-100 scale-95 border-slate-300' : 'border-slate-200 bg-white'
-                                  }`}
-                                >
-                                  <MoreHorizontal className="w-4 h-4" />
-                                </button>
-                              </div>
-
-                              {activeFileDropdown && (
-                                <div className="absolute right-5 top-12 w-32 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1.5 animate-in fade-in zoom-in-95 duration-100 text-left">
-                                  <button
-                                    id="menu-edit-name-btn"
-                                    onClick={() => {
-                                      setActiveFileDropdown(false);
-                                      setShowFileEditModal(true);
-                                    }}
-                                    className="w-full text-left font-bold text-slate-700 hover:bg-slate-50 hover:text-slate-900 px-4 py-2 transition text-xs flex items-center gap-2 cursor-pointer"
-                                  >
-                                    <SquarePen className="w-3.5 h-3.5 text-slate-400" />
-                                    <span>Edit Name</span>
-                                  </button>
-                                  <button
-                                    id="menu-delete-file-btn"
-                                    onClick={() => {
-                                      setActiveFileDropdown(false);
-                                      alert("Scholarly article text deleted in memory. The metadata persists.");
-                                    }}
-                                    className="w-full text-left font-bold text-red-650 text-red-600 hover:bg-red-50 px-4 py-2 transition text-xs flex items-center gap-2 cursor-pointer border-t border-slate-100"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                    <span>Delete</span>
+                                    <Eye className="w-4 h-4" />
                                   </button>
                                 </div>
-                              )}
-                            </td>
+                              </td>
 
-                          </tr>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
 
@@ -2388,7 +2186,7 @@ export default function OjsSubmissionDetail({
                         <button
                           id="bulk-assets-download-link"
                           onClick={() => alert("Downloading all matching document publication files recursively.")}
-                          className="inline-flex items-center gap-2 text-xs font-black text-[#008751] hover:text-[#007043] hover:underline cursor-pointer select-none transition"
+                          className="inline-flex items-center gap-2 text-xs font-semibold text-[#008751] hover:text-[#007043] hover:underline cursor-pointer select-none transition"
                         >
                           <Download className="w-4 h-4 text-[#008751]" />
                           <span>Download All Files</span>
@@ -2416,7 +2214,7 @@ export default function OjsSubmissionDetail({
 
                         <button
                           id="initiate-discussion-btn"
-                          onClick={() => setViewState('ADD_DISCUSSION')}
+                          disabled style={{display: 'none'}}
                           className="bg-[#008751] hover:bg-[#007043] transition-all text-white font-extrabold text-xs px-5 py-2.5 rounded-lg shadow-sm hover:shadow-md cursor-pointer tracking-wider flex items-center gap-1.5"
                         >
                           <Plus className="w-4 h-4 text-white font-bold stroke-[3]" />
@@ -2609,7 +2407,7 @@ export default function OjsSubmissionDetail({
                           <div className="flex items-center gap-2 flex-wrap">
                             <button
                               type="button"
-                              onClick={() => handleSimulateUpload(true)}
+                              onClick={() => fileInputRef.current?.click()}
                               className="text-slate-700 hover:text-slate-900 bg-white p-1.5 px-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-100 transition font-bold font-mono tracking-wide flex items-center gap-1.5 text-[10.5px]"
                             >
                               <Paperclip className="w-4 h-4 text-slate-400" />
@@ -2775,7 +2573,7 @@ export default function OjsSubmissionDetail({
 
                             <button
                               type="button"
-                              onClick={() => handleSimulateUpload(false)}
+                              onClick={() => fileInputRef.current?.click()}
                               className="text-[10.5px] text-[#008751] hover:underline font-extrabold flex items-center gap-1 px-1 rounded cursor-pointer font-mono"
                             >
                               <Paperclip className="w-3.5 h-3.5" />
@@ -2806,7 +2604,7 @@ export default function OjsSubmissionDetail({
                           <div className="flex items-center gap-1.5 text-[10px]">
                             <button
                               type="button"
-                              onClick={() => handleSimulateUpload(false)}
+                              onClick={() => fileInputRef.current?.click()}
                               className="bg-white hover:bg-slate-100 border text-[#008751] px-2.5 py-1 rounded shadow-inner font-mono font-bold tracking-wide cursor-pointer transition flex items-center gap-0.5"
                             >
                               <Search className="w-3 h-3 text-[#008751]" />
@@ -2814,14 +2612,14 @@ export default function OjsSubmissionDetail({
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleSimulateUpload(false)}
+                              onClick={() => fileInputRef.current?.click()}
                               className="bg-white hover:bg-slate-100 border text-[#008751] px-2.5 py-1 rounded shadow-inner font-mono font-bold tracking-wide cursor-pointer transition"
                             >
                               <span>Upload File</span>
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleSimulateUpload(false)}
+                              onClick={() => fileInputRef.current?.click()}
                               className="bg-white hover:bg-slate-100 border text-[#008751] px-2.5 py-1 rounded shadow-inner font-mono font-bold tracking-wide cursor-pointer transition"
                             >
                               <span>Select Files</span>
@@ -2907,6 +2705,8 @@ export default function OjsSubmissionDetail({
                   Status Metrics: {paper.stage === 'Revisions Requested' ? 'Active Revisions Phase - Revision File Awaiting Dispatch' : 'Awaiting Reviewer Allocation / Invitation dispatch'}
                 </div>
               </div>
+            ) : activeTab === 'production' ? (
+              <AuthorProductionPanel manuscriptId={paper.id} />
             ) : activeTab === 'COPYEDITING' ? (
               <div className="bg-white border border-slate-200 rounded-xl p-6 text-xs text-left space-y-4 animate-in fade-in duration-100">
                 <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide border-b pb-2.5 font-mono">Workflow: Editorial Copyediting</h2>
@@ -3030,126 +2830,37 @@ export default function OjsSubmissionDetail({
                   </button>
                 </div>
               </div>
-            ) : null}
+            ) : activeTab === 'REVISION_HISTORY' ? (
+              <div className="bg-white border border-slate-200 rounded-xl p-6 text-xs text-left space-y-4 animate-in fade-in duration-100">
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide border-b pb-2.5 font-mono">Revision History</h2>
+                {paper?.id ? (
+                  <RevisionHistoryPanel
+                    manuscriptId={paper.id}
+                    profiles={Object.fromEntries(manuscriptDetails?.profiles || new Map())}
+                  />
+                ) : (
+                  <p className="text-slate-500">No manuscript selected</p>
+                )}
+              </div>
+            ) : (
+              <ViewSubmissionContent
+                activeTab={activeTab}
+                manuscriptDetails={manuscriptDetails}
+                currentUserId={currentUser?.email}
+                allRevisionFiles={[...allRevisions]
+                  .sort((a, b) => a.revision_number - b.revision_number)
+                  .map((r) => ({ revisionNumber: r.revision_number, files: allRevisionFilesById[r.id] || [] }))}
+                onRefreshData={() => {
+                  if (manuscriptDetails) {
+                    fetchAuthorManuscriptDetails(manuscriptDetails.manuscript.id)
+                      .then(setManuscriptDetails)
+                      .catch(console.error);
+                  }
+                }}
+              />
+            )}
 
           </div>
-
-          {/* ======= COLUMN 3: RIGHT DETAILS SIDEBAR ======= */}
-          {(() => {
-            const { isRejected } = getDynamicProgress();
-            return (
-              <aside id="ojs-column-right-details" className="w-full lg:w-80 shrink-0 space-y-6 text-left leading-normal">
-                
-                {/* AREA A: Submission Progress detailed vertical timeline widget */}
-                <div id="ojs-progress-widget" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-5">
-                  
-                  <div className="flex items-center justify-between border-b pb-3 border-slate-100">
-                    <div>
-                      <h3 className="text-sm font-extrabold text-slate-800 font-sans tracking-tight">
-                        Submission Status
-                      </h3>
-                      <p className="text-[10px] text-slate-400 mt-0.5 font-sans">Workflow tracking lifecycle</p>
-                    </div>
-                    {isRejected && (
-                      <span className="px-2 py-0.5 bg-rose-50 text-rose-700 text-[10px] font-bold rounded-md border border-rose-100 font-mono">
-                        DECLINED
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Detailed 12-stage academic tracker timeline */}
-                  <div className="space-y-4 text-left">
-                    <div className="relative pl-5 border-l border-slate-200 ml-2.5 space-y-5 text-xs">
-                      {getDetailedWorkflowState(paper).map((stage) => {
-                        const isDone = stage.status === 'completed';
-                        const isActive = stage.status === 'active';
-                        const isUpcoming = stage.status === 'upcoming';
-                        const isSkipped = stage.status === 'skipped';
-
-                        let bulletColor = "bg-white border-slate-200 text-slate-350";
-                        let textColor = "text-slate-400";
-                        let iconElem: React.ReactNode = null;
-
-                        if (isDone) {
-                          bulletColor = "bg-[#008751] border-[#008751] text-white";
-                          textColor = "text-slate-800 font-extrabold";
-                          iconElem = <Check className="w-2.5 h-2.5 stroke-[3.5]" />;
-                        } else if (isActive) {
-                          bulletColor = "bg-emerald-50 border-2 border-[#008751] text-[#008751] animate-pulse ring-2 ring-[#008751]/10";
-                          textColor = "text-[#008751] font-black";
-                          iconElem = <span className="w-1.5 h-1.5 bg-[#008751] rounded-full animate-ping" />;
-                        } else if (isSkipped) {
-                          bulletColor = "bg-slate-100 border-slate-200 text-slate-400";
-                          textColor = "text-slate-450 line-through";
-                          iconElem = <span className="text-[8px]">-</span>;
-                        }
-
-                        return (
-                          <div key={stage.id} className="relative">
-                            {/* Circle dot marker */}
-                            <div className={`absolute -left-[30.5px] top-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center ${bulletColor} z-10 transition`}>
-                              {iconElem}
-                            </div>
-
-                            <div className="space-y-0.5">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className={`text-[11px] leading-tight ${textColor}`}>
-                                  {stage.label}
-                                </span>
-                                {stage.dateCompleted && (
-                                  <span className="text-[9px] font-mono font-bold text-[#008751] whitespace-nowrap bg-emerald-50 px-1.5 py-0.5 rounded">
-                                    {stage.dateCompleted}
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-[10.5px] text-slate-500 leading-relaxed font-sans select-none">
-                                {stage.description}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                </div>
-
-            {/* AREA B: Submission Details table listing */}
-            <div id="ojs-details-widget" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
-              
-              <h3 className="text-sm font-extrabold text-[#004d2b] font-sans tracking-tight border-b pb-2.5 border-slate-100">
-                Submission Details
-              </h3>
-
-              <div className="space-y-3 pt-1 text-xs">
-                
-                <div className="flex flex-col space-y-1 text-left">
-                  <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold">Submission ID</span>
-                  <strong className="text-slate-800 font-extrabold font-mono text-[13px]">{paper.id || "N/A"}</strong>
-                </div>
-
-                <div className="flex flex-col space-y-1 text-left">
-                  <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold font-mono">Submitted On</span>
-                  <strong className="text-slate-800 font-extrabold font-mono text-xs">{paper.receivedAt || "2026-06-08"}</strong>
-                </div>
-
-                <div className="flex flex-col space-y-1 text-left">
-                  <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold font-mono">Last Updated</span>
-                  <strong className="text-slate-800 font-extrabold font-mono text-xs">{paper.receivedAt || "2026-06-08"}</strong>
-                </div>
-
-                <div className="flex flex-col space-y-1 text-left">
-                  <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold font-mono">Submission Files</span>
-                  <strong className="text-slate-800 font-extrabold font-mono text-xs">1 file</strong>
-                </div>
-
-              </div>
-
-            </div>
-
-          </aside>
-          );
-          })()}
 
         </div>
       </>
@@ -3217,6 +2928,7 @@ export default function OjsSubmissionDetail({
           fileName={previewFileName}
           fileType={previewFileType}
           fileSize={previewFileSize}
+          publicUrl={previewPublicUrl}
         />
       )}
 

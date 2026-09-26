@@ -1,18 +1,99 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, ReactNode } from 'react';
 import { Role, ManuscriptStatus, ReviewerRecommendation } from '../types';
 import {
-  ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow,
+  ManuscriptRow, EditorAssignmentRow, ReviewerAssignmentRow, RevisionRow, DiscussionRow, SuggestedReviewerRow,
   listManuscripts, getEditorAssignments, getReviewerAssignments, getRevisions, subscribeToManuscripts,
-  respondToEditorAssignment, submitEditorAssessment, submitEditorRecommendation
+  respondToEditorAssignment, submitEditorAssessment, submitEditorRecommendation, publishDecision,
+  getManuscript, getContributors, getDiscussions, getReviewerNeedingReplacement, getPendingEditorSuggestions,
+  editorSelectReplacementReviewer, ProfileRow
 } from '../lib/workflow';
 import { supabase } from '../lib/supabase';
-import { Loader2, ArrowLeft, Check, X as XIcon, Plus, Trash2 } from 'lucide-react';
+import { getManuscriptStatusLabel, getRoleAwareStatusLabel, getLatestRevision, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
+import { getEditorFacingReviewerStatus, editorSeesReplacementNeeded } from '../lib/reviewerStatus';
+import { formatTimelineDate } from '../lib/dateFormat';
+import {
+  getEditorAssignedManuscripts,
+  subscribeToEditorAssignments,
+  EditorManuscriptDetails,
+  ManuscriptFileRow,
+  respondToAssignment,
+  saveDraftEvaluation,
+  getDraftEvaluation,
+  submitAssessment,
+  submitRecommendation,
+  publishFinalDecision,
+  subscribeToReviewerChanges,
+  postDiscussion,
+  subscribeToDiscussions,
+  postInternalNote,
+  notifyCoordinator,
+  subscribeToAllManuscriptUpdates,
+  retryOperation,
+  categorizeError,
+  validateAssignmentData,
+  formatDate,
+  formatDateTime
+} from '../lib/editorWorkspace';
+import { SidebarBrand, SidebarDecoration, TopBar } from './RoleChrome';
+import { StatusStatCard } from './StatusStatCard';
+import { SidebarThemeContext, LIGHT_SIDEBAR_SURFACE, LIGHT_PAGE_SURFACE } from './sidebarTheme';
+import { Loader2, ArrowLeft, ArrowRight, Check, X as XIcon, Plus, Trash2, ChevronDown, Clock, AlertCircle, Archive, CheckCircle, FileText, Settings, Save, Send, RefreshCw } from 'lucide-react';
+import RevisionHistoryPanel from './RevisionHistoryPanel';
+import { EditorEvaluationFormTab } from './manuscript-detail/tabs/EditorEvaluationFormTab';
+import { EditorReviewerSelection, useEditorReviewerSelection, ReviewerSelectionList, ReviewerSelectionConfirmButton, SelectionCheckbox } from './EditorReviewerSelection';
+import { ReviewerReplacementAlert } from './ReviewerReplacementAlert';
+import EditorEvaluationSidebar from './EditorEvaluationSidebar';
+import FilePreviewModal from './FilePreviewModal';
+import EditorRevisionReview from './EditorRevisionReview';
+import { RejectReasonDialog } from './RejectReasonDialog';
+import EditorProductionVerification from './production/EditorProductionVerification';
+import { usePermissions } from '../lib/permissions';
+import { getProduction, getCorrections, subscribeToProduction, ProductionRow, CorrectionRow } from '../lib/production';
+import { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
+
+
+/** Which Editor tab a given notification type should land on -- e.g.
+ * REVIEWS_READY_FOR_DECISION means the Coordinator just released both peer
+ * reviews, so clicking that notification should open straight to the
+ * Reviewers tab where those reviews are shown, not the manuscript's default
+ * Files tab. Falls back to the default tab for any type with no specific
+ * landing spot (assignment invites, decision-published, etc.). */
+const NOTIFICATION_TAB_MAP: Record<string, 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments'> = {
+  REVIEWS_READY_FOR_DECISION: 'reviews',
+  REVIEWS_COMPLETE: 'reviews',
+  PEER_REVIEW_STARTED: 'reviews',
+  REVIEWER_DECLINED: 'reviews',
+};
+
+const PEER_REVIEW_QUESTION_LABELS: Record<string, string> = {
+  focus_scope_relevance: 'Focus, Scope, and Relevance',
+  theoretical_novelty: 'Theoretical Novelty',
+  methodology_soundness: 'Methodology Soundness',
+  replicability_check: 'Replicability Check',
+  structured_completeness: 'Structured Completeness',
+  data_integrity: 'Data Integrity',
+  references_relevance: 'References Relevance',
+  ethical_attestation: 'Ethical Attestation',
+  structural_clarity: 'Structural Clarity',
+  conclusion_justification: 'Conclusion Justification',
+};
+
+// Same ACCEPT/MINOR/MAJOR/REJECT color convention already used for the
+// Editor's own decision buttons further down this file -- applied here so a
+// reviewer's recommendation reads at a glance instead of as plain text.
+const RECOMMENDATION_TEXT_COLOR: Record<string, string> = {
+  ACCEPT: 'text-emerald-700',
+  MINOR_REVISION: 'text-amber-700',
+  MAJOR_REVISION: 'text-orange-700',
+  REJECT: 'text-red-700',
+};
 
 interface EditorWorkspaceProps {
   manuscripts?: any[];
   onUpdateManuscript?: (m: any) => void;
   onDeleteManuscript?: (id: string) => void;
   currentUser?: { name: string; email: string; role: Role } | null;
+  onSignOut?: () => void;
 }
 
 const STATUS_STYLES: Record<ManuscriptStatus, string> = {
@@ -27,39 +108,210 @@ const STATUS_STYLES: Record<ManuscriptStatus, string> = {
   REJECTED: 'bg-red-50 text-red-700 border-red-200',
 };
 
-function StatusBadge({ status }: { status: ManuscriptStatus }) {
+function StatusBadge({ manuscript, latestRevision }: { manuscript: ManuscriptRow; latestRevision?: RevisionRow | null }) {
+  const label = getRoleAwareStatusLabel(manuscript, 'EDITOR', latestRevision);
+  const style = STANDARD_STATUS_COLORS[label as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT;
   return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${STATUS_STYLES[status]}`}>
-      {status.replace(/_/g, ' ')}
+    <span className={`inline-flex items-center whitespace-nowrap px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${style}`}>
+      {label}
     </span>
   );
 }
 
-interface Row { manuscript: ManuscriptRow; assignment: EditorAssignmentRow; }
+/** Module 104: inline replacement picker for a declined or overdue
+ * reviewer, shown directly on the Reviewers tab instead of relying solely
+ * on the floating ReviewerReplacementAlert widget (which is easy to miss/
+ * lose track of). Same underlying RPC and rules -- only usable once the
+ * assignment actually needs replacing, and for an overdue (not declined)
+ * row only once the Coordinator has explicitly requested a replacement. */
+function ReviewerReplacementInline({ assignment, excludedEmails, hasPendingReplacement, onReplaced }: { assignment: ReviewerAssignmentRow; excludedEmails: Set<string>; hasPendingReplacement: boolean; onReplaced: () => void }) {
+  const [choosing, setChoosing] = useState(false);
+  const [reviewers, setReviewers] = useState<ProfileRow[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
-export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
-  const [rows, setRows] = useState<Row[]>([]);
+  useEffect(() => {
+    if (!choosing) return;
+    supabase
+      .from('profiles')
+      .select('id, name, email, role, status')
+      .eq('role', 'REVIEWER')
+      .eq('status', 'ACTIVE')
+      .order('name')
+      .then(({ data }) => setReviewers((data || []) as ProfileRow[]));
+  }, [choosing]);
+
+  // Module 107: both declined and overdue only become visible/actionable to
+  // the Editor once the Coordinator has explicitly notified them (requested
+  // a replacement) -- see editor_select_replacement_reviewer() in
+  // 0107_decline_also_requires_coordinator_notify.sql, which enforces this
+  // same rule server-side.
+  if (!editorSeesReplacementNeeded(assignment)) return null;
+
+
+  const handleSubmit = async () => {
+    if (!selectedId) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await editorSelectReplacementReviewer(assignment.id, selectedId);
+      setChoosing(false);
+      setSelectedId(null);
+      onReplaced();
+    } catch (e: any) {
+      setError(e.message || 'Failed to select replacement reviewer');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-red-200 space-y-2">
+      {error && <p className="text-xs font-semibold text-red-600">{error}</p>}
+      {choosing ? (
+        <div className="space-y-2">
+          <p className="text-xs font-bold text-slate-700">Select Replacement Reviewer:</p>
+          <div className="max-h-40 overflow-y-auto space-y-1.5 border border-slate-200 rounded-lg p-2">
+            {reviewers.length === 0 ? (
+              <p className="text-xs text-slate-500 py-2 text-center">Loading Reviewer Board...</p>
+            ) : (
+              reviewers.filter(r => !excludedEmails.has(r.email.toLowerCase())).map(r => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => setSelectedId(r.id)}
+                  className={`w-full flex items-center justify-between p-2 rounded-lg text-left text-xs transition ${
+                    selectedId === r.id ? 'bg-emerald-50 border border-emerald-400' : 'hover:bg-slate-50 border border-transparent'
+                  }`}
+                >
+                  <span>
+                    <span className="font-semibold text-slate-900 block">{r.name}</span>
+                    <span className="text-slate-500">{r.email}</span>
+                  </span>
+                  {selectedId === r.id && <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                </button>
+              ))
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleSubmit}
+              disabled={!selectedId || submitting}
+              className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {submitting ? 'Selecting...' : 'Confirm Replacement'}
+            </button>
+            <button
+              onClick={() => { setChoosing(false); setSelectedId(null); }}
+              disabled={submitting}
+              className="text-xs px-3 py-1.5 border border-slate-300 text-slate-700 rounded font-bold hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : hasPendingReplacement ? (
+        <p className="text-xs text-slate-500 italic">A replacement reviewer has already been selected -- awaiting invitation.</p>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setChoosing(true)}
+          className="text-xs px-3 py-1.5 bg-amber-600 text-white rounded font-bold hover:bg-amber-700 transition flex items-center gap-1.5"
+        >
+          <RefreshCw className="w-3 h-3" />
+          Choose Replacement Reviewer
+        </button>
+      )}
+    </div>
+  );
+}
+
+export default function EditorWorkspace({ currentUser, onSignOut }: EditorWorkspaceProps) {
+  const { can } = usePermissions();
+  const [rows, setRows] = useState<EditorManuscriptDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedManuscriptId, setSelectedManuscriptId] = useState<string | null>(null);
+  const [pendingTab, setPendingTab] = useState<'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | 'production' | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    submissions: true,
+    reviewStages: false,
+    copyedit: false
+  });
+  const [showAcceptModal, setShowAcceptModal] = useState(false);
+  const [acceptingAssignment, setAcceptingAssignment] = useState(false);
+  const [decliningAssignment, setDecliningAssignment] = useState(false);
+  const [sectionFilter, setSectionFilter] = useState<string | null>(null);
+
+  // "Remove from My Queue": hides rows from THIS Editor's list only. The manuscript, its
+  // reviews and its history are untouched, and the Coordinator still sees everything.
+  // Kept per Editor in this browser; "Show again" brings them back.
+  const removedKey = `jms.editor.removedFromQueue.${currentUser?.email ?? ''}`;
+  const [removedIds, setRemovedIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(removedKey) || '[]'); } catch { return []; }
+  });
+  const [removeMode, setRemoveMode] = useState(false);
+  const [removeSelection, setRemoveSelection] = useState<Set<string>>(new Set());
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const saveRemoved = (ids: string[]) => {
+    setRemovedIds(ids);
+    try { localStorage.setItem(removedKey, JSON.stringify(ids)); } catch { /* storage unavailable */ }
+  };
+
+  // Real predicates over actual assignment/manuscript/reviewer data -- no
+  // fabricated counts. Buckets with no matching schema field (overdue
+  // tracking uses reviewer_assignments.due_date; scheduling/copyediting has
+  // no dedicated status in this schema) fall back to an honest empty state
+  // rather than inventing a stage that isn't tracked.
+  const isClosedManuscript = (r: EditorManuscriptDetails) => r.manuscript.status === 'PUBLISHED' || r.manuscript.status === 'REJECTED';
+  const SECTION_FILTERS: Record<string, { label: string; predicate: (r: EditorManuscriptDetails) => boolean }> = {
+    // "Closed" = finished for the Editor's purposes; these never count as
+    // active work or as awaiting anything.
+    'active-submissions': { label: 'Active Submissions', predicate: (r) => r.assignment.status === 'ACCEPTED' && !isClosedManuscript(r) },
+    // Accepted the assignment but the initial editorial evaluation hasn't been started.
+    'needs-editor': { label: 'Needs Editor', predicate: (r) => r.assignment.status === 'ACCEPTED' && r.manuscript.status === 'EDITOR_REVIEW' && r.assignment.assessment_status === 'NOT_STARTED' },
+    // Invited but hasn't accepted yet.
+    'in-submission-stage': { label: 'In Submission Stage', predicate: (r) => r.assignment.status === 'INVITED' },
+    // Assignments this Editor declined -- kept here (not deleted) once the manuscript is reopened for reassignment.
+    'declined': { label: 'Declined', predicate: (r) => r.assignment.status === 'DECLINED' },
+    // Peer review is running and at least one reviewer still owes a response/report.
+    'awaiting-reviews': { label: 'Awaiting Reviews', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' && r.reviewers.some((rv) => rv.status === 'INVITED' || rv.status === 'ACCEPTED') },
+    // Every (non-declined) reviewer has submitted and the manuscript is at the decision gate.
+    'reviews-submitted': { label: 'Reviews Submitted', predicate: (r) => {
+      const active = r.reviewers.filter((rv) => rv.status !== 'DECLINED');
+      return r.manuscript.status === 'AWAITING_DECISION' && active.length > 0 && active.every((rv) => rv.status === 'SUBMITTED');
+    } },
+    'reviews-overdue': { label: 'Reviews Overdue', predicate: (r) => !isClosedManuscript(r) && r.reviewers.some((rv) => editorSeesReplacementNeeded(rv)) },
+    // A revision the Coordinator has forwarded to the Editor and that is waiting on them.
+    'revisions-submitted': { label: 'Revisions Submitted', predicate: (r) => !isClosedManuscript(r) && getLatestRevision(r.revisions)?.status === 'UNDER_REVIEW' },
+    'in-review-stage': { label: 'In Review Stage', predicate: (r) => r.manuscript.status === 'UNDER_REVIEW' },
+    'published-articles': { label: 'Published', predicate: (r) => r.manuscript.status === 'PUBLISHED' },
+    'declined-rejected': { label: 'Declined / Rejected', predicate: (r) => r.manuscript.status === 'REJECTED' || r.assignment.status === 'DECLINED' },
+  };
 
   const load = async () => {
     try {
       const { data } = await supabase.auth.getUser();
-      const manuscripts = await listManuscripts();
-      const withAssignments: Row[] = [];
-      for (const m of manuscripts) {
-        const assignments = await getEditorAssignments(m.id);
-        const mine = assignments.find((a) => a.editor_id === data.user?.id);
-        if (mine) withAssignments.push({ manuscript: m, assignment: mine });
+      if (!data.user?.id) {
+        setLoading(false);
+        return;
       }
-      setRows(withAssignments);
+      const details = await getEditorAssignedManuscripts(data.user.id);
+      setRows(details);
+    } catch (error) {
+      console.error('Error loading assignments:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  const removedSet = new Set(removedIds);
+  const removedCount = rows.filter((r) => removedSet.has(r.manuscript.id)).length;
   const filteredRows = rows.filter((row) => {
+    if (removedSet.has(row.manuscript.id)) return false;
+    if (sectionFilter && !SECTION_FILTERS[sectionFilter]?.predicate(row)) return false;
     const query = searchTerm.toLowerCase();
     return (
       row.manuscript.title.toLowerCase().includes(query) ||
@@ -71,316 +323,3082 @@ export default function EditorWorkspace({ currentUser }: EditorWorkspaceProps) {
   const assignmentCounts = {
     total: rows.length,
     invited: rows.filter((r) => r.assignment.status === 'INVITED').length,
-    accepted: rows.filter((r) => r.assignment.status === 'ACCEPTED').length,
+    accepted: rows.filter(SECTION_FILTERS['active-submissions'].predicate).length,
     submitted: rows.filter((r) => r.assignment.assessment_status === 'SUBMITTED').length,
-    pending: rows.filter((r) => r.assignment.assessment_status === 'NOT_STARTED').length,
+    pending: rows.filter(SECTION_FILTERS['needs-editor'].predicate).length,
   };
 
   useEffect(() => {
     load();
-    const unsubscribe = subscribeToManuscripts(load);
-    return unsubscribe;
+    if (!currentUser?.email) return;
+
+    // Subscribe to real-time updates
+    const setupSubscription = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (!data.user?.id) return;
+
+      const unsubscribe = subscribeToEditorAssignments(data.user.id, setRows);
+      return unsubscribe;
+    };
+
+    const unsubscribePromise = setupSubscription();
+    return () => {
+      unsubscribePromise.then(unsub => unsub?.());
+    };
+  }, [currentUser?.email]);
+
+  // Clicking a manuscript-linked notification (NotificationBell, mounted by
+  // the sibling RoleSelector shell) jumps straight to that manuscript and,
+  // for notification types with an obvious landing tab, opens on it -- e.g.
+  // "reviews are ready for your decision" opens on Reviewers instead of the
+  // default Files tab, so the Editor doesn't have to go hunt for it.
+  useEffect(() => {
+    const onOpenManuscript = (e: Event) => {
+      const detail = (e as CustomEvent<JmsOpenManuscriptDetail>).detail;
+      if (!detail) return;
+      setSelectedManuscriptId(detail.manuscriptId);
+      setShowAcceptModal(false);
+      setPendingTab(NOTIFICATION_TAB_MAP[detail.notificationType] ?? null);
+    };
+    window.addEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
+    return () => window.removeEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
   }, []);
 
   const selected = rows.find((r) => r.manuscript.id === selectedManuscriptId) || null;
+  const topBar = <TopBar user={currentUser ? { name: currentUser.name, role: 'EDITOR' } : null} onSignOut={onSignOut} tinted />;
+  const toggleSection = (section: string) => {
+    setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  // Show accept/decline modal if assignment is INVITED
+  if (selected && selected.assignment.status === 'INVITED' && showAcceptModal) {
+    return (
+      <>
+      {topBar}
+      <AcceptDeclineModal
+        details={selected}
+        onAccept={async () => {
+          setAcceptingAssignment(true);
+          try {
+            await respondToAssignment(selected.assignment.id, true);
+            setShowAcceptModal(false);
+            await load();
+          } catch (error: any) {
+            alert('Error accepting assignment: ' + error.message);
+          } finally {
+            setAcceptingAssignment(false);
+          }
+        }}
+        onDecline={async () => {
+          setDecliningAssignment(true);
+          try {
+            await respondToAssignment(selected.assignment.id, false);
+            setShowAcceptModal(false);
+            setSelectedManuscriptId(null);
+            setSectionFilter('declined');
+            await load();
+          } catch (error: any) {
+            alert('Error declining assignment: ' + error.message);
+          } finally {
+            setDecliningAssignment(false);
+          }
+        }}
+        onBack={() => {
+          setSelectedManuscriptId(null);
+          setShowAcceptModal(false);
+        }}
+        isAcceptLoading={acceptingAssignment}
+        isDeclineLoading={decliningAssignment}
+      />
+      </>
+    );
+  }
+
+  if (selected && selected.assignment.status === 'INVITED' && !showAcceptModal) {
+    setShowAcceptModal(true);
+  }
+
+  if (selected && selected.assignment.status === 'ACCEPTED') {
+    return <>{topBar}<AssignmentDetail
+      details={selected}
+      onBack={() => {
+        setSelectedManuscriptId(null);
+        setShowAcceptModal(false);
+      }}
+      onChanged={load}
+      currentUser={currentUser}
+      initialTab={pendingTab}
+      onInitialTabConsumed={() => setPendingTab(null)}
+    /></>;
+  }
+
+  // Dashboard-wide replacement alerts -- surfaced the moment the Editor logs
+  // in and lands on this list, not only after they open a specific
+  // manuscript. One stacked widget per manuscript that actually needs a
+  // replacement (usually zero or one).
+  const rowsNeedingReplacement = rows
+    .map(r => {
+      const currentRound = r.reviewers.length > 0 ? Math.max(...r.reviewers.map(a => a.revision_number ?? 0)) : 0;
+      const pendingSuggestions = getPendingEditorSuggestions(r.suggestedReviewers, r.editorReviewerActions, currentRound);
+      return { row: r, pendingCount: pendingSuggestions.length, pendingEmails: pendingSuggestions.map(s => s.email.toLowerCase()) };
+    })
+    .filter(({ row, pendingCount }) => !!getReviewerNeedingReplacement(row.reviewers, row.manuscript.status, pendingCount));
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 flex flex-col font-sans">
-      <header className="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-30">
-        <h1 className="text-lg font-black text-slate-900">Editor Workspace</h1>
-        <p className="text-xs text-slate-500 font-semibold">{currentUser?.name} &middot; {currentUser?.email}</p>
-      </header>
+    <div className={`w-full h-screen ${LIGHT_PAGE_SURFACE} role-tint flex font-sans overflow-hidden`}>
+      {rowsNeedingReplacement.map(({ row: r, pendingCount, pendingEmails }, idx) => (
+        <ReviewerReplacementAlert
+          key={r.manuscript.id}
+          manuscriptId={r.manuscript.id}
+          manuscriptTitle={r.manuscript.title}
+          manuscriptStatus={r.manuscript.status}
+          reviewerAssignments={r.reviewers}
+          pendingReplacementCount={pendingCount}
+          pendingReplacementEmails={pendingEmails}
+          onReplacementSelected={load}
+          onOpenManuscript={() => setSelectedManuscriptId(r.manuscript.id)}
+          stackIndex={idx}
+        />
+      ))}
 
-      <main className="flex-1 w-full max-w-5xl mx-auto px-6 py-8">
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 mb-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Editor Dashboard</p>
-              <h2 className="text-xl font-black text-slate-900 mt-2">Assigned manuscripts</h2>
-            </div>
-            <div className="relative w-full max-w-md">
+      <aside className={`w-[220px] xl:w-[270px] ${LIGHT_SIDEBAR_SURFACE} flex flex-col shrink-0`}>
+        <SidebarThemeContext.Provider value="light">
+        <SidebarBrand />
+
+        <nav className="flex-1 px-3 pb-6 overflow-y-auto">
+          {can('SUBMISSIONS', 'VIEW') && (
+          <div className="border-t border-[#d9dccb] first:border-t-0 py-3">
+            <button
+              onClick={() => toggleSection('submissions')}
+              className="w-full flex items-center justify-between rounded-xl bg-[#dcebe0] hover:bg-[#d2e5d7] px-3 py-2.5 text-xs font-bold uppercase tracking-wider text-[#1f4d3a] transition"
+            >
+              <span className="flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                Submissions
+              </span>
+              <ChevronDown className={`w-4 h-4 transition ${expandedSections.submissions ? 'rotate-180' : ''}`} />
+            </button>
+            {expandedSections.submissions && (
+              <div className="mt-2 space-y-1">
+                {(['active-submissions', 'needs-editor', 'in-submission-stage', 'declined'] as const).map((id) => {
+                  const isActive = sectionFilter === id;
+                  const count = rows.filter(SECTION_FILTERS[id].predicate).length;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
+                      className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition flex items-center justify-between cursor-pointer ${
+                        isActive ? 'bg-[#4b8b62] text-white font-bold' : 'text-[#1f3b30] font-medium hover:bg-[#dcebe0]/70'
+                      }`}
+                    >
+                      <span>{SECTION_FILTERS[id].label}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/25 text-white' : 'bg-[#dcebe0] text-[#1f4d3a]'}`}>{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          )}
+
+          {can('REVIEW_STAGES', 'VIEW') && (
+          <div className="border-t border-[#d9dccb] first:border-t-0 py-3">
+            <button
+              onClick={() => toggleSection('reviewStages')}
+              className="w-full flex items-center justify-between rounded-xl bg-[#dcebe0] hover:bg-[#d2e5d7] px-3 py-2.5 text-xs font-bold uppercase tracking-wider text-[#1f4d3a] transition"
+            >
+              <span className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4" />
+                Review Stages
+              </span>
+              <ChevronDown className={`w-4 h-4 transition ${expandedSections.reviewStages ? 'rotate-180' : ''}`} />
+            </button>
+            {expandedSections.reviewStages && (
+              <div className="mt-2 space-y-1">
+                {(['awaiting-reviews', 'reviews-submitted', 'reviews-overdue', 'revisions-submitted', 'in-review-stage'] as const).map((id) => {
+                  const isActive = sectionFilter === id;
+                  const count = rows.filter(SECTION_FILTERS[id].predicate).length;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
+                      className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition flex items-center justify-between cursor-pointer ${
+                        isActive ? 'bg-[#4b8b62] text-white font-bold' : 'text-[#1f3b30] font-medium hover:bg-[#dcebe0]/70'
+                      }`}
+                    >
+                      <span>{SECTION_FILTERS[id].label}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/25 text-white' : 'bg-[#dcebe0] text-[#1f4d3a]'}`}>{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          )}
+
+          {can('COPYEDIT_PRODUCTION', 'VIEW') && (
+          <div className="border-t border-[#d9dccb] first:border-t-0 py-3">
+            <button
+              onClick={() => toggleSection('copyedit')}
+              className="w-full flex items-center justify-between rounded-xl bg-[#dcebe0] hover:bg-[#d2e5d7] px-3 py-2.5 text-xs font-bold uppercase tracking-wider text-[#1f4d3a] transition"
+            >
+              <span className="flex items-center gap-2">
+                <Archive className="w-4 h-4" />
+                Copyedit & Production
+              </span>
+              <ChevronDown className={`w-4 h-4 transition ${expandedSections.copyedit ? 'rotate-180' : ''}`} />
+            </button>
+            {expandedSections.copyedit && (
+              <div className="mt-2 space-y-1">
+                {(['published-articles', 'declined-rejected'] as const).map((id) => {
+                  const isActive = sectionFilter === id;
+                  const count = rows.filter(SECTION_FILTERS[id].predicate).length;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => { setSectionFilter(isActive ? null : id); setSelectedManuscriptId(null); }}
+                      className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition flex items-center justify-between cursor-pointer ${
+                        isActive ? 'bg-[#4b8b62] text-white font-bold' : 'text-[#1f3b30] font-medium hover:bg-[#dcebe0]/70'
+                      }`}
+                    >
+                      <span>{SECTION_FILTERS[id].label}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/25 text-white' : 'bg-[#dcebe0] text-[#1f4d3a]'}`}>{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          )}
+        </nav>
+        <SidebarDecoration />
+        </SidebarThemeContext.Provider>
+      </aside>
+
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {topBar}
+        <div className="bg-white border-b border-slate-200 px-8 py-5 shrink-0">
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => { setRemoveMode((v) => !v); setRemoveSelection(new Set()); }}
+              className={`rounded-full border px-4 py-2 text-xs font-bold transition ${removeMode ? 'border-slate-700 bg-slate-700 text-white hover:bg-slate-800' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+            >
+              {removeMode ? 'Cancel' : 'Remove from My Queue'}
+            </button>
+            <div className="relative w-64">
               <input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search manuscripts or status"
+                placeholder="Search titles / IDs..."
                 className="w-full rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
               />
             </div>
           </div>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
-              <p className="uppercase tracking-[0.24em] text-slate-500">Total Assignments</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.total}</p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-8">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <StatusStatCard title="Active Submissions" value={assignmentCounts.accepted} icon={<Clock className="w-5 h-5" />} tone="emerald" />
+            <StatusStatCard title="Needs Editor" value={assignmentCounts.pending} icon={<AlertCircle className="w-5 h-5" />} tone="amber" />
+            <StatusStatCard title="In Submission" value={assignmentCounts.invited} icon={<Archive className="w-5 h-5" />} tone="sky" />
+            <StatusStatCard title="System Pipeline" value={assignmentCounts.total} icon={<FileText className="w-5 h-5" />} tone="violet" />
+          </div>
+
+
+          {loading ? (
+            <div className="flex items-center justify-center py-24 text-slate-400">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...
             </div>
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
-              <p className="uppercase tracking-[0.24em] text-slate-500">Invited</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.invited}</p>
-            </div>
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
-              <p className="uppercase tracking-[0.24em] text-slate-500">Accepted</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.accepted}</p>
-            </div>
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
-              <p className="uppercase tracking-[0.24em] text-slate-500">Evaluated</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.submitted}</p>
-            </div>
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4 text-xs">
-              <p className="uppercase tracking-[0.24em] text-slate-500">Pending</p>
-              <p className="mt-3 text-3xl font-black text-slate-900">{assignmentCounts.pending}</p>
+          ) : filteredRows.length === 0 ? (
+              <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-24 text-center">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center">
+                    <FileText className="w-8 h-8 text-emerald-500" />
+                  </div>
+                </div>
+                <p className="text-sm text-slate-500 font-semibold mb-2">No manuscript records registered under the selected sub-tab category.</p>
+                <p className="text-xs text-slate-400 mb-6">Try selecting a different workflow status from the left menu.</p>
+                <button className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-6 py-2.5 rounded-lg transition">
+                  VIEW ALL SUBMISSIONS →
+                </button>
+              </div>
+            ) : (
+              <div key={sectionFilter ?? 'all'} className="space-y-4">
+                {removeMode && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-sm font-semibold text-slate-800">
+                      {removeSelection.size === 0 ? 'Select the manuscripts to remove from your queue' : `${removeSelection.size} manuscript${removeSelection.size === 1 ? '' : 's'} selected`}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      {removeSelection.size < filteredRows.length && (
+                        <button onClick={() => setRemoveSelection(new Set(filteredRows.map((r) => r.manuscript.id)))} className="rounded-full border border-slate-300 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">Select all {filteredRows.length}</button>
+                      )}
+                      <button onClick={() => { setRemoveMode(false); setRemoveSelection(new Set()); }} className="rounded-full border border-slate-300 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">Cancel</button>
+                      <button onClick={() => setConfirmRemove(true)} disabled={removeSelection.size === 0} className="rounded-full bg-slate-700 px-4 py-1.5 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed">Remove from my queue</button>
+                    </div>
+                  </div>
+                )}
+                <AssignmentListWithPagination
+                  rows={filteredRows}
+                  onOpen={(id, tab) => { setSelectedManuscriptId(id); setPendingTab(tab ?? null); }}
+                  selectMode={removeMode}
+                  selected={removeSelection}
+                  onToggle={(ids) => setRemoveSelection((prev) => {
+                    const next = new Set(prev);
+                    const allOn = ids.every((id) => next.has(id));
+                    ids.forEach((id) => (allOn ? next.delete(id) : next.add(id)));
+                    return next;
+                  })}
+                />
+                {removedCount > 0 && !removeMode && (
+                  <button type="button" onClick={() => saveRemoved([])} className="w-full rounded-xl border border-dashed border-slate-200 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">{removedCount} removed from your queue · Show again</button>
+                )}
+              </div>
+            )}
+
+        </div>
+      </main>
+      {confirmRemove && (() => {
+        const toRemove = rows.filter((r) => removeSelection.has(r.manuscript.id));
+        const one = toRemove.length === 1;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={() => setConfirmRemove(false)}>
+            <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl border border-slate-200 p-6" onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-lg font-black text-slate-900">Remove {one ? 'this manuscript' : `${toRemove.length} manuscripts`} from your queue?</h2>
+              <p className="mt-2 text-sm text-slate-600">This only hides {one ? 'it' : 'them'} from your own list. Nothing is deleted: the manuscript, its reviews and its history stay in the system, and the Coordinator can still see {one ? 'it' : 'them'}. You can bring {one ? 'it' : 'them'} back with "Show again".</p>
+              <ul className="mt-3 max-h-40 overflow-y-auto rounded-2xl bg-slate-50 border border-slate-200 divide-y divide-slate-100 text-xs">
+                {toRemove.slice(0, 8).map((r) => (
+                  <li key={r.manuscript.id} className="px-3 py-2"><span className="font-mono text-slate-400">{r.manuscript.id}</span> <span className="font-semibold text-slate-800">{r.manuscript.title}</span></li>
+                ))}
+                {toRemove.length > 8 && <li className="px-3 py-2 text-slate-500">…and {toRemove.length - 8} more</li>}
+              </ul>
+              <div className="mt-5 flex gap-2">
+                <button onClick={() => { saveRemoved(Array.from(new Set([...removedIds, ...toRemove.map((r) => r.manuscript.id)]))); setRemoveMode(false); setRemoveSelection(new Set()); setConfirmRemove(false); }} className="flex-1 rounded-full bg-slate-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800">Remove from my queue</button>
+                <button onClick={() => setConfirmRemove(false)} className="flex-1 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+              </div>
             </div>
           </div>
-        </div>
-        {loading ? (
-          <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>
-        ) : selected ? (
-          <AssignmentDetail row={selected} onBack={() => setSelectedManuscriptId(null)} onChanged={load} />
-        ) : (
-          <AssignmentList rows={filteredRows} onOpen={setSelectedManuscriptId} />
-        )}
-      </main>
+        );
+      })()}
     </div>
   );
 }
 
-function AssignmentList({ rows, onOpen }: { rows: Row[]; onOpen: (id: string) => void }) {
+function AssignmentListWithPagination({ rows, onOpen, selectMode, selected, onToggle }: { rows: EditorManuscriptDetails[]; onOpen: (id: string, tab?: 'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | 'production') => void; selectMode: boolean; selected: Set<string>; onToggle: (ids: string[]) => void }) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   if (rows.length === 0) {
     return <div className="text-center py-24 bg-white border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">No manuscript assignments yet.</div>;
   }
+
+  const totalPages = Math.ceil(rows.length / itemsPerPage);
+  // A search can shrink the list below the page we're on -- never show an empty page.
+  const activePage = Math.min(currentPage, totalPages);
+  const startIndex = (activePage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedRows = rows.slice(startIndex, endIndex);
+
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
           <tr>
-            <th className="px-4 py-3">Title</th>
-            <th className="px-4 py-3">Manuscript Status</th>
-            <th className="px-4 py-3">Assignment</th>
-            <th className="px-4 py-3"></th>
+            {selectMode && (
+              <th className="pl-6 pr-0 py-3.5 w-10">
+                <input type="checkbox" aria-label="Select all manuscripts on this page" checked={paginatedRows.length > 0 && paginatedRows.every((r) => selected.has(r.manuscript.id))} onChange={() => onToggle(paginatedRows.map((r) => r.manuscript.id))} className="h-4 w-4 rounded border-slate-300 accent-slate-700 cursor-pointer" />
+              </th>
+            )}
+            <th className="px-6 py-3.5">Title</th>
+            <th className="px-4 py-3.5 w-[190px]">Manuscript Status</th>
+            <th className="px-4 py-3.5 w-[130px]">Assignment</th>
+            <th className="px-6 py-3.5 w-[190px]"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {rows.map(({ manuscript, assignment }) => (
-            <tr key={manuscript.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(manuscript.id)}>
-              <td className="px-4 py-3 font-bold text-slate-800">{manuscript.title}</td>
-              <td className="px-4 py-3"><StatusBadge status={manuscript.status} /></td>
-              <td className="px-4 py-3 text-xs font-bold text-slate-600">{assignment.status}</td>
-              <td className="px-4 py-3 text-right text-[#008751] font-bold text-xs">Open &rarr;</td>
-            </tr>
-          ))}
+          {paginatedRows.map((details) => {
+            const latestRevision = getLatestRevision(details.revisions);
+            const isRevisionSubmitted = latestRevision?.status === 'UNDER_REVIEW';
+            // Once the Editor has actually recorded a fresh recommendation
+            // for this peer-review round, there's nothing left for THEM to
+            // do -- it's sitting with the Coordinator now. Same freshness
+            // check as DecisionTab.tsx's editorDecisionIsFreshForPeerReview:
+            // a recommendation only counts if it postdates the reviewers'
+            // own submissions, so a stale recommendation from an earlier
+            // round doesn't wrongly suppress "Reviews Ready" for a new one.
+            const latestReviewSubmittedAt = details.reviewers.reduce<string | null>((latest, r) => (
+              r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
+            ), null);
+            const editorDecisionIsFresh = !!(
+              details.assignment.recommendation && details.assignment.recommendation_submitted_at &&
+              latestReviewSubmittedAt && details.assignment.recommendation_submitted_at > latestReviewSubmittedAt
+            );
+            // Same idea as the "Review Revision" callout above -- both
+            // reviewers are in, so there's something new to act on here
+            // (see the Reviewers tab), not just "open and look around".
+            const reviewsReady = !isRevisionSubmitted && !editorDecisionIsFresh && details.manuscript.status === 'AWAITING_DECISION'
+              && details.reviewers.length > 0 && details.reviewers.every((rv) => rv.status === 'SUBMITTED');
+            const awaitingCoordinator = !isRevisionSubmitted && editorDecisionIsFresh && details.manuscript.status === 'AWAITING_DECISION';
+            // Once accepted, the manuscript moves into production/proofreading
+            // -- nothing left on the peer-review side, so open straight to the
+            // Production Verification screen instead of the default Status tab.
+            const inProofreading = details.manuscript.status === 'ACCEPTED';
+            return (
+              <tr key={details.manuscript.id} className={`hover:bg-slate-50 cursor-pointer ${selected.has(details.manuscript.id) ? 'bg-slate-50' : ''}`} onClick={() => selectMode ? onToggle([details.manuscript.id]) : onOpen(details.manuscript.id, isRevisionSubmitted ? 'status' : reviewsReady ? 'reviews' : inProofreading ? 'production' : undefined)}>
+                {selectMode && (
+                  <td className="pl-6 pr-0 py-4 align-middle w-10">
+                    <input type="checkbox" aria-label={`Select ${details.manuscript.title}`} checked={selected.has(details.manuscript.id)} onChange={() => onToggle([details.manuscript.id])} onClick={(e) => e.stopPropagation()} className="h-4 w-4 rounded border-slate-300 accent-slate-700 cursor-pointer" />
+                  </td>
+                )}
+                <td className="px-6 py-4 align-middle font-bold text-slate-800">
+                  {details.manuscript.title}
+                  {details.assignment.timeline_start_date && details.assignment.timeline_end_date && (
+                    <p className="mt-0.5 text-[11px] font-normal text-slate-500">
+                      Editorial Timeline: {formatTimelineDate(details.assignment.timeline_start_date)} – {formatTimelineDate(details.assignment.timeline_end_date)}
+                    </p>
+                  )}
+                  {reviewsReady && (
+                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold uppercase tracking-wide align-middle">
+                      Reviewers Submitted
+                    </span>
+                  )}
+                  {awaitingCoordinator && (
+                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold uppercase tracking-wide align-middle">
+                      Decision Submitted
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-4 align-middle">
+                  {awaitingCoordinator ? (
+                    <span className={`inline-flex items-center whitespace-nowrap px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${STANDARD_STATUS_COLORS['EDITORIAL REVIEW']}`}>
+                      EDITORIAL REVIEW
+                    </span>
+                  ) : (
+                    <StatusBadge manuscript={details.manuscript} latestRevision={latestRevision} />
+                  )}
+                </td>
+                <td className="px-4 py-4 align-middle whitespace-nowrap text-xs font-bold uppercase tracking-wide text-slate-600">{details.assignment.status}</td>
+                <td className={`px-6 py-4 align-middle whitespace-nowrap text-right font-bold text-xs ${isRevisionSubmitted ? 'text-indigo-600' : reviewsReady ? 'text-emerald-600' : awaitingCoordinator ? 'text-slate-500' : inProofreading ? 'text-emerald-600' : 'text-[#008751]'}`}>
+                  {isRevisionSubmitted ? 'Review Revision →' : reviewsReady ? 'Reviews Ready →' : awaitingCoordinator ? 'Pending Decision →' : inProofreading ? 'Review Proofreading →' : 'Open →'}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+
+      {totalPages > 1 && (
+        <div className="border-t border-slate-100 bg-slate-50 px-6 py-4 flex items-center justify-between">
+          <div className="text-xs text-slate-600 font-medium">
+            Showing {startIndex + 1} to {Math.min(endIndex, rows.length)} of {rows.length} manuscripts
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(Math.max(1, activePage - 1))}
+              disabled={activePage === 1}
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ← Previous
+            </button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`w-8 h-8 rounded text-xs font-semibold transition ${
+                    activePage === page
+                      ? 'bg-[#008751] text-white'
+                      : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setCurrentPage(Math.min(totalPages, activePage + 1))}
+              disabled={activePage === totalPages}
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+/** Renders the reviewer picker heading+list, then `children` (the Author's
+ * suggested reviewers card), then the Confirm button -- so the Confirm
+ * button sits below both lists instead of directly under the picker.
+ * A real component (not an inline hook call) so useEditorReviewerSelection's
+ * hooks mount/unmount cleanly whenever the caller stops rendering this.
+ *
+ * `children` is a render prop fed the full selection state -- the Author
+ * suggestions card needs `toggleSuggestion`/`selectedSuggestionIds` to let
+ * the Editor stage a suggestion pick alongside pool picks (any mix, freely
+ * toggleable) and only commit both together via the single Confirm button
+ * below, instead of each list submitting independently. */
+function ReviewerSelectionWithAuthorSuggestions({ manuscriptId, suggestedReviewers, onSubmitSuccess, reviewerAssignments, profiles, children }: {
+  manuscriptId: string;
+  suggestedReviewers: SuggestedReviewerRow[];
+  onSubmitSuccess: () => void;
+  reviewerAssignments?: ReviewerAssignmentRow[];
+  profiles?: Map<string, { email: string }>;
+  children: (state: ReturnType<typeof useEditorReviewerSelection>) => ReactNode;
+}) {
+  const state = useEditorReviewerSelection({ manuscriptId, suggestedReviewers, onSubmitSuccess, reviewerAssignments, profiles });
+  return (
+    <>
+      <ReviewerSelectionList {...state} />
+      {children(state)}
+      <ReviewerSelectionConfirmButton {...state} />
+    </>
+  );
+}
 
-function AssignmentDetail({ row, onBack, onChanged }: { row: Row; onBack: () => void; onChanged: () => void }) {
-  const { manuscript, assignment } = row;
-  const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>([]);
-  const [revisions, setRevisions] = useState<RevisionRow[]>([]);
+function AssignmentDetail({ details, onBack, onChanged, currentUser, initialTab, onInitialTabConsumed }: { details: EditorManuscriptDetails; onBack: () => void; onChanged: () => void; currentUser?: { name: string; email: string; role: Role } | null; initialTab?: 'status' | 'files' | 'evaluation' | 'reviews' | 'revisions' | 'comments' | 'production' | null; onInitialTabConsumed?: () => void }) {
+  const { manuscript, assignment, reviewers: initialReviewerAssignments } = details;
+  const [reviewerAssignments, setReviewerAssignments] = useState<ReviewerAssignmentRow[]>(initialReviewerAssignments || []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [sidebarSection, setSidebarSection] = useState<'dashboard' | 'evaluation_timeline' | 'title_abstract' | 'submission_files' | 'authors' | 'manuscript' | 'references' | 'supplementary' | 'cover_letter' | 'discussions' | 'editor_evaluation' | 'reviews' | 'decision' | 'suggestions' | 'review_history' | 'metadata' | 'revisions' | 'production' | 'galley_files'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'status' | 'files' | 'evaluation' | 'decision' | 'reviews' | 'revisions' | 'comments'>(initialTab || 'status');
+  const [production, setProduction] = useState<ProductionRow | null>(null);
+  const [productionCorrections, setProductionCorrections] = useState<CorrectionRow[]>([]);
 
+  // RLS only exposes manuscript_production/manuscript_production_corrections
+  // to this Editor once a correction package is explicitly routed to them
+  // (sent_to_editor_at) -- fetching unconditionally is safe either way,
+  // since a manuscript never sent to them just resolves to no rows.
   useEffect(() => {
-    getReviewerAssignments(manuscript.id).then(setReviewerAssignments);
-    getRevisions(manuscript.id).then(setRevisions);
+    let cancelled = false;
+    const refetch = () => {
+      getProduction(manuscript.id).then((p) => { if (!cancelled) setProduction(p); }).catch(() => {});
+      getCorrections(manuscript.id).then((c) => { if (!cancelled) setProductionCorrections(c); }).catch(() => {});
+    };
+    refetch();
+    const unsubscribe = subscribeToProduction(refetch);
+    return () => { cancelled = true; unsubscribe(); };
   }, [manuscript.id]);
 
-  const respond = async (accept: boolean) => {
-    setBusy(true); setError('');
-    try { await respondToEditorAssignment(assignment.id, accept); onChanged(); }
-    catch (e: any) { setError(e.message); }
-    finally { setBusy(false); }
+  // Module 69: whether a proof is currently awaiting this Editor's decision
+  // is now the single production_status value PROOF_SENT_TO_EDITOR --
+  // backend-enforced by editor_review_proof(), not inferred from a
+  // once-only feedback flag on a specific correction row (which would never
+  // clear once the Editor's decision moved the workflow on).
+  const pendingProductionVerification = production?.production_status === 'PROOF_SENT_TO_EDITOR';
+
+  // A notification click can request a specific tab (see EditorWorkspace's
+  // JMS_OPEN_MANUSCRIPT_EVENT listener) -- apply it once on mount and let
+  // the parent clear the request so navigating away and back doesn't keep
+  // forcing the same tab.
+  useEffect(() => {
+    if (initialTab === 'production') {
+      setSidebarSection('production');
+      onInitialTabConsumed?.();
+    } else if (initialTab) {
+      setSidebarSection('dashboard');
+      setActiveTab(initialTab);
+      onInitialTabConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Lets the Editor dismiss the "choose reviewers" banner on the
+  // reviewer-selection screen for this visit; it reappears on a fresh visit
+  // (page reload, coming back later) for as long as reviewer selection is
+  // still actually pending -- see the banner's own visibility check below.
+  const [reviewerBannerDismissed, setReviewerBannerDismissed] = useState(false);
+  const [decisionBusy, setDecisionBusy] = useState(false);
+  const [decisionError, setDecisionError] = useState('');
+  const [editorComments, setEditorComments] = useState('');
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  // Lets the Editor re-open the decision buttons after already submitting a
+  // recommendation for a revision-loop/peer-review round, as long as the
+  // Coordinator hasn't confirmed it yet -- submit_editor_recommendation
+  // simply overwrites editor_decision on re-call, so this is safe.
+  const [redeciding, setRedeciding] = useState(false);
+  const [activePublication, setActivePublication] = useState<'title' | 'contributors' | 'metadata' | 'references' | 'galleries' | 'jats' | 'permissions' | 'issue'>('title');
+  const [currentPage] = useState(1);
+  const [addingReviewer, setAddingReviewer] = useState(false);
+
+  // Phase 2: Reviewer Management (display only — assignment happens via Coordinator Review Board)
+
+  // Phase 3: Collaboration
+  const [discussions, setDiscussions] = useState<DiscussionRow[]>(details.discussions || []);
+  const [newComment, setNewComment] = useState('');
+  const [newInternalNote, setNewInternalNote] = useState('');
+  const [showInternalNotes, setShowInternalNotes] = useState(false);
+
+  // Phase 4: Real-Time Updates & Polish
+  const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+  // Editor Evaluation Workflow
+  const [assignmentAccepted] = useState(assignment.status === 'ACCEPTED');
+  const evaluationSubmitted = assignment.assessment_status === 'SUBMITTED';
+
+  // Once the Coordinator forwards a resubmitted revision (manuscript_revisions
+  // .status = 'UNDER_REVIEW'), show the dedicated revision-review page instead
+  // of the regular tabbed manuscript view -- see EditorRevisionReview.tsx.
+  // Both "sent to Editor" (coordinator_send_revision_to_editor) and "sent to
+  // Reviewers for re-check" (coordinator_send_revision_to_reviewers) leave
+  // the revision at UNDER_REVIEW, so origin alone can't tell them apart --
+  // only manuscripts.status does: EDITOR_REVIEW means it's with the Editor
+  // (either origin, now that revisions of both origins route through the
+  // Editor first -- see 0043_editor_initiated_reviewer_recheck.sql), UNDER_
+  // REVIEW means the Reviewers are re-checking it and the Editor shouldn't
+  // see a "decide now" page until those re-reviews are actually in.
+  const latestRevisionForReview = getLatestRevision(details.revisions);
+  const isRevisionReviewPage = latestRevisionForReview?.status === 'UNDER_REVIEW' && manuscript.status === 'EDITOR_REVIEW';
+  // isRevisionReviewPage being true no longer auto-opens the full-page
+  // review screen -- the Editor lands on the normal tabbed dashboard (with
+  // the Current Status tab) and opens it on demand via that tab's "Review
+  // Revision N" button, so they aren't forced straight past everything else
+  // (Files for Review, prior comments, etc.) the moment a revision is ready.
+  const [showRevisionReviewPage, setShowRevisionReviewPage] = useState(false);
+
+  const [previewFile, setPreviewFile] = useState<any>(null);
+
+  // Phase 4: Set up real-time subscriptions for manuscript updates
+  useEffect(() => {
+    if (!manuscript.id) return;
+
+    const unsubscribe = subscribeToAllManuscriptUpdates(
+      manuscript.id,
+      {
+        onManuscriptChange: () => {
+          onChanged();
+        },
+        onReviewerChange: (updated) => {
+          setReviewerAssignments(updated);
+          showNotification('info', 'Reviewer assignments updated');
+        },
+        onDiscussionChange: (updated) => {
+          setDiscussions(updated);
+        },
+        onStatusChange: () => {
+          onChanged();
+        },
+        onAssignmentChange: () => {
+          onChanged();
+        }
+      }
+    );
+
+    setIsSubscribed(true);
+
+    return () => {
+      unsubscribe();
+      setIsSubscribed(false);
+    };
+  }, [manuscript.id, onChanged]);
+
+  // Phase 4: Notification helper
+  const showNotification = (type: 'success' | 'error' | 'info', message: string) => {
+    setNotification({ type, message });
+    setTimeout(() => setNotification(null), 4000);
   };
 
-  const allReviewsIn = reviewerAssignments.length > 0 && reviewerAssignments.every((r) => r.status === 'SUBMITTED' || r.status === 'DECLINED');
+  // Phase 4: Enhanced error handler with categorization
+  const handleError = async (error: any, context: string) => {
+    const errorInfo = categorizeError(error);
+    console.error(`[${context}]`, errorInfo);
 
-  return (
-    <div className="space-y-5">
-      <button onClick={onBack} className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-700 cursor-pointer">
-        <ArrowLeft className="w-3.5 h-3.5" /> Back to assignments
-      </button>
+    if (errorInfo.recoverable && retryCount < 2) {
+      setRetryCount(retryCount + 1);
+      showNotification('info', `${errorInfo.message} Retrying...`);
+    } else {
+      setError(errorInfo.message);
+      showNotification('error', errorInfo.message);
+    }
+  };
 
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="font-mono text-xs text-slate-400">{manuscript.id}</p>
-            <h2 className="text-lg font-black text-slate-900 mt-1">{manuscript.title}</h2>
-          </div>
-          <StatusBadge status={manuscript.status} />
-        </div>
-        <p className="text-sm text-slate-600 mt-3 leading-relaxed">{manuscript.abstract}</p>
-        {manuscript.cover_letter && (
-          <div className="mt-3 bg-slate-50 rounded-lg p-3 text-xs text-slate-600">
-            <p className="font-bold text-slate-500 mb-1">Cover Letter</p>
-            {manuscript.cover_letter}
-          </div>
-        )}
-      </div>
-
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">{error}</div>}
-
-      {assignment.status === 'INVITED' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-3">You've been assigned this manuscript</h3>
-          <div className="flex gap-2">
-            <button disabled={busy} onClick={() => respond(true)} className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50">
-              <Check className="w-4 h-4" /> Accept
-            </button>
-            <button disabled={busy} onClick={() => respond(false)} className="flex items-center gap-1.5 border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50">
-              <XIcon className="w-4 h-4" /> Decline
-            </button>
-          </div>
-        </div>
-      )}
-
-      {assignment.status === 'ACCEPTED' && assignment.assessment_status === 'NOT_STARTED' && (
-        <EvaluationForm assignmentId={assignment.id} onSubmitted={onChanged} />
-      )}
-
-      {assignment.assessment_status === 'SUBMITTED' && manuscript.status === 'EDITOR_REVIEW' && (
-        <div className="bg-sky-50 border border-sky-200 rounded-2xl p-6 text-xs text-sky-700">
-          Assessment submitted. Waiting for the Coordinator to assign reviewers.
-        </div>
-      )}
-
-      {reviewerAssignments.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h3 className="text-sm font-black text-slate-900 mb-3">Reviewer Feedback</h3>
-          <div className="space-y-3">
-            {reviewerAssignments.map((r) => (
-              <div key={r.id} className="border border-slate-100 rounded-lg p-3 text-xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-slate-700">Reviewer</span>
-                  <span className={`px-2 py-0.5 rounded-full font-bold uppercase text-[10px] ${r.status === 'SUBMITTED' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{r.status}</span>
-                </div>
-                {r.status === 'SUBMITTED' && (
-                  <div className="space-y-1 text-slate-600 mt-1">
-                    <p><strong>Recommendation:</strong> {r.recommendation?.replace(/_/g, ' ')}</p>
-                    <p><strong>To Editor:</strong> {r.comments_to_editor}</p>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {manuscript.status === 'AWAITING_DECISION' && !assignment.recommendation && allReviewsIn && (
-        <RecommendationForm
-          busy={busy}
-          onSubmit={async (rec) => {
-            setBusy(true); setError('');
-            try { await submitEditorRecommendation(manuscript.id, rec); onChanged(); }
-            catch (e: any) { setError(e.message); }
-            finally { setBusy(false); }
-          }}
-        />
-      )}
-
-      {assignment.recommendation && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 text-xs text-emerald-800">
-          Your recommendation: <strong>{assignment.recommendation.replace(/_/g, ' ')}</strong> &mdash; awaiting Coordinator's final decision.
-        </div>
-      )}
-    </div>
-  );
-}
-
-interface ScoreState {
-  scientificMerit: number; noveltyInnovation: number; methodologyQuality: number;
-  literatureAdequacy: number; ethicalCompliance: number; dataReliability: number; writingQuality: number;
-}
-
-function EvaluationForm({ assignmentId, onSubmitted }: { assignmentId: string; onSubmitted: () => void }) {
-  const [scores, setScores] = useState<ScoreState>({
-    scientificMerit: 7, noveltyInnovation: 7, methodologyQuality: 7, literatureAdequacy: 7, ethicalCompliance: 7, dataReliability: 7, writingQuality: 7
-  });
-  const [strengths, setStrengths] = useState('');
-  const [weaknesses, setWeaknesses] = useState('');
-  const [mandatoryRevisions, setMandatoryRevisions] = useState('');
-  const [commentsToCoordinator, setCommentsToCoordinator] = useState('');
-  const [suggested, setSuggested] = useState<{ name: string; email: string; note: string }[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  const setScore = (key: keyof ScoreState, value: number) => setScores((s) => ({ ...s, [key]: value }));
-
-  const submit = async () => {
-    setBusy(true); setError('');
+  // Decision: Accept / Minor Revision / Major Revision / Reject. Separate
+  // from the coordinator's final publish_decision -- this is the editor's
+  // own recommendation, gated server-side on the evaluation already being
+  // submitted (submit_editor_recommendation RPC re-checks assessment_status).
+  // Reject always asks for a required reason + confirmation first; the
+  // recommendation itself is submitted exactly like every other decision.
+  const handleConfirmReject = async (reason: string) => {
+    setDecisionBusy(true);
+    setDecisionError('');
     try {
-      await submitEditorAssessment(assignmentId, {
-        ...scores, strengths, weaknesses, mandatoryRevisions, commentsToCoordinator,
-        suggestedReviewers: suggested.filter((s) => s.name.trim())
-      });
-      onSubmitted();
+      const extra = editorComments.trim();
+      // reason -> p_reason (required server-side outside revision/peer-review rounds) plus the comments the Coordinator sees.
+      await submitEditorRecommendation(manuscript.id, 'REJECT', extra ? reason + '\n\n' + extra : reason, undefined, reason);
+      setEditorComments('');
+      setRedeciding(false);
+      setRejectDialogOpen(false);
+      showNotification('success', 'Recommendation submitted: REJECT');
+      onChanged();
     } catch (e: any) {
-      setError(e.message);
+      setDecisionError(e.message || 'Failed to submit recommendation');
+    } finally {
+      setDecisionBusy(false);
+    }
+  };
+
+  const handleSubmitRecommendation = async (recommendation: ReviewerRecommendation) => {
+    setDecisionBusy(true);
+    setDecisionError('');
+    try {
+      await submitRecommendation(manuscript.id, recommendation, editorComments.trim() || undefined);
+      setEditorComments('');
+      setRedeciding(false);
+      showNotification('success', `Recommendation submitted: ${recommendation.replace(/_/g, ' ')}`);
+      onChanged();
+    } catch (e: any) {
+      setDecisionError(e.message || 'Failed to submit recommendation');
+    } finally {
+      setDecisionBusy(false);
+    }
+  };
+
+  // Phase 3: Collaboration Handlers
+  const handlePostComment = async () => {
+    if (!newComment.trim()) {
+      showNotification('error', 'Please enter a comment');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const { data } = await supabase.auth.getUser();
+      if (!data.user?.id) throw new Error('Not authenticated');
+
+      await retryOperation(
+        () => postDiscussion(manuscript.id, data.user.id, newComment, 'GENERAL'),
+        3,
+        1000
+      );
+
+      setNewComment('');
+      showNotification('success', 'Comment posted successfully');
+      onChanged();
+    } catch (e: any) {
+      await handleError(e, 'Post Comment');
     } finally {
       setBusy(false);
     }
   };
 
-  const scoreFields: [keyof ScoreState, string][] = [
-    ['scientificMerit', 'Scientific Merit'], ['noveltyInnovation', 'Novelty / Innovation'], ['methodologyQuality', 'Methodology'],
-    ['literatureAdequacy', 'Literature Adequacy'], ['ethicalCompliance', 'Ethical Compliance'], ['dataReliability', 'Data Reliability'], ['writingQuality', 'Writing Quality']
+  const handlePostInternalNote = async () => {
+    if (!newInternalNote.trim()) {
+      showNotification('error', 'Please enter an internal note');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const { data } = await supabase.auth.getUser();
+      if (!data.user?.id) throw new Error('Not authenticated');
+
+      await retryOperation(
+        () => postInternalNote(manuscript.id, data.user.id, newInternalNote),
+        3,
+        1000
+      );
+
+      setNewInternalNote('');
+      setShowInternalNotes(false);
+      showNotification('success', 'Internal note posted successfully');
+      onChanged();
+    } catch (e: any) {
+      await handleError(e, 'Post Internal Note');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Compute workflow stages from manuscript status
+  const computeWorkflowStages = () => {
+    const status = manuscript.status;
+    const stages = [
+      { label: 'Submission', stage: 'SUBMITTED' },
+      { label: 'Review', stage: 'UNDER_REVIEW' },
+      { label: 'Copyediting', stage: 'AWAITING_DECISION' },
+      { label: 'Production', stage: 'PUBLISHED' }
+    ];
+
+    const statusOrder: Record<string, number> = {
+      'DRAFT': 0,
+      'SUBMITTED': 1,
+      'EDITOR_REVIEW': 1.5,
+      'UNDER_REVIEW': 2,
+      'REVISION_REQUESTED': 2.5,
+      'AWAITING_DECISION': 3,
+      'ACCEPTED': 3.5,
+      'PUBLISHED': 4,
+      'REJECTED': -1
+    };
+
+    const currentOrder = statusOrder[status] || 0;
+    return stages.map(stage => ({
+      ...stage,
+      done: statusOrder[stage.stage] <= currentOrder && currentOrder >= 0
+    }));
+  };
+
+  // Extract figures/media from uploaded files
+  const extractFigures = (): ManuscriptFileRow[] => {
+    if (!details.files) return [];
+    return details.files.filter(f =>
+      f.file_type && (
+        f.file_type.toLowerCase().includes('figure') ||
+        f.file_type.toLowerCase().includes('table') ||
+        f.file_type.toLowerCase().includes('image') ||
+        f.file_type.toLowerCase().includes('supplementary')
+      )
+    );
+  };
+
+  const tabs = [
+    { id: 'title', label: 'Title & Abstract' },
+    { id: 'contributors', label: 'Contributors' },
+    { id: 'files', label: 'Files for Review' },
+    { id: 'evaluation', label: 'Editor Evaluation' },
+    { id: 'reviews', label: 'Reviews' },
+    { id: 'suggestions', label: 'Suggestions' },
+    { id: 'history', label: 'Review History' },
+    { id: 'revisions', label: 'Revisions' },
+    { id: 'comments', label: 'Collaboration' }
   ];
 
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-      <h3 className="text-sm font-black text-slate-900">Editor Evaluation</h3>
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-2">{error}</div>}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {scoreFields.map(([key, label]) => (
-          <div key={key}>
-            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{label}</label>
-            <input type="number" min={1} max={10} value={scores[key]} onChange={(e) => setScore(key, Number(e.target.value))} className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs" />
-          </div>
-        ))}
-      </div>
-      <textarea value={strengths} onChange={(e) => setStrengths(e.target.value)} rows={2} placeholder="Strengths" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs" />
-      <textarea value={weaknesses} onChange={(e) => setWeaknesses(e.target.value)} rows={2} placeholder="Weaknesses" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs" />
-      <textarea value={mandatoryRevisions} onChange={(e) => setMandatoryRevisions(e.target.value)} rows={2} placeholder="Mandatory revisions (if any)" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs" />
-      <textarea value={commentsToCoordinator} onChange={(e) => setCommentsToCoordinator(e.target.value)} rows={2} placeholder="Comments to Coordinator" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs" />
-
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <label className="text-xs font-bold text-slate-600">Suggested Reviewers</label>
-          <button onClick={() => setSuggested([...suggested, { name: '', email: '', note: '' }])} className="text-[11px] font-bold text-[#008751] cursor-pointer flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>
+  if (isRevisionReviewPage && showRevisionReviewPage) {
+    return (
+      <div className="w-full h-full flex flex-col bg-white overflow-hidden">
+        <div className="shrink-0 sticky top-0 z-10 bg-white border-b border-slate-200 px-8 py-4">
+          <button
+            onClick={() => setShowRevisionReviewPage(false)}
+            className="text-slate-600 hover:text-slate-900 flex items-center gap-1 text-xs font-bold"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </button>
         </div>
-        <div className="space-y-2">
-          {suggested.map((s, i) => (
-            <div key={i} className="grid grid-cols-3 gap-2">
-              <input value={s.name} onChange={(e) => setSuggested(suggested.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} placeholder="Name" className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs" />
-              <input value={s.email} onChange={(e) => setSuggested(suggested.map((x, j) => j === i ? { ...x, email: e.target.value } : x))} placeholder="Email" className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs" />
-              <div className="flex gap-1">
-                <input value={s.note} onChange={(e) => setSuggested(suggested.map((x, j) => j === i ? { ...x, note: e.target.value } : x))} placeholder="Note" className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs flex-1" />
-                <button onClick={() => setSuggested(suggested.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 cursor-pointer"><Trash2 className="w-4 h-4" /></button>
+        <div className="flex-1 overflow-y-auto">
+          <EditorRevisionReview
+            manuscriptTitle={manuscript.title || 'Manuscript'}
+            manuscriptId={manuscript.id}
+            revisions={details.revisions || []}
+            reviewerAssignments={reviewerAssignments || []}
+            profiles={details.profiles}
+            onSubmitSuccess={() => {
+              // submit_editor_recommendation() marks the revision COMPLETED
+              // (0040_peer_review_editor_comments.sql), so isRevisionReviewPage
+              // naturally flips false on the next render and the Editor lands
+              // back on the normal tabbed workspace either way.
+              onChanged();
+              setShowRevisionReviewPage(false);
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full h-full flex bg-white overflow-hidden">
+      {/* Phase 4: Notification Toast */}
+      {notification && (
+        <div className={`fixed top-4 right-4 px-4 py-3 rounded-lg shadow-lg text-white text-sm font-semibold z-50 animate-pulse ${
+          notification.type === 'success' ? 'bg-emerald-600' :
+          notification.type === 'error' ? 'bg-red-600' :
+          'bg-blue-600'
+        }`}>
+          {notification.message}
+        </div>
+      )}
+
+      {/* Phase 4: Subscription Status Indicator */}
+      {isSubscribed && (
+        <div className="fixed top-4 left-4 flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-200 z-40">
+          <span className="w-2 h-2 bg-emerald-600 rounded-full animate-pulse"></span>
+          Live Updates Active
+        </div>
+      )}
+
+      <ReviewerReplacementAlert
+        manuscriptId={manuscript.id}
+        manuscriptTitle={manuscript.title}
+        manuscriptStatus={manuscript.status}
+        reviewerAssignments={reviewerAssignments}
+        pendingReplacementCount={getPendingEditorSuggestions(
+          details.suggestedReviewers || [], details.editorReviewerActions || [],
+          reviewerAssignments.length > 0 ? Math.max(...reviewerAssignments.map(a => a.revision_number ?? 0)) : 0
+        ).length}
+        pendingReplacementEmails={getPendingEditorSuggestions(
+          details.suggestedReviewers || [], details.editorReviewerActions || [],
+          reviewerAssignments.length > 0 ? Math.max(...reviewerAssignments.map(a => a.revision_number ?? 0)) : 0
+        ).map(s => s.email.toLowerCase())}
+        onReplacementSelected={onChanged}
+      />
+
+      {/* LEFT SIDEBAR */}
+      <EditorEvaluationSidebar
+        details={details}
+        activeTab={sidebarSection}
+        onTabChange={setSidebarSection}
+      />
+
+      {/* MAIN CONTENT */}
+      <main className="flex-1 flex flex-col overflow-hidden relative">
+        {/* Header with Breadcrumb */}
+        <div className="bg-white border-b border-slate-200 px-8 py-4 shrink-0">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={onBack}
+                className="text-slate-600 hover:text-slate-900 flex items-center gap-1 text-xs font-bold"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </button>
+              <div className="flex items-center gap-2 text-xs text-slate-600">
+                <button onClick={onBack} className="hover:text-slate-900 hover:underline">Dashboard</button>
+                <span>&gt;</span>
+                <button onClick={onBack} className="hover:text-slate-900 hover:underline">Editorial Desk</button>
+                <span>&gt;</span>
+                <button onClick={onBack} className="hover:text-slate-900 hover:underline">Manuscripts</button>
+                <span>&gt;</span>
+                <span className="font-bold text-slate-900">{manuscript.id}</span>
               </div>
             </div>
-          ))}
+            {/* Editor Profile - Moved to Header */}
+            <div className="flex items-center gap-3 bg-slate-50 rounded-lg px-4 py-2 border border-slate-200">
+              <div className="w-8 h-8 bg-emerald-500 rounded-full text-white flex items-center justify-center font-bold text-xs">
+                {currentUser?.name?.charAt(0).toUpperCase() || 'E'}
+              </div>
+              <div>
+                <p className="font-semibold text-xs text-slate-900">{currentUser?.name || 'Editor'}</p>
+                <p className="text-[10px] text-slate-600">{currentUser?.role || 'Editor'}</p>
+              </div>
+            </div>
+          </div>
+          <h1 className="text-lg font-black text-slate-900 mb-1">{manuscript.title || 'Manuscript Title'}</h1>
+          <div className="flex items-center gap-3">
+            {assignmentAccepted ? (
+              <>
+                <span className="bg-emerald-100 text-emerald-700 text-xs px-3 py-1 rounded-full font-bold">
+                  ✓ Assignment Accepted
+                </span>
+                {evaluationSubmitted ? (
+                  <span className="bg-blue-100 text-blue-700 text-xs px-3 py-1 rounded-full font-bold">
+                    ✓ Evaluation Submitted
+                  </span>
+                ) : (
+                  <span className="bg-amber-100 text-amber-700 text-xs px-3 py-1 rounded-full font-bold">
+                    ⏳ Evaluation In Progress
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="bg-slate-100 text-slate-700 text-xs px-3 py-1 rounded-full font-bold">{assignment.status || 'Pending'}</span>
+            )}
+          </div>
         </div>
-      </div>
 
-      <button disabled={busy} onClick={submit} className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-5 py-2.5 rounded-lg cursor-pointer disabled:opacity-50 flex items-center gap-1.5">
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Submit Assessment to Coordinator
-      </button>
+
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          {/* CENTER CONTENT - SCROLLABLE TABS */}
+          <div className="flex-1 flex flex-col overflow-hidden min-w-0" style={{ paddingRight: '320px' }}>
+            {/* Tabs Bar - Only show for Dashboard */}
+            {sidebarSection === 'dashboard' && (
+              <div className="bg-white border-b border-slate-200 flex-shrink-0 overflow-x-scroll" style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 #f1f5f9', scrollbarGutter: 'stable' }}>
+                <div className="flex gap-8 px-8 py-0 min-w-max">
+                  {[
+                    { id: 'status', label: 'Current Status' },
+                    { id: 'files', label: 'Files for Review (1)' },
+                    { id: 'evaluation', label: 'Editor Evaluation (2)' },
+                    { id: 'reviews', label: 'Reviewers (3)' },
+                    { id: 'revisions', label: 'Revisions (4)' }
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id as 'status' | 'files' | 'evaluation' | 'decision' | 'reviews' | 'revisions' | 'comments')}
+                      className={`px-1 py-4 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
+                        activeTab === tab.id
+                          ? 'text-[#008751] border-[#008751]'
+                          : 'text-slate-600 border-transparent hover:text-slate-900'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Scrollable Content Area */}
+            <div className="flex-1 overflow-y-scroll overflow-x-scroll p-8" style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 #f1f5f9', scrollbarGutter: 'stable' }}>
+              {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4 mb-6">{error}</div>}
+
+              {/* DASHBOARD TABS CONTENT - Only show when on dashboard */}
+
+              {/* CURRENT STATUS -- mirrors the Coordinator's own "Current
+                  Status" card (OverviewTab.tsx): one Status/description
+                  block, plus a single colored action box for whichever one
+                  thing is actually pending on the Editor right now -- not a
+                  multi-step checklist. Purely additive -- doesn't replace or
+                  change any other tab. */}
+              {sidebarSection === 'dashboard' && activeTab === 'status' && (() => {
+                // Same fallback as EditorEvaluationFormTab.tsx's hasSubmittedEvaluation:
+                // a revision cycle resets assessment_status back to NOT_STARTED
+                // without clearing the submitted screening_responses, so relying
+                // on evaluationSubmitted/scientific_merit alone left this stuck
+                // "not done" forever once a revision loop started.
+                const evaluationDone = evaluationSubmitted || (assignment as any).scientific_merit != null || (assignment.screening_responses?.length ?? 0) > 0;
+                const revisionN = latestRevisionForReview?.revision_number;
+                // Scoped to the CURRENT revision round's own reviewer_assignments
+                // rows (coordinator_send_revision_to_reviewers always stamps
+                // re-invites with that revision's number) -- otherwise the
+                // original round's already-submitted reviews (revision_number 0)
+                // make this read "done" before the re-check reviewers have even
+                // been re-invited, let alone reported back.
+                // latestRevisionForReview can be an EDITOR_SCREENING-origin
+                // revision (predating peer review) whose number is already
+                // > 0, while the FIRST peer-review round's reviewer_
+                // assignments are always stamped revision_number 0 -- only a
+                // genuine re-review round stamps a PEER_REVIEW-origin
+                // revision's number. Fall back to 0 unless the latest
+                // revision is actually PEER_REVIEW-origin.
+                const currentPeerReviewRoundNumber = latestRevisionForReview?.origin === 'PEER_REVIEW' ? (revisionN || 0) : 0;
+                const activeReviews = (reviewerAssignments || []).filter(
+                  r => r.status !== 'DECLINED' && (r.revision_number || 0) === currentPeerReviewRoundNumber
+                );
+                const hasRequiredReviews = activeReviews.length > 0 && activeReviews.every(r => r.status === 'SUBMITTED');
+                const isPeerReviewRound = !isRevisionReviewPage && manuscript.status === 'AWAITING_DECISION' && (reviewerAssignments?.length || 0) > 0;
+                const editorHasSuggestedReviewers = (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR');
+                const readyToSelectReviewers = manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT' && !editorHasSuggestedReviewers;
+                // A stale recommendation (e.g. the earlier 'ADDITIONAL_REVIEW'
+                // call that sent this back for a reviewer re-check) must not
+                // permanently block this from ever showing "ready" again once
+                // the re-check reviews are actually in -- only a recommendation
+                // submitted AFTER the latest review counts as still current.
+                // Same freshness comparison as the Reviews tab's own
+                // recommendationIsCurrent.
+                const latestReviewSubmittedAt = activeReviews.reduce<string | null>((latest, r) => (
+                  r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
+                ), null);
+                // No reviewers invited for this specific round (activeReviews
+                // is scoped to the current revision_number) means there's
+                // nothing to compare the recommendation's freshness against
+                // via reviews -- fall back to comparing it against when this
+                // revision round itself was requested (same idea as the
+                // Reviews tab's isRevisionDecision branch), so a genuinely
+                // new resubmission still correctly invalidates a stale
+                // recommendation from an earlier round instead of always
+                // reading as current. Without this, the Status line below
+                // stayed stuck on the generic stage label instead of
+                // reflecting a decision just made with no reviewer re-check.
+                const recommendationIsCurrent = !!assignment.recommendation && !!assignment.recommendation_submitted_at && (
+                  activeReviews.length > 0
+                    ? (!!latestReviewSubmittedAt && assignment.recommendation_submitted_at > latestReviewSubmittedAt)
+                    : (!!latestRevisionForReview && assignment.recommendation_submitted_at > latestRevisionForReview.requested_at)
+                );
+                const readyForPeerReviewDecision = isPeerReviewRound && hasRequiredReviews && !!manuscript.reviews_released_at && !recommendationIsCurrent;
+                const reviewsSubmittedCount = activeReviews.filter(r => r.status === 'SUBMITTED').length;
+
+                const getStatusDescription = (): string => {
+                  if (pendingProductionVerification) return 'A proof is ready for your review -- Approve/Publish or request corrections.';
+                  // Terminal, Coordinator-confirmed outcomes take priority
+                  // over everything below -- without this, an already
+                  // Accepted/Rejected/Published manuscript kept saying "Your
+                  // recommendation is with the Coordinator" forever, even
+                  // though the Coordinator had already acted on it.
+                  if (manuscript.status === 'REJECTED') return 'This manuscript has been rejected.';
+                  if (manuscript.status === 'PUBLISHED') return 'This manuscript has been published.';
+                  if (manuscript.status === 'ACCEPTED' && (!production || production.production_status === 'NOT_STARTED')) {
+                    return 'Manuscript accepted -- awaiting production.';
+                  }
+                  if (!evaluationDone) return 'Complete your editorial screening evaluation.';
+                  if (readyToSelectReviewers) return 'Select 2 reviewers to begin peer review.';
+                  if (editorHasSuggestedReviewers && manuscript.status === 'EDITOR_REVIEW') return 'Reviewers selected -- awaiting invitation.';
+                  if (isRevisionReviewPage) return `Revision ${revisionN} is ready for your review.`;
+                  if (isPeerReviewRound && !hasRequiredReviews) return 'Waiting for reviewers to submit their reports.';
+                  if (isPeerReviewRound && hasRequiredReviews && !manuscript.reviews_released_at) return 'Reviews are in -- waiting for the Coordinator to send them to you.';
+                  if (readyForPeerReviewDecision) return 'All reviews are in -- make your decision.';
+                  if (manuscript.status === 'UNDER_REVIEW') return 'Reviewers have been invited and peer review is underway.';
+                  if (revisionN && manuscript.status === 'REVISION_REQUESTED') {
+                    return latestRevisionForReview?.status === 'AWAITING_AUTHOR_UPLOAD'
+                      ? `Waiting for the author to submit Revision ${revisionN}.`
+                      : `Revision ${revisionN} submitted -- waiting for the Coordinator to send it to you.`;
+                  }
+                  if (assignment.recommendation) return 'Your recommendation is with the Coordinator.';
+                  return 'Processing.';
+                };
+
+                return (
+                  <div className="max-w-2xl space-y-6">
+                    <div>
+                      <h2 className="text-lg font-black text-slate-900">Current Status</h2>
+                      <p className="text-sm text-slate-500 mt-1">Where this manuscript stands right now, and what you need to do next.</p>
+                    </div>
+
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                      <div className="space-y-4">
+                        <div>
+                          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Status</p>
+                          <p className="text-lg font-bold text-slate-900">
+                            {/* Once the Editor's own recommendation is submitted
+                                and still current (not a stale leftover from an
+                                earlier round), reflect that decision directly
+                                here instead of the generic stage label -- the
+                                Coordinator hasn't acted on it yet, but the
+                                Editor's own status should already read as
+                                decided, not stuck at "Peer Review" forever.
+                                But once the Coordinator HAS acted and the
+                                manuscript reached a real terminal state
+                                (Accepted/Rejected/Published), that outcome
+                                takes priority -- otherwise this kept showing
+                                "Decision Submitted: Accept" forever instead of
+                                updating to the manuscript's actual final
+                                status. Same for once reviewers are chosen and
+                                invited (status moves to UNDER_REVIEW) -- the
+                                Editor's ACCEPT recommendation already did its
+                                job kicking off peer review, so the Status
+                                should read "PEER REVIEW" from here on, not
+                                keep repeating the stale decision. "Decision
+                                Submitted" is only ever the right thing to
+                                show while the manuscript is still sitting at
+                                EDITOR_REVIEW/AWAITING_DECISION waiting on the
+                                Coordinator -- and not even then once the
+                                Editor has already picked their 2 reviewers
+                                (editorHasSuggestedReviewers). Choosing
+                                reviewers doesn't touch manuscript.status
+                                itself (that only moves to UNDER_REVIEW once
+                                the Coordinator sends the actual invitations),
+                                so without this extra check the Status stayed
+                                on "Decision Submitted: Accept" for that whole
+                                gap even though peer review has effectively
+                                already started from the Editor's side. */}
+                            {editorHasSuggestedReviewers && manuscript.status === 'EDITOR_REVIEW'
+                              ? 'PEER REVIEW'
+                              : recommendationIsCurrent && ['EDITOR_REVIEW', 'AWAITING_DECISION'].includes(manuscript.status)
+                              ? assignment.recommendation === 'ADDITIONAL_REVIEW'
+                                ? 'Decision Submitted: Peer Review 2'
+                                : `Decision Submitted: ${assignment.recommendation?.replace(/_/g, ' ')}`
+                              : getRoleAwareStatusLabel(manuscript, 'EDITOR', latestRevisionForReview, production?.production_status)}
+                          </p>
+                          {revisionN != null && (
+                            <p className="text-xs font-bold text-slate-500 mt-1">Revision: {revisionN}</p>
+                          )}
+                          <p className="text-sm text-slate-600 mt-1">{getStatusDescription()}</p>
+                        </div>
+
+                        {/* Module 97 -- Editorial Timeline: the deadline the
+                            Coordinator set for the first editorial
+                            evaluation, visible here so the Editor doesn't
+                            need to hunt for it elsewhere. */}
+                        {assignment.timeline_start_date && assignment.timeline_end_date && (
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Editorial Timeline</p>
+                            <p className="text-sm font-semibold text-slate-800">Start: {formatTimelineDate(assignment.timeline_start_date)}</p>
+                            <p className="text-sm font-semibold text-slate-800">Deadline: {formatTimelineDate(assignment.timeline_end_date)}</p>
+                          </div>
+                        )}
+
+                        {pendingProductionVerification && (
+                          <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+                            <p className="text-sm font-bold text-teal-900 mb-1">Proof ready for your review</p>
+                            <p className="text-xs text-teal-800 mb-3">Approve/Publish sends it to the Author for final review; Corrections Required sends it back to the GD Member.</p>
+                            <button
+                              onClick={() => setSidebarSection('production')}
+                              className="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2.5 rounded-lg transition"
+                            >
+                              Review Proofreading Corrections
+                            </button>
+                          </div>
+                        )}
+
+                        {!evaluationDone && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                            <p className="text-sm font-bold text-amber-900 mb-1">Editorial screening not yet complete</p>
+                            <p className="text-xs text-amber-800 mb-3">Answer the screening questionnaire to decide the manuscript's next step.</p>
+                            <button
+                              onClick={() => setActiveTab('evaluation')}
+                              className="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold py-2.5 rounded-lg transition"
+                            >
+                              Go to Editor Evaluation
+                            </button>
+                          </div>
+                        )}
+
+                        {readyToSelectReviewers && (
+                          <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+                            <p className="text-sm font-bold text-teal-900 mb-1">Ready to select reviewers</p>
+                            <p className="text-xs text-teal-800 mb-3">Choose 2 reviewers so peer review can begin.</p>
+                            <button
+                              onClick={() => setActiveTab('reviews')}
+                              className="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2.5 rounded-lg transition"
+                            >
+                              Select 2 Reviewers
+                            </button>
+                          </div>
+                        )}
+
+                        {readyForPeerReviewDecision && (
+                          <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+                            <p className="text-sm font-bold text-teal-900 mb-1">
+                              {assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Re-check reviews are in -- ready for your decision' : 'All reviews are in -- ready for your decision'}
+                            </p>
+                            <p className="text-xs text-teal-800 mb-3">Review the reports and decide whether to accept or send back for revision.</p>
+                            <button
+                              onClick={() => setActiveTab('reviews')}
+                              className="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2.5 rounded-lg transition"
+                            >
+                              {assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Evaluate Re-review' : 'Go to Reviews'}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Gated on isRevisionReviewPage itself (not just "no
+                            editor_decision yet") -- a revision the author has
+                            submitted but the Coordinator hasn't forwarded yet
+                            (status REVISION_SUBMITTED) looked identical to a
+                            genuinely-open one before this fix, so the button
+                            showed but did nothing when clicked. */}
+                        {isRevisionReviewPage && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                            <p className="text-sm font-bold text-amber-900 mb-1">Revision {revisionN} is ready for your review</p>
+                            <p className="text-xs text-amber-800 mb-3">The author has submitted their revision. Review it and decide.</p>
+                            <button
+                              onClick={() => setShowRevisionReviewPage(true)}
+                              className="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold py-2.5 rounded-lg transition"
+                            >
+                              Review Revision {revisionN} (submitted by Author)
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Scoped to activeReviews (the CURRENT revision
+                            round's own reviewer_assignments) -- the raw
+                            reviewerAssignments count mixes in every earlier
+                            round's rows too, which showed a misleading
+                            "0 / 4" for a round that never had its own
+                            reviewers invited in the first place. */}
+                        {/* Once the manuscript has fully left the peer-review/
+                            decision flow, the last round's tally is history,
+                            not "current status" -- this card must track the
+                            live decision flow, not keep showing a stale
+                            review count once production has started. */}
+                        {!['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status) && activeReviews.length > 0 && (
+                          <div>
+                            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Review Progress</p>
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-slate-600">Reviews Submitted</span>
+                                <span className="font-bold text-slate-900">{reviewsSubmittedCount} / {activeReviews.length}</span>
+                              </div>
+                              <div className="w-full bg-slate-200 rounded-full h-2">
+                                <div
+                                  className="bg-emerald-600 h-2 rounded-full transition-all"
+                                  style={{ width: `${activeReviews.length > 0 ? (reviewsSubmittedCount / activeReviews.length) * 100 : 0}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {sidebarSection === 'dashboard' && activeTab === 'files' && (() => {
+                const allFiles = details.files || [];
+                const originalFiles = allFiles.filter(f => !f.revision_id);
+                const sortedRevisions = [...(details.revisions || [])].sort((a, b) => a.revision_number - b.revision_number);
+
+                const renderFileList = (files: typeof allFiles) => (
+                  <div className="space-y-3">
+                    {files.map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 transition">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📄</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          {file.public_url && (
+                            <>
+                              <button
+                                onClick={() => setPreviewFile(file)}
+                                className="text-slate-600 hover:text-slate-900 p-2"
+                                title="View"
+                              >
+                                👁️
+                              </button>
+                              <a href={file.public_url} download={file.file_name} className="text-slate-600 hover:text-slate-900 p-2" title="Download">📥</a>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+
+                return (
+                  <div className="space-y-6">
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                      <h3 className="text-sm font-black text-slate-900 mb-4">ORIGINAL SUBMISSION FILES ({originalFiles.length})</h3>
+                      {originalFiles.length > 0 ? renderFileList(originalFiles) : (
+                        <div className="text-center py-8 text-slate-400 text-sm">No original submission files.</div>
+                      )}
+                    </div>
+                    {sortedRevisions.map((rev) => {
+                      const revFiles = allFiles.filter(f => f.revision_id === rev.id);
+                      return (
+                        <div key={rev.id} className="bg-white border border-slate-200 rounded-2xl p-6">
+                          <h3 className="text-sm font-black text-slate-900 mb-4">REVISION {rev.revision_number} — UPLOADED FILES ({revFiles.length})</h3>
+                          {revFiles.length > 0 ? renderFileList(revFiles) : (
+                            <div className="text-center py-8 text-slate-400 text-sm">No files uploaded for this revision yet.</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+            {previewFile && (
+              <FilePreviewModal
+                isOpen={!!previewFile}
+                onClose={() => setPreviewFile(null)}
+                fileName={previewFile.file_name}
+                fileType={previewFile.file_type}
+                fileSize={previewFile.file_size}
+                publicUrl={previewFile.public_url || undefined}
+              />
+            )}
+
+            {sidebarSection === 'dashboard' && activeTab === 'evaluation' && (
+              <EditorEvaluationFormTab
+                assignmentId={assignment.id}
+                manuscriptId={manuscript.id}
+                assignment={assignment}
+                suggestedReviewers={details.suggestedReviewers}
+                revisions={details.revisions || []}
+                onSubmitSuccess={onChanged}
+                onMoveToNextStage={() => {
+                  // Record the decision and stay right here on the
+                  // now-submitted Evaluation tab -- previously this jumped
+                  // straight to the Reviewers tab, moving the Editor away
+                  // before they could see their own recorded decision. The
+                  // "choose reviewers" banner shows itself once they navigate
+                  // there, for as long as it's actually still pending.
+                  onChanged();
+                }}
+              />
+            )}
+
+            {sidebarSection === 'dashboard' && activeTab === 'reviews' && (() => {
+              const pendingReplacements = getPendingEditorSuggestions(details.suggestedReviewers || [], details.editorReviewerActions || []);
+              // Only show this card once real reviewer assignments exist --
+              // before that, a pending selection is already shown by
+              // EditorReviewerSelection's own "Reviewers Selected" card
+              // below, so repeating it here as "Pending Invitation" would
+              // just be the same 2 names twice.
+              if ((reviewerAssignments?.length || 0) === 0) return null;
+              const totalCount = (reviewerAssignments?.length || 0) + pendingReplacements.length;
+              return (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">PEER REVIEWS ({totalCount})</h3>
+                {totalCount > 0 ? (
+                  <div className="space-y-6">
+                    {(() => {
+                      // Group by revision round so re-review comments are
+                      // read together under their own "Revision N" heading
+                      // instead of interleaved with the original round.
+                      const grouped = new Map<number, typeof reviewerAssignments>();
+                      (reviewerAssignments || []).forEach((ra) => {
+                        const key = ra.revision_number || 0;
+                        if (!grouped.has(key)) grouped.set(key, []);
+                        grouped.get(key)!.push(ra);
+                      });
+                      const groupKeys = Array.from(grouped.keys()).sort((a, b) => a - b);
+                      return groupKeys.map((revNum) => (
+                        <div key={revNum} className="space-y-4">
+                          <h4 className="text-xs font-black text-purple-700 uppercase tracking-wide">
+                            {revNum > 0 ? `Revision ${revNum} Comments` : 'Original Review Comments'}
+                          </h4>
+                          {grouped.get(revNum)!.map((ra) => (
+                      <div key={ra.id} className={`border rounded-lg p-4 ${
+                        (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                          ? 'border-slate-200 bg-slate-100 opacity-70'
+                          : 'border-slate-200'
+                      }`}>
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {details.profiles.get(ra.reviewer_id)?.name || 'Unknown Reviewer'}
+                            </p>
+                            <p className="text-xs text-slate-600">{details.profiles.get(ra.reviewer_id)?.email}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className={`inline-flex text-xs font-bold px-2 py-1 rounded ${
+                              (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                                ? 'bg-slate-200 text-slate-600'
+                                : getEditorFacingReviewerStatus(ra) === 'SUBMITTED'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : getEditorFacingReviewerStatus(ra) === 'OVERDUE'
+                                ? 'bg-red-100 text-red-700'
+                                : getEditorFacingReviewerStatus(ra) === 'ACCEPTED'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {(details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                                ? '↻ Replaced'
+                                : getEditorFacingReviewerStatus(ra) === 'OVERDUE' ? '🔴 Overdue' : (getEditorFacingReviewerStatus(ra) || 'Pending')}
+                            </span>
+                            {ra.submitted_at && (
+                              <p className="text-xs text-slate-500 mt-1">{formatDate(ra.submitted_at)}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <ReviewerReplacementInline assignment={ra} excludedEmails={new Set([
+                          ...(grouped.get(revNum) || []).map(a => details.profiles.get(a.reviewer_id)?.email?.toLowerCase()).filter((e): e is string => !!e),
+                          ...getPendingEditorSuggestions(details.suggestedReviewers || [], details.editorReviewerActions || [], revNum).map(sg => sg.email.toLowerCase())
+                        ])} hasPendingReplacement={getPendingEditorSuggestions(details.suggestedReviewers || [], details.editorReviewerActions || [], revNum).some(s => s.replaces_assignment_id === ra.id)} onReplaced={onChanged} />
+
+                        {ra.status === 'SUBMITTED' && (
+                          manuscript.reviews_released_at ? (
+                          <div className="mt-3 space-y-3">
+                            <p className="text-sm text-slate-700">
+                              <span className="font-semibold">Recommendation:</span>{' '}
+                              <span className={`font-bold ${ra.recommendation ? RECOMMENDATION_TEXT_COLOR[ra.recommendation] || '' : ''}`}>
+                                {ra.recommendation?.replace(/_/g, ' ') || 'N/A'}
+                              </span>
+                            </p>
+
+                            {(ra.screening_responses?.length ?? 0) > 0 && (
+                              <div className="space-y-1.5">
+                                {ra.screening_responses.map((r, qIdx) => (
+                                  <div key={r.question_id} className="border border-slate-200 rounded p-2.5 bg-slate-50">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <p className="text-xs font-bold text-slate-800">{qIdx + 1}. {PEER_REVIEW_QUESTION_LABELS[r.question_id] || r.question_id}</p>
+                                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${r.answer ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                        {r.answer ? 'Yes' : 'No'}
+                                      </span>
+                                    </div>
+                                    {r.reason && <p className="text-xs text-slate-600">{r.reason}</p>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {ra.comments_to_author && (
+                              <div className="bg-slate-50 rounded p-3 text-sm text-slate-700">
+                                <p className="font-semibold text-xs uppercase tracking-wide text-slate-500 mb-1">Comments to Author</p>
+                                {ra.comments_to_author}
+                              </div>
+                            )}
+                            {ra.comments_to_editor && (
+                              <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-slate-700">
+                                <p className="font-semibold text-xs uppercase tracking-wide text-blue-700 mb-1">Confidential Comments to Editor</p>
+                                {ra.comments_to_editor}
+                              </div>
+                            )}
+                          </div>
+                          ) : (
+                            // Submitted, but the Coordinator hasn't released this
+                            // round's reviews yet (coordinator_send_reviews_to_editor,
+                            // see manuscripts.reviews_released_at) -- the Editor
+                            // should know a review is in without seeing its content
+                            // early, same gate the Decision tab already enforces.
+                            <div className="mt-3 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                              <p className="text-xs text-slate-500 italic">Review submitted -- comments will be visible once the Coordinator releases this round's reviews.</p>
+                            </div>
+                          )
+                        )}
+
+                        {ra.status === 'ACCEPTED' && (
+                          <p className="text-xs text-slate-500 italic mt-3">Awaiting review submission...</p>
+                        )}
+                      </div>
+                          ))}
+                        </div>
+                      ));
+                    })()}
+
+                    {/* Replacement reviewers the Editor has selected but the
+                        Coordinator hasn't invited yet -- see
+                        ReviewerReplacementAlert.tsx / editor_select_replacement_reviewer(). */}
+                    {pendingReplacements.map((s) => (
+                      <div key={s.id} className="border border-amber-200 bg-amber-50/50 rounded-lg p-4">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <p className="font-semibold text-slate-900">{s.name}</p>
+                            <p className="text-xs text-slate-600">{s.email}</p>
+                          </div>
+                          <span className="inline-flex text-xs font-bold px-2 py-1 rounded bg-amber-100 text-amber-700">
+                            Pending Invitation
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 italic mt-3">Selected as a replacement reviewer -- awaiting invitation.</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet.</div>
+                )}
+              </div>
+              );
+            })()}
+
+            {sidebarSection === 'dashboard' && activeTab === 'reviews' && (() => {
+              const editorAlreadySelected = (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR');
+              const authorSuggestions = (details.suggestedReviewers || []).filter(s => s.suggested_by !== 'EDITOR');
+              const canSelectAuthorSuggestionBase = manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT';
+              return (
+              <div className="space-y-6">
+                {canSelectAuthorSuggestionBase && !editorAlreadySelected && (reviewerAssignments?.length || 0) === 0 && !reviewerBannerDismissed && (
+                  <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
+                    {(details.revisions || []).length > 0 ? (
+                      <>
+                        <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm shrink-0">
+                          <CheckCircle className="w-4 h-4" /> Revision Approved
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <p className="text-sm text-emerald-800 font-bold">Now select 2 reviewers to continue.</p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-emerald-800 font-bold">Please choose 2 reviewers.</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setReviewerBannerDismissed(true)}
+                      className="ml-auto text-emerald-600 hover:text-emerald-800 shrink-0"
+                    >
+                      <XIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+                {(() => {
+                  // Renders the Author's suggested reviewers, each with its
+                  // own "Select" toggle wired into the SAME staged-selection
+                  // state as the Reviewer Board pool above -- any mix of pool
+                  // picks and Author-suggestion picks is fine (both, one of
+                  // each, etc.), freely checked/unchecked, and nothing is
+                  // written to the server until the single Confirm button at
+                  // the bottom is pressed.
+                  const renderAuthorSuggestionsCard = (state?: ReturnType<typeof useEditorReviewerSelection>) => (
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                      <h3 className="text-sm font-black text-slate-900 mb-4">REVIEWER SUGGESTIONS BY AUTHOR ({authorSuggestions.length})</h3>
+                      {authorSuggestions.length > 0 ? (
+                        <div className="space-y-3">
+                          {authorSuggestions.map((reviewer) => {
+                            const isAssigned = reviewerAssignments?.some(r => details.profiles.get(r.reviewer_id)?.email === reviewer.email);
+                            const isCommitted = state ? state.promotedFromIds.has(reviewer.id) : false;
+                            const isTentative = state ? state.selectedSuggestionIds.includes(reviewer.id) : false;
+                            const canToggle = state ? canSelectAuthorSuggestionBase && !isAssigned && !isCommitted : false;
+                            const Wrapper = canToggle ? 'button' : 'div';
+                            return (
+                              <Wrapper
+                                key={reviewer.id}
+                                type={canToggle ? 'button' : undefined}
+                                onClick={canToggle ? () => state!.toggleSuggestion(reviewer.id) : undefined}
+                                disabled={canToggle ? state!.submitting : undefined}
+                                {...(canToggle ? { role: 'checkbox', 'aria-checked': isTentative } : {})}
+                                className={`w-full text-left border rounded-lg p-4 transition ${canToggle ? 'cursor-pointer hover:border-slate-300 disabled:opacity-50' : ''} ${
+                                  isAssigned || isTentative ? 'bg-emerald-50 border-emerald-200' : isCommitted ? 'bg-amber-50 border-amber-200' : 'border-slate-200'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between mb-2">
+                                  <div className="flex-1">
+                                    <p className="font-semibold text-slate-900">{reviewer.name}</p>
+                                    <p className="text-xs text-slate-600">{reviewer.email}</p>
+                                    {reviewer.department && (
+                                      <p className="text-xs text-slate-500 mt-1">Department: {reviewer.department}</p>
+                                    )}
+                                    {reviewer.note && (
+                                      <p className="text-xs text-slate-500 mt-1">Research Area: {reviewer.note}</p>
+                                    )}
+                                    <span className="inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                                      Suggested by author
+                                    </span>
+                                  </div>
+                                  {isAssigned ? (
+                                    <span className="text-xs font-bold px-2 py-1 bg-emerald-100 text-emerald-700 rounded shrink-0">✓ Assigned</span>
+                                  ) : isCommitted ? (
+                                    <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 shrink-0">Awaiting Invitation</span>
+                                  ) : canToggle ? (
+                                    <SelectionCheckbox checked={isTentative} disabled={state!.submitting} />
+                                  ) : null}
+                                </div>
+                              </Wrapper>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-slate-400 text-sm">No suggested reviewers yet.</div>
+                      )}
+                    </div>
+                  );
+
+                  // Order: "Select N Reviewer(s)" heading + reviewer list, then
+                  // the Author's suggestions, then the Confirm button at the
+                  // very bottom -- rather than Confirm sitting directly under
+                  // the reviewer list. Once reviewer selection is done (the
+                  // manuscript has moved past EDITOR_REVIEW/ACCEPT), this card
+                  // is stale noise -- the real, invited reviewers already show
+                  // in the Peer Reviews list above, so it's dropped entirely
+                  // rather than rendered as a static, un-toggleable leftover.
+                  if (!canSelectAuthorSuggestionBase) return null;
+                  return (
+                    <ReviewerSelectionWithAuthorSuggestions
+                      manuscriptId={manuscript.id}
+                      suggestedReviewers={details.suggestedReviewers || []}
+                      onSubmitSuccess={onChanged}
+                      reviewerAssignments={reviewerAssignments}
+                      profiles={details.profiles}
+                    >
+                      {renderAuthorSuggestionsCard}
+                    </ReviewerSelectionWithAuthorSuggestions>
+                  );
+                })()}
+              </div>
+              );
+            })()}
+
+            {/* Editor decision form -- lives here (below the peer reviews) rather than a separate tab so the Editor writes their comments and decides right next to what they just read. */}
+            {sidebarSection === 'dashboard' && activeTab === 'reviews' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+                {(() => {
+                  const latestRevision = getLatestRevision(details.revisions);
+                  // Same ambiguity as isRevisionReviewPage above: revision.
+                  // status = 'UNDER_REVIEW' means EITHER "the Editor is
+                  // actively deciding this round" (manuscript EDITOR_REVIEW)
+                  // OR "the Reviewers are re-checking it after the Editor
+                  // asked for that" (manuscript UNDER_REVIEW/AWAITING_DECISION
+                  // once they've submitted -- see coordinator_send_revision_
+                  // to_reviewers in 0043_editor_initiated_reviewer_recheck.sql,
+                  // which reuses this same revision status for both entry
+                  // points). Only the first case is really "the Editor is
+                  // deciding this revision cycle" for freshness-comparison
+                  // purposes below -- the second needs to fall through to
+                  // isPeerReviewRound instead, so recommendationIsCurrent
+                  // compares against the fresh reviewer submissions, not the
+                  // revision's original requested_at.
+                  const isRevisionDecision = latestRevision?.status === 'UNDER_REVIEW' && manuscript.status === 'EDITOR_REVIEW';
+                  // A revision decision is now handled exclusively by the
+                  // dedicated EditorRevisionReview screen (reviewer comments,
+                  // author's response, checklist, and the same Reject/Return
+                  // to Author/Move to Next Stage buttons) -- opened via the
+                  // Current Status tab's "Review Revision N" button. This
+                  // panel duplicating the same 4-button decision here, with
+                  // none of that context, was confusing and redundant.
+                  if (isRevisionDecision) return null;
+                  const nextRevisionNumber = (latestRevision?.revision_number || 0) + 1;
+
+                  // Peer-review round: reviews already pushed the manuscript to
+                  // AWAITING_DECISION and at least one reviewer was ever
+                  // assigned -- the screening round's own AWAITING_DECISION
+                  // (reject/revision) always has zero reviewer_assignments,
+                  // since reviewers aren't selected until screening ACCEPTs.
+                  // Declined rows don't block completion -- only the
+                  // non-declined ones need to have actually submitted (a
+                  // pre-existing gap: a stale DECLINED row would otherwise
+                  // permanently block this from ever being "ready"). Also
+                  // scoped to the current revision round's own rows -- an
+                  // earlier round's already-submitted reviews (revision_number
+                  // 0) must not make a fresh re-check round look done before
+                  // its own re-invited reviewers have reported back.
+                  // latestRevision can be an EDITOR_SCREENING-origin revision
+                  // (predating peer review) whose number is already > 0,
+                  // while the FIRST peer-review round's reviewer_assignments
+                  // are always stamped revision_number 0 -- only a genuine
+                  // re-review round (coordinator_send_revision_to_reviewers)
+                  // stamps a PEER_REVIEW-origin revision's number. Scoping
+                  // against a screening revision's number wrongly zeroed out
+                  // a fully-submitted original round.
+                  const currentPeerReviewRoundNumber = latestRevision?.origin === 'PEER_REVIEW' ? (latestRevision.revision_number || 0) : 0;
+                  const activeReviews = (reviewerAssignments || []).filter(
+                    r => r.status !== 'DECLINED' && (r.revision_number || 0) === currentPeerReviewRoundNumber
+                  );
+                  const hasRequiredReviews = activeReviews.length > 0 && activeReviews.every(r => r.status === 'SUBMITTED');
+                  const isPeerReviewRound = !isRevisionDecision && manuscript.status === 'AWAITING_DECISION' && (reviewerAssignments?.length || 0) > 0;
+                  // A re-review round (isRevisionDecision on a PEER_REVIEW-
+                  // origin revision) only goes through the same Coordinator
+                  // release gate as the original peer-review round when the
+                  // reviewers were actually (re-)invited for THIS round --
+                  // see coordinator_send_reviews_to_editor() in
+                  // 0041_coordinator_releases_reviews_to_editor.sql. A normal
+                  // MAJOR_REVISION resubmission the Editor decides on
+                  // directly (no "Move to Reviewer" re-check requested) has
+                  // zero reviewer_assignments rows for this revision_number,
+                  // and must not be blocked waiting for reviews that were
+                  // never asked for.
+                  const needsReviewerGate = isPeerReviewRound || (isRevisionDecision && latestRevision?.origin === 'PEER_REVIEW' && activeReviews.length > 0);
+                  const latestReviewSubmittedAt = activeReviews.reduce<string | null>((latest, r) => (
+                    r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
+                  ), null);
+
+                  // A recommendation only counts as "already decided" if it was
+                  // submitted after the thing it's deciding on -- otherwise
+                  // it's a stale leftover from an earlier round (recommendation
+                  // isn't reset per-round, only assessment_status is) and the
+                  // editor still needs to decide on *this* round. When no
+                  // reviewers were ever invited for this specific round
+                  // (activeReviews is already scoped to the current
+                  // revision_number) there's nothing to be stale against --
+                  // e.g. a plain MAJOR_REVISION resubmission the Editor
+                  // decides on directly, with no "Move to Reviewer" re-check
+                  // requested -- so the recommendation is trivially current.
+                  const recommendationIsCurrent = !!assignment.recommendation && !!assignment.recommendation_submitted_at && (
+                    isRevisionDecision
+                      ? new Date(assignment.recommendation_submitted_at) > new Date(latestRevision!.requested_at)
+                      : isPeerReviewRound
+                      ? (activeReviews.length === 0 || (!!latestReviewSubmittedAt && new Date(assignment.recommendation_submitted_at) > new Date(latestReviewSubmittedAt)))
+                      : true
+                  );
+
+                  return (
+                    <>
+                      <h3 className="text-sm font-black text-slate-900">
+                        {isRevisionDecision
+                          ? `Editor Decision — Revision ${latestRevision!.revision_number}`
+                          : isPeerReviewRound
+                          ? (latestRevision && latestRevision.revision_number > 0 ? `Peer Review Decision — Revision ${latestRevision.revision_number}` : 'Peer Review Decision')
+                          : 'Editor Recommendation'}
+                      </h3>
+
+                      {(assignment.strengths || assignment.weaknesses || assignment.mandatory_revisions || assignment.comments_to_coordinator) && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-xs">
+                          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Your Evaluation Comments</p>
+                          {assignment.strengths && <p><span className="font-bold text-slate-700">Strengths:</span> <span className="text-slate-600">{assignment.strengths}</span></p>}
+                          {assignment.weaknesses && <p><span className="font-bold text-slate-700">Weaknesses:</span> <span className="text-slate-600">{assignment.weaknesses}</span></p>}
+                          {assignment.mandatory_revisions && <p><span className="font-bold text-slate-700">Mandatory Revisions:</span> <span className="text-slate-600">{assignment.mandatory_revisions}</span></p>}
+                          {assignment.comments_to_coordinator && <p><span className="font-bold text-slate-700">Comments to Coordinator:</span> <span className="text-slate-600">{assignment.comments_to_coordinator}</span></p>}
+                        </div>
+                      )}
+
+                      {/* Visible while the Editor still has a decision to
+                          make on this peer-review round -- not gated behind
+                          the evaluation/reviewer-release checks below, so
+                          they can start writing comments while those are
+                          still pending. Once recommendationIsCurrent (the
+                          decision's already been submitted, see the emerald
+                          "Editor Decision: ..." box below), this box has
+                          nothing left to do and disappears too, leaving just
+                          that one confirmation box. */}
+                      {isPeerReviewRound && !(recommendationIsCurrent && !redeciding) && (
+                        <div className="border-2 border-emerald-300 bg-emerald-50/40 rounded-xl p-4">
+                          <label className="block text-xs font-bold text-emerald-800 mb-1.5">Editor Comments (optional)</label>
+                          <textarea
+                            value={editorComments}
+                            onChange={(e) => setEditorComments(e.target.value)}
+                            disabled={decisionBusy}
+                            rows={3}
+                            placeholder="Additional comments or instructions..."
+                            className="w-full px-3 py-2 border border-emerald-300 rounded-lg text-sm bg-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      )}
+
+                      {/* The "submit your evaluation first" requirement only
+                          applies to the original screening round -- neither
+                          a revision-loop decision nor a peer-review-round
+                          decision needs a fresh assessment_status='SUBMITTED'
+                          (see submit_editor_recommendation's own gate in
+                          0038_revision_loop_accept_and_author_response.sql:
+                          `not is_revision_loop_round and not is_peer_review_round`),
+                          so the UI shouldn't block those on it either. */}
+                      {recommendationIsCurrent && !redeciding ? (
+                        <div className={`rounded-xl p-5 border ${assignment.recommendation === 'REJECT' ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                          <p className={`text-sm font-bold ${assignment.recommendation === 'REJECT' ? 'text-red-900' : 'text-emerald-900'}`}>
+                            Editor Decision: {assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Peer Review 2' : assignment.recommendation!.replace(/_/g, ' ')}
+                          </p>
+                          {assignment.recommendation_submitted_at && (
+                            <p className={`text-xs mt-1 ${assignment.recommendation === 'REJECT' ? 'text-red-700' : 'text-emerald-700'}`}>{formatDate(assignment.recommendation_submitted_at)}</p>
+                          )}
+                        </div>
+                      ) : !evaluationSubmitted && !isRevisionDecision && !isPeerReviewRound ? (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
+                          You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
+                        </div>
+                      ) : needsReviewerGate && !hasRequiredReviews ? (
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
+                          Waiting for all peer reviews to be submitted before you can make the final decision.
+                        </div>
+                      ) : needsReviewerGate && hasRequiredReviews && !manuscript.reviews_released_at ? (
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
+                          All reviews are in, but the Coordinator hasn't sent them to you yet.
+                        </div>
+                      ) : (
+                        <>
+          {(() => {
+                            // Any Peer Review Decision checkpoint (the
+                            // original round, or after reviewers re-check a
+                            // resubmitted revision) collapses to a single
+                            // "Send to Author" action -- not Accept/Reject/
+                            // Minor/Major -- that forwards the Editor's +
+                            // reviewers' comments to the Author for one more
+                            // round. Capped at one round-trip: once 2+
+                            // PEER_REVIEW-origin revisions exist, it's
+                            // Accept/Reject only (final call). This does not
+                            // affect isRevisionDecision (a different
+                            // component, EditorRevisionReview.tsx, handles
+                            // that screen) or the plain first-round
+                            // screening case (no reviewers assigned yet).
+                            const peerReviewOriginRounds = (details.revisions || []).filter(r => r.origin === 'PEER_REVIEW').length;
+                            if (isPeerReviewRound && peerReviewOriginRounds < 2) {
+                              return (
+                                <>
+                                  <p className="text-xs text-slate-600">
+                                    Accept if the manuscript is ready as submitted, or send your comments and the reviewers' comments to the Author for one more round of corrections. The Coordinator forwards it on.
+                                  </p>
+                                  {decisionError && (
+                                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                                  )}
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <button
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => handleSubmitRecommendation('MAJOR_REVISION')}
+                                      className="px-4 py-3 rounded-xl border-2 border-amber-300 hover:bg-amber-50 text-amber-800 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      Send Revision to Author
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => handleSubmitRecommendation('ACCEPT')}
+                                      className="px-4 py-3 rounded-xl border-2 border-emerald-300 hover:bg-emerald-50 text-emerald-800 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      Accept Submission
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => setRejectDialogOpen(true)}
+                                      className="sm:col-span-2 px-4 py-3 rounded-xl border-2 border-red-300 hover:bg-red-50 text-red-800 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      Reject Submission
+                                    </button>
+                                  </div>
+                                </>
+                              );
+                            }
+
+                            const buttons = isPeerReviewRound
+                              ? [
+                                  { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                  { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                ]
+                              : [
+                                  { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                  { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
+                                  { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
+                                  { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                ];
+                            return (
+                              <>
+                                <p className="text-xs text-slate-600">
+                                  {isRevisionDecision
+                                    ? `Accept sends Revision ${latestRevision!.revision_number} straight to the Coordinator's decision. Requesting a revision opens Revision ${nextRevisionNumber}.`
+                                    : isPeerReviewRound
+                                    ? "This manuscript has already been sent back to the Author once -- final call only."
+                                    : "Select one decision based on your evaluation and (if applicable) the reviewers' recommendations."}
+                                </p>
+                                {decisionError && (
+                                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                                )}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {buttons.map((opt) => (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => (opt.value === 'REJECT' ? setRejectDialogOpen(true) : handleSubmitRecommendation(opt.value))}
+                                      className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {sidebarSection === 'dashboard' && activeTab === 'revisions' && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 mb-3">Revision History</h3>
+                  <RevisionHistoryPanel manuscriptId={manuscript.id} profiles={Object.fromEntries(details.profiles)} />
+                </div>
+              </div>
+            )}
+
+            {sidebarSection === 'dashboard' && activeTab === 'comments' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-sm font-black text-slate-900">DISCUSSION & COLLABORATION ({discussions?.length || 0})</h3>
+                  <button
+                    onClick={() => setShowInternalNotes(!showInternalNotes)}
+                    className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                  >
+                    <FileText className="w-3 h-3" /> {showInternalNotes ? 'Hide' : 'Show'} Internal Notes
+                  </button>
+                </div>
+
+                {/* Discussion Chat */}
+                <div className="mb-6 flex flex-col h-96">
+                  <h4 className="text-xs font-bold text-slate-700 mb-4">TEAM DISCUSSIONS</h4>
+
+                  {/* Chat Messages */}
+                  <div className="flex-1 overflow-y-auto mb-4 space-y-3 border border-slate-200 rounded-lg p-4 bg-white">
+                    {discussions && discussions.length > 0 ? (
+                      discussions.filter(d => !(d as any).is_internal).map((discussion, idx) => {
+                        const isCurrentUser = discussion.sender_id === currentUser?.email;
+                        return (
+                          <div key={idx} className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-xs px-4 py-2 rounded-lg ${
+                              isCurrentUser
+                                ? 'bg-emerald-500 text-white'
+                                : 'bg-slate-100 text-slate-900'
+                            }`}>
+                              <div className={`text-xs font-semibold mb-1 ${isCurrentUser ? 'text-emerald-100' : 'text-slate-600'}`}>
+                                {details.profiles.get(discussion.sender_id)?.name || 'Unknown User'}
+                              </div>
+                              <p className="text-sm break-words">{discussion.message}</p>
+                              <div className={`text-xs mt-1 ${isCurrentUser ? 'text-emerald-100' : 'text-slate-500'}`}>
+                                {formatDateTime(discussion.created_at)}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-slate-500">
+                        <p className="text-xs">No discussions yet. Start a discussion below.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Message Input Form */}
+                  <div className="flex gap-2">
+                    <textarea
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      placeholder="Type a message..."
+                      className="flex-1 text-xs border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500 resize-none"
+                      rows={2}
+                    />
+                    <button
+                      onClick={handlePostComment}
+                      disabled={busy || !newComment.trim()}
+                      className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold px-4 rounded-lg transition self-end"
+                    >
+                      {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Internal Notes Section */}
+                {showInternalNotes && (
+                  <div className="pt-6 border-t border-slate-200">
+                    <h4 className="text-xs font-bold text-slate-700 mb-4 flex items-center gap-2">
+                      <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                      EDITOR INTERNAL NOTES (Private)
+                    </h4>
+                    {discussions && discussions.filter(d => (d as any).is_internal).length > 0 ? (
+                      <div className="space-y-3 mb-6 bg-amber-50 border border-amber-200 rounded p-4">
+                        {discussions.filter(d => (d as any).is_internal).map((discussion, idx) => (
+                          <div key={idx} className="border-b border-amber-200 pb-3 last:border-0">
+                            <div className="flex items-start justify-between mb-1">
+                              <p className="font-semibold text-amber-900 text-xs">
+                                {details.profiles.get(discussion.sender_id)?.name || 'Unknown'}
+                              </p>
+                              <p className="text-xs text-amber-700">{formatDateTime(discussion.created_at)}</p>
+                            </div>
+                            <p className="text-xs text-amber-800">{discussion.message}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 mb-6">No internal notes yet.</p>
+                    )}
+
+                    {/* Post Internal Note Form */}
+                    <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+                      <textarea
+                        value={newInternalNote}
+                        onChange={(e) => setNewInternalNote(e.target.value)}
+                        placeholder="Add a private internal note (visible only to editors)..."
+                        className="w-full text-xs border border-amber-300 rounded px-3 py-2 mb-3 bg-white focus:outline-none focus:border-amber-500"
+                        rows={3}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handlePostInternalNote}
+                          disabled={busy || !newInternalNote.trim()}
+                          className="flex-1 bg-amber-600 text-white text-xs font-bold py-2 rounded hover:bg-amber-700 disabled:opacity-50"
+                        >
+                          {busy ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : <Save className="w-3 h-3 inline mr-1" />}
+                          Post Internal Note
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* CONTENT SECTION ITEMS - Only show when sidebar section is selected */}
+            {sidebarSection === 'title_abstract' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">TITLE & ABSTRACT</h3>
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-600 mb-1">TITLE</p>
+                    <p className="text-sm text-slate-900">{details.manuscript?.title || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-slate-600 mb-1">ABSTRACT</p>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{details.manuscript?.abstract || 'No abstract provided'}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {sidebarSection === 'authors' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">AUTHORS / CONTRIBUTORS ({details.contributors?.length || 0})</h3>
+                {details.contributors && details.contributors.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.contributors.map((contributor, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4 hover:bg-slate-50">
+                        <p className="font-semibold text-slate-900">{idx + 1}. {contributor.name}</p>
+                        <p className="text-xs text-slate-600">{contributor.email}</p>
+                        {contributor.department && <p className="text-xs text-slate-600">{contributor.department}</p>}
+                        {contributor.affiliation && <p className="text-xs text-slate-600">{contributor.affiliation}</p>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No contributors found.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'submission_files' && (() => {
+              const allFiles = details.files || [];
+              const originalFiles = allFiles.filter(f => !f.revision_id);
+              const sortedRevisions = [...(details.revisions || [])].sort((a, b) => a.revision_number - b.revision_number);
+
+              const renderFileList = (files: typeof allFiles) => (
+                <div className="space-y-3">
+                  {files.map((file) => (
+                    <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50 transition">
+                      <div className="flex items-center gap-3 flex-1">
+                        <span className="text-lg">📄</span>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                          <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        {file.public_url && (
+                          <>
+                            <button
+                              onClick={() => setPreviewFile(file)}
+                              className="text-slate-600 hover:text-slate-900 p-2"
+                              title="View"
+                            >
+                              👁️
+                            </button>
+                            <a href={file.public_url} download={file.file_name} className="text-slate-600 hover:text-slate-900 p-2" title="Download">📥</a>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+
+              return (
+                <div className="space-y-6">
+                  <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                    <h3 className="text-sm font-black text-slate-900 mb-4">ORIGINAL SUBMISSION FILES ({originalFiles.length})</h3>
+                    {originalFiles.length > 0 ? renderFileList(originalFiles) : (
+                      <div className="text-center py-8 text-slate-400 text-sm">No original submission files.</div>
+                    )}
+                  </div>
+                  {sortedRevisions.map((rev) => {
+                    const revFiles = allFiles.filter(f => f.revision_id === rev.id);
+                    return (
+                      <div key={rev.id} className="bg-white border border-slate-200 rounded-2xl p-6">
+                        <h3 className="text-sm font-black text-slate-900 mb-4">REVISION {rev.revision_number} — UPLOADED FILES ({revFiles.length})</h3>
+                        {revFiles.length > 0 ? renderFileList(revFiles) : (
+                          <div className="text-center py-8 text-slate-400 text-sm">No files uploaded for this revision yet.</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {sidebarSection === 'manuscript' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">MANUSCRIPT ({details.files?.filter(f => f.file_type?.toLowerCase().includes('manuscript')).length || 0})</h3>
+                {details.files && details.files.filter(f => f.file_type?.toLowerCase().includes('manuscript')).length > 0 ? (
+                  <div className="space-y-3">
+                    {details.files.filter(f => f.file_type?.toLowerCase().includes('manuscript')).map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📄</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                          </div>
+                        </div>
+                        {file.public_url && (
+                          <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No manuscript files found.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'references' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">REFERENCES</h3>
+                {details.manuscript?.references ? (
+                  <div className="text-sm text-slate-700 whitespace-pre-wrap">{details.manuscript.references}</div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No references provided.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'supplementary' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">SUPPLEMENTARY FILES ({details.files?.filter(f => f.file_type?.toLowerCase().includes('supplementary') || f.file_type?.toLowerCase().includes('additional')).length || 0})</h3>
+                {details.files && details.files.filter(f => f.file_type?.toLowerCase().includes('supplementary') || f.file_type?.toLowerCase().includes('additional')).length > 0 ? (
+                  <div className="space-y-3">
+                    {details.files.filter(f => f.file_type?.toLowerCase().includes('supplementary') || f.file_type?.toLowerCase().includes('additional')).map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📎</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                          </div>
+                        </div>
+                        {file.public_url && (
+                          <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No supplementary files found.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'cover_letter' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+                <h3 className="text-sm font-black text-slate-900 mb-4">COVER LETTER</h3>
+                {details.manuscript.cover_letter?.trim() && (
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{details.manuscript.cover_letter}</p>
+                )}
+                {details.files && details.files.some(f => f.file_name?.toLowerCase().includes('cover')) && (
+                  <div className="space-y-3">
+                    {details.files.filter(f => f.file_name?.toLowerCase().includes('cover')).map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📝</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                          </div>
+                        </div>
+                        {file.public_url && (
+                          <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!details.manuscript.cover_letter?.trim() && !(details.files && details.files.some(f => f.file_name?.toLowerCase().includes('cover'))) && (
+                  <p className="text-slate-500 text-sm">No cover letter provided.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'discussions' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">DISCUSSIONS ({details.discussions?.length || 0})</h3>
+                {details.discussions && details.discussions.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.discussions.map((discussion, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4 hover:bg-slate-50">
+                        <p className="font-semibold text-slate-900">{discussion.sender_id}</p>
+                        <p className="text-sm text-slate-700 mt-2">{discussion.message}</p>
+                        <p className="text-xs text-slate-500 mt-2">{formatDateTime(discussion.created_at)}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No discussions yet.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'evaluation_timeline' && (() => {
+              const realHistory = (details.statusHistory || []).filter(item => item.from_status !== item.to_status);
+              return (
+                <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-black text-slate-900 mb-4">EVALUATION TIMELINE ({realHistory.length})</h3>
+                  {realHistory.length > 0 ? (
+                    <div className="space-y-4">
+                      {realHistory.map((item, idx) => (
+                        <div key={idx} className="border border-slate-200 rounded p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <p className="font-semibold text-slate-900">{item.to_status.replace(/_/g, ' ')}</p>
+                            <p className="text-xs text-slate-500">{formatDateTime(item.created_at)}</p>
+                          </div>
+                          {item.note && <p className="text-sm text-slate-600">{item.note}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-slate-400 text-sm">No timeline events yet.</div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {sidebarSection === 'editor_evaluation' && (
+              <EditorEvaluationFormTab
+                assignmentId={assignment.id}
+                manuscriptId={manuscript.id}
+                assignment={assignment}
+                suggestedReviewers={details.suggestedReviewers}
+                revisions={details.revisions || []}
+                onSubmitSuccess={onChanged}
+              />
+            )}
+
+            {sidebarSection === 'reviews' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">PEER REVIEWS ({reviewerAssignments?.length || 0})</h3>
+                {reviewerAssignments && reviewerAssignments.length > 0 ? (
+                  <div className="space-y-6">
+                    {(() => {
+                      const grouped = new Map<number, typeof reviewerAssignments>();
+                      reviewerAssignments.forEach((ra) => {
+                        const key = ra.revision_number || 0;
+                        if (!grouped.has(key)) grouped.set(key, []);
+                        grouped.get(key)!.push(ra);
+                      });
+                      const groupKeys = Array.from(grouped.keys()).sort((a, b) => a - b);
+                      return groupKeys.map((revNum) => (
+                        <div key={revNum} className="space-y-4">
+                          <h4 className="text-xs font-black text-purple-700 uppercase tracking-wide">
+                            {revNum > 0 ? `Revision ${revNum} Comments` : 'Original Review Comments'}
+                          </h4>
+                          {grouped.get(revNum)!.map((ra) => (
+                      <div key={ra.id} className={`border rounded-lg p-4 ${
+                        (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                          ? 'border-slate-200 bg-slate-100 opacity-70'
+                          : 'border-slate-200'
+                      }`}>
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {details.profiles.get(ra.reviewer_id)?.name || 'Unknown Reviewer'}
+                            </p>
+                            <p className="text-xs text-slate-600">{details.profiles.get(ra.reviewer_id)?.email}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className={`inline-flex text-xs font-bold px-2 py-1 rounded ${
+                              (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                                ? 'bg-slate-200 text-slate-600'
+                                : getEditorFacingReviewerStatus(ra) === 'SUBMITTED'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : getEditorFacingReviewerStatus(ra) === 'OVERDUE'
+                                ? 'bg-red-100 text-red-700'
+                                : getEditorFacingReviewerStatus(ra) === 'ACCEPTED'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {(details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR' && s.replaces_assignment_id === ra.id)
+                                ? '↻ Replaced'
+                                : getEditorFacingReviewerStatus(ra) === 'OVERDUE' ? '🔴 Overdue' : (getEditorFacingReviewerStatus(ra) || 'Pending')}
+                            </span>
+                            {ra.submitted_at && (
+                              <p className="text-xs text-slate-500 mt-1">{formatDate(ra.submitted_at)}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <ReviewerReplacementInline assignment={ra} excludedEmails={new Set([
+                          ...(grouped.get(revNum) || []).map(a => details.profiles.get(a.reviewer_id)?.email?.toLowerCase()).filter((e): e is string => !!e),
+                          ...getPendingEditorSuggestions(details.suggestedReviewers || [], details.editorReviewerActions || [], revNum).map(sg => sg.email.toLowerCase())
+                        ])} hasPendingReplacement={getPendingEditorSuggestions(details.suggestedReviewers || [], details.editorReviewerActions || [], revNum).some(s => s.replaces_assignment_id === ra.id)} onReplaced={onChanged} />
+
+                        {ra.status === 'SUBMITTED' && (
+                          manuscript.reviews_released_at ? (
+                          <div className="mt-3 space-y-3">
+                            <p className="text-sm text-slate-700">
+                              <span className="font-semibold">Recommendation:</span>{' '}
+                              <span className={`font-bold ${ra.recommendation ? RECOMMENDATION_TEXT_COLOR[ra.recommendation] || '' : ''}`}>
+                                {ra.recommendation?.replace(/_/g, ' ') || 'N/A'}
+                              </span>
+                            </p>
+
+                            {(ra.screening_responses?.length ?? 0) > 0 && (
+                              <div className="space-y-1.5">
+                                {ra.screening_responses.map((r, qIdx) => (
+                                  <div key={r.question_id} className="border border-slate-200 rounded p-2.5 bg-slate-50">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <p className="text-xs font-bold text-slate-800">{qIdx + 1}. {PEER_REVIEW_QUESTION_LABELS[r.question_id] || r.question_id}</p>
+                                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${r.answer ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                        {r.answer ? 'Yes' : 'No'}
+                                      </span>
+                                    </div>
+                                    {r.reason && <p className="text-xs text-slate-600">{r.reason}</p>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {ra.comments_to_author && (
+                              <div className="bg-slate-50 rounded p-3 text-sm text-slate-700">
+                                <p className="font-semibold text-xs uppercase tracking-wide text-slate-500 mb-1">Comments to Author</p>
+                                {ra.comments_to_author}
+                              </div>
+                            )}
+                            {ra.comments_to_editor && (
+                              <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-slate-700">
+                                <p className="font-semibold text-xs uppercase tracking-wide text-blue-700 mb-1">Confidential Comments to Editor</p>
+                                {ra.comments_to_editor}
+                              </div>
+                            )}
+                          </div>
+                          ) : (
+                            // Submitted, but the Coordinator hasn't released this
+                            // round's reviews yet (coordinator_send_reviews_to_editor,
+                            // see manuscripts.reviews_released_at) -- the Editor
+                            // should know a review is in without seeing its content
+                            // early, same gate the Decision tab already enforces.
+                            <div className="mt-3 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                              <p className="text-xs text-slate-500 italic">Review submitted -- comments will be visible once the Coordinator releases this round's reviews.</p>
+                            </div>
+                          )
+                        )}
+
+                        {ra.status === 'ACCEPTED' && (
+                          <p className="text-xs text-slate-500 italic mt-3">Awaiting review submission...</p>
+                        )}
+                      </div>
+                          ))}
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-slate-400 text-sm">No reviewers assigned yet.</div>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'decision' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+                {(() => {
+                  const latestRevision = getLatestRevision(details.revisions);
+                  // Same ambiguity as isRevisionReviewPage above: revision.
+                  // status = 'UNDER_REVIEW' means EITHER "the Editor is
+                  // actively deciding this round" (manuscript EDITOR_REVIEW)
+                  // OR "the Reviewers are re-checking it after the Editor
+                  // asked for that" (manuscript UNDER_REVIEW/AWAITING_DECISION
+                  // once they've submitted -- see coordinator_send_revision_
+                  // to_reviewers in 0043_editor_initiated_reviewer_recheck.sql,
+                  // which reuses this same revision status for both entry
+                  // points). Only the first case is really "the Editor is
+                  // deciding this revision cycle" for freshness-comparison
+                  // purposes below -- the second needs to fall through to
+                  // isPeerReviewRound instead, so recommendationIsCurrent
+                  // compares against the fresh reviewer submissions, not the
+                  // revision's original requested_at.
+                  const isRevisionDecision = latestRevision?.status === 'UNDER_REVIEW' && manuscript.status === 'EDITOR_REVIEW';
+                  // A revision decision is now handled exclusively by the
+                  // dedicated EditorRevisionReview screen (reviewer comments,
+                  // author's response, checklist, and the same Reject/Return
+                  // to Author/Move to Next Stage buttons) -- opened via the
+                  // Current Status tab's "Review Revision N" button. This
+                  // panel duplicating the same 4-button decision here, with
+                  // none of that context, was confusing and redundant.
+                  if (isRevisionDecision) return null;
+                  const nextRevisionNumber = (latestRevision?.revision_number || 0) + 1;
+
+                  // Peer-review round: reviews already pushed the manuscript to
+                  // AWAITING_DECISION and at least one reviewer was ever
+                  // assigned -- the screening round's own AWAITING_DECISION
+                  // (reject/revision) always has zero reviewer_assignments,
+                  // since reviewers aren't selected until screening ACCEPTs.
+                  // Declined rows don't block completion -- only the
+                  // non-declined ones need to have actually submitted (a
+                  // pre-existing gap: a stale DECLINED row would otherwise
+                  // permanently block this from ever being "ready"). Also
+                  // scoped to the current revision round's own rows -- an
+                  // earlier round's already-submitted reviews (revision_number
+                  // 0) must not make a fresh re-check round look done before
+                  // its own re-invited reviewers have reported back.
+                  // latestRevision can be an EDITOR_SCREENING-origin revision
+                  // (predating peer review) whose number is already > 0,
+                  // while the FIRST peer-review round's reviewer_assignments
+                  // are always stamped revision_number 0 -- only a genuine
+                  // re-review round (coordinator_send_revision_to_reviewers)
+                  // stamps a PEER_REVIEW-origin revision's number. Scoping
+                  // against a screening revision's number wrongly zeroed out
+                  // a fully-submitted original round.
+                  const currentPeerReviewRoundNumber = latestRevision?.origin === 'PEER_REVIEW' ? (latestRevision.revision_number || 0) : 0;
+                  const activeReviews = (reviewerAssignments || []).filter(
+                    r => r.status !== 'DECLINED' && (r.revision_number || 0) === currentPeerReviewRoundNumber
+                  );
+                  const hasRequiredReviews = activeReviews.length > 0 && activeReviews.every(r => r.status === 'SUBMITTED');
+                  const isPeerReviewRound = !isRevisionDecision && manuscript.status === 'AWAITING_DECISION' && (reviewerAssignments?.length || 0) > 0;
+                  // A re-review round (isRevisionDecision on a PEER_REVIEW-
+                  // origin revision) only goes through the same Coordinator
+                  // release gate as the original peer-review round when the
+                  // reviewers were actually (re-)invited for THIS round --
+                  // see coordinator_send_reviews_to_editor() in
+                  // 0041_coordinator_releases_reviews_to_editor.sql. A normal
+                  // MAJOR_REVISION resubmission the Editor decides on
+                  // directly (no "Move to Reviewer" re-check requested) has
+                  // zero reviewer_assignments rows for this revision_number,
+                  // and must not be blocked waiting for reviews that were
+                  // never asked for.
+                  const needsReviewerGate = isPeerReviewRound || (isRevisionDecision && latestRevision?.origin === 'PEER_REVIEW' && activeReviews.length > 0);
+                  const latestReviewSubmittedAt = activeReviews.reduce<string | null>((latest, r) => (
+                    r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest
+                  ), null);
+
+                  // A recommendation only counts as "already decided" if it was
+                  // submitted after the thing it's deciding on -- otherwise
+                  // it's a stale leftover from an earlier round (recommendation
+                  // isn't reset per-round, only assessment_status is) and the
+                  // editor still needs to decide on *this* round. When no
+                  // reviewers were ever invited for this specific round
+                  // (activeReviews is already scoped to the current
+                  // revision_number) there's nothing to be stale against --
+                  // e.g. a plain MAJOR_REVISION resubmission the Editor
+                  // decides on directly, with no "Move to Reviewer" re-check
+                  // requested -- so the recommendation is trivially current.
+                  const recommendationIsCurrent = !!assignment.recommendation && !!assignment.recommendation_submitted_at && (
+                    isRevisionDecision
+                      ? new Date(assignment.recommendation_submitted_at) > new Date(latestRevision!.requested_at)
+                      : isPeerReviewRound
+                      ? (activeReviews.length === 0 || (!!latestReviewSubmittedAt && new Date(assignment.recommendation_submitted_at) > new Date(latestReviewSubmittedAt)))
+                      : true
+                  );
+
+                  return (
+                    <>
+                      <h3 className="text-sm font-black text-slate-900">
+                        {isRevisionDecision
+                          ? `Editor Decision — Revision ${latestRevision!.revision_number}`
+                          : isPeerReviewRound
+                          ? (latestRevision && latestRevision.revision_number > 0 ? `Peer Review Decision — Revision ${latestRevision.revision_number}` : 'Peer Review Decision')
+                          : 'Editor Recommendation'}
+                      </h3>
+
+                      {(assignment.strengths || assignment.weaknesses || assignment.mandatory_revisions || assignment.comments_to_coordinator) && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-xs">
+                          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Your Evaluation Comments</p>
+                          {assignment.strengths && <p><span className="font-bold text-slate-700">Strengths:</span> <span className="text-slate-600">{assignment.strengths}</span></p>}
+                          {assignment.weaknesses && <p><span className="font-bold text-slate-700">Weaknesses:</span> <span className="text-slate-600">{assignment.weaknesses}</span></p>}
+                          {assignment.mandatory_revisions && <p><span className="font-bold text-slate-700">Mandatory Revisions:</span> <span className="text-slate-600">{assignment.mandatory_revisions}</span></p>}
+                          {assignment.comments_to_coordinator && <p><span className="font-bold text-slate-700">Comments to Coordinator:</span> <span className="text-slate-600">{assignment.comments_to_coordinator}</span></p>}
+                        </div>
+                      )}
+
+                      {/* Visible while the Editor still has a decision to
+                          make on this peer-review round -- not gated behind
+                          the evaluation/reviewer-release checks below, so
+                          they can start writing comments while those are
+                          still pending. Once recommendationIsCurrent (the
+                          decision's already been submitted, see the emerald
+                          "Editor Decision: ..." box below), this box has
+                          nothing left to do and disappears too, leaving just
+                          that one confirmation box. */}
+                      {isPeerReviewRound && !(recommendationIsCurrent && !redeciding) && (
+                        <div className="border-2 border-emerald-300 bg-emerald-50/40 rounded-xl p-4">
+                          <label className="block text-xs font-bold text-emerald-800 mb-1.5">Editor Comments (optional)</label>
+                          <textarea
+                            value={editorComments}
+                            onChange={(e) => setEditorComments(e.target.value)}
+                            disabled={decisionBusy}
+                            rows={3}
+                            placeholder="Additional comments or instructions..."
+                            className="w-full px-3 py-2 border border-emerald-300 rounded-lg text-sm bg-white focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      )}
+
+                      {/* The "submit your evaluation first" requirement only
+                          applies to the original screening round -- neither
+                          a revision-loop decision nor a peer-review-round
+                          decision needs a fresh assessment_status='SUBMITTED'
+                          (see submit_editor_recommendation's own gate in
+                          0038_revision_loop_accept_and_author_response.sql:
+                          `not is_revision_loop_round and not is_peer_review_round`),
+                          so the UI shouldn't block those on it either. */}
+                      {recommendationIsCurrent && !redeciding ? (
+                        <div className={`rounded-xl p-5 border ${assignment.recommendation === 'REJECT' ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                          <p className={`text-sm font-bold ${assignment.recommendation === 'REJECT' ? 'text-red-900' : 'text-emerald-900'}`}>
+                            Editor Decision: {assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Peer Review 2' : assignment.recommendation!.replace(/_/g, ' ')}
+                          </p>
+                          {assignment.recommendation_submitted_at && (
+                            <p className={`text-xs mt-1 ${assignment.recommendation === 'REJECT' ? 'text-red-700' : 'text-emerald-700'}`}>{formatDate(assignment.recommendation_submitted_at)}</p>
+                          )}
+                        </div>
+                      ) : !evaluationSubmitted && !isRevisionDecision && !isPeerReviewRound ? (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm text-amber-800">
+                          You must submit your evaluation (Editor Evaluation tab) before recommending a decision.
+                        </div>
+                      ) : needsReviewerGate && !hasRequiredReviews ? (
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
+                          Waiting for all peer reviews to be submitted before you can make the final decision.
+                        </div>
+                      ) : needsReviewerGate && hasRequiredReviews && !manuscript.reviews_released_at ? (
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-800">
+                          All reviews are in, but the Coordinator hasn't sent them to you yet.
+                        </div>
+                      ) : (
+                        <>
+          {(() => {
+                            // Any Peer Review Decision checkpoint (the
+                            // original round, or after reviewers re-check a
+                            // resubmitted revision) collapses to a single
+                            // "Send to Author" action -- not Accept/Reject/
+                            // Minor/Major -- that forwards the Editor's +
+                            // reviewers' comments to the Author for one more
+                            // round. Capped at one round-trip: once 2+
+                            // PEER_REVIEW-origin revisions exist, it's
+                            // Accept/Reject only (final call). This does not
+                            // affect isRevisionDecision (a different
+                            // component, EditorRevisionReview.tsx, handles
+                            // that screen) or the plain first-round
+                            // screening case (no reviewers assigned yet).
+                            const peerReviewOriginRounds = (details.revisions || []).filter(r => r.origin === 'PEER_REVIEW').length;
+                            if (isPeerReviewRound && peerReviewOriginRounds < 2) {
+                              return (
+                                <>
+                                  <p className="text-xs text-slate-600">
+                                    Accept if the manuscript is ready as submitted, or send your comments and the reviewers' comments to the Author for one more round of corrections. The Coordinator forwards it on.
+                                  </p>
+                                  {decisionError && (
+                                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                                  )}
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <button
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => handleSubmitRecommendation('MAJOR_REVISION')}
+                                      className="px-4 py-3 rounded-xl border-2 border-amber-300 hover:bg-amber-50 text-amber-800 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      Send Revision to Author
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => handleSubmitRecommendation('ACCEPT')}
+                                      className="px-4 py-3 rounded-xl border-2 border-emerald-300 hover:bg-emerald-50 text-emerald-800 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      Accept Submission
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => setRejectDialogOpen(true)}
+                                      className="sm:col-span-2 px-4 py-3 rounded-xl border-2 border-red-300 hover:bg-red-50 text-red-800 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      Reject Submission
+                                    </button>
+                                  </div>
+                                </>
+                              );
+                            }
+
+                            const buttons = isPeerReviewRound
+                              ? [
+                                  { value: 'ACCEPT' as ReviewerRecommendation, label: 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                  { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                ]
+                              : [
+                                  { value: 'ACCEPT' as ReviewerRecommendation, label: isRevisionDecision ? 'Accept & Send to Decision' : 'Accept Submission', style: 'border-emerald-300 hover:bg-emerald-50 text-emerald-800' },
+                                  { value: 'MINOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Minor)` : 'Minor Revision', style: 'border-amber-300 hover:bg-amber-50 text-amber-800' },
+                                  { value: 'MAJOR_REVISION' as ReviewerRecommendation, label: isRevisionDecision ? `Request Revision ${nextRevisionNumber} (Major)` : 'Major Revision', style: 'border-orange-300 hover:bg-orange-50 text-orange-800' },
+                                  { value: 'REJECT' as ReviewerRecommendation, label: 'Reject', style: 'border-red-300 hover:bg-red-50 text-red-800' },
+                                ];
+                            return (
+                              <>
+                                <p className="text-xs text-slate-600">
+                                  {isRevisionDecision
+                                    ? `Accept sends Revision ${latestRevision!.revision_number} straight to the Coordinator's decision. Requesting a revision opens Revision ${nextRevisionNumber}.`
+                                    : isPeerReviewRound
+                                    ? "This manuscript has already been sent back to the Author once -- final call only."
+                                    : "Select one decision based on your evaluation and (if applicable) the reviewers' recommendations."}
+                                </p>
+                                {decisionError && (
+                                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">{decisionError}</div>
+                                )}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {buttons.map((opt) => (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      disabled={decisionBusy}
+                                      onClick={() => (opt.value === 'REJECT' ? setRejectDialogOpen(true) : handleSubmitRecommendation(opt.value))}
+                                      className={`px-4 py-3 rounded-xl border-2 font-bold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${opt.style}`}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {sidebarSection === 'suggestions' && (
+              manuscript.status === 'EDITOR_REVIEW' && assignment.recommendation === 'ACCEPT' ? (
+                <EditorReviewerSelection
+                  manuscriptId={manuscript.id}
+                  suggestedReviewers={details.suggestedReviewers || []}
+                  onSubmitSuccess={onChanged}
+                  reviewerAssignments={reviewerAssignments}
+                  profiles={details.profiles}
+                />
+              ) : (
+                <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                  <h3 className="text-sm font-black text-slate-900 mb-4">SUGGESTIONS ({details.suggestedReviewers?.length || 0})</h3>
+                  {details.suggestedReviewers && details.suggestedReviewers.length > 0 ? (
+                    <div className="space-y-3">
+                      {details.suggestedReviewers.map((reviewer, idx) => (
+                        <div key={idx} className="border border-slate-200 rounded p-4">
+                          <p className="font-semibold text-slate-900">{reviewer.name || 'N/A'}</p>
+                          <p className="text-xs text-slate-600">{reviewer.email}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-slate-500 text-sm">No suggested reviewers.</p>
+                  )}
+                </div>
+              )
+            )}
+
+            {sidebarSection === 'review_history' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">REVIEW HISTORY ({details.revisions?.length || 0})</h3>
+                {details.revisions && details.revisions.length > 0 ? (
+                  <div className="space-y-3">
+                    {details.revisions.map((revision, idx) => (
+                      <div key={idx} className="border border-slate-200 rounded p-4">
+                        <p className="font-semibold text-slate-900">{revision.revision_number}</p>
+                        <p className="text-xs text-slate-600">{formatDate(revision.requested_at)}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No revision history.</p>
+                )}
+              </div>
+            )}
+
+            {sidebarSection === 'metadata' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">METADATA</h3>
+                <div className="space-y-3 text-sm">
+                  <div><span className="font-semibold text-slate-900">Manuscript ID:</span> <span className="text-slate-700">{details.manuscript?.id}</span></div>
+                  <div><span className="font-semibold text-slate-900">Status:</span> <span className="text-slate-700">{details.manuscript?.status}</span></div>
+                  <div><span className="font-semibold text-slate-900">Submitted:</span> <span className="text-slate-700">{formatDate(details.manuscript?.created_at)}</span></div>
+                  {details.manuscript?.published_at && (
+                    <div><span className="font-semibold text-slate-900">Published:</span> <span className="text-slate-700">{formatDate(details.manuscript?.published_at)}</span></div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {sidebarSection === 'production' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">PRODUCTION VERIFICATION</h3>
+                <EditorProductionVerification manuscriptId={manuscript.id} />
+              </div>
+            )}
+
+            {sidebarSection === 'galley_files' && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-slate-900 mb-4">GALLEY FILES ({details.files?.filter(f => f.file_type?.toLowerCase().includes('galley')).length || 0})</h3>
+                {details.files && details.files.filter(f => f.file_type?.toLowerCase().includes('galley')).length > 0 ? (
+                  <div className="space-y-3">
+                    {details.files.filter(f => f.file_type?.toLowerCase().includes('galley')).map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded hover:bg-emerald-50">
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-lg">📰</span>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{file.file_name}</p>
+                            <p className="text-xs text-slate-500">{file.file_size} • {formatDate(file.uploaded_at)}</p>
+                          </div>
+                        </div>
+                        {file.public_url && (
+                          <a href={file.public_url} target="_blank" rel="noopener noreferrer" className="text-slate-600 hover:text-slate-900 p-2">👁️</a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-sm">No galley files found.</p>
+                )}
+              </div>
+            )}
+
+            </div>
+          </div>
+
+          {/* RIGHT SIDEBAR - EDITOR EVALUATION PANEL - FIXED */}
+          <aside className="fixed right-0 top-14 w-80 bg-slate-50 border-l border-slate-200 flex flex-col overflow-hidden" style={{ right: '0', height: 'calc(100vh - 3.5rem)' }}>
+            {/* SCROLLABLE CONTENT */}
+            <div className="flex-1 overflow-y-auto">
+              <div className="p-6 space-y-6">
+
+                {/* DECISION STATUS */}
+                <div className="space-y-3">
+                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
+                    Decision Status
+                  </h3>
+                  {(() => {
+                    // Was a single static "Evaluation Submitted / Awaiting
+                    // coordinator action" box that never changed again once
+                    // the screening evaluation was submitted -- it kept
+                    // showing that even after the Coordinator invited
+                    // reviewers, peer review started, a decision was made, or
+                    // the manuscript reached a terminal state. This mirrors
+                    // the same live status logic already used for the
+                    // "Current Status" tab and its Status line (editorHas
+                    // SuggestedReviewers / recommendationIsCurrent / round
+                    // scoping), so both places track the real decision flow.
+                    if (assignment.status === 'DECLINED') {
+                      return (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-red-700 text-center">✕ Assignment Declined</p>
+                        </div>
+                      );
+                    }
+                    if (['ACCEPTED', 'REJECTED', 'PUBLISHED'].includes(manuscript.status)) {
+                      const isRejected = manuscript.status === 'REJECTED';
+                      return (
+                        <div className={`rounded-lg p-4 border ${isRejected ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                          <p className={`text-xs font-semibold text-center ${isRejected ? 'text-red-700' : 'text-emerald-700'}`}>
+                            {manuscript.status === 'ACCEPTED' ? '✓ Accepted' : manuscript.status === 'PUBLISHED' ? '✓ Published' : '✕ Rejected'}
+                          </p>
+                        </div>
+                      );
+                    }
+                    if (manuscript.status === 'REVISION_REQUESTED') {
+                      return (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-amber-700 text-center">Revision Requested</p>
+                          <p className="text-xs text-amber-600 text-center mt-1">Waiting for the author's response</p>
+                        </div>
+                      );
+                    }
+                    const editorHasSuggestedReviewers = (details.suggestedReviewers || []).some(s => s.suggested_by === 'EDITOR');
+                    if (editorHasSuggestedReviewers && manuscript.status === 'EDITOR_REVIEW') {
+                      return (
+                        <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-teal-700 text-center">Reviewers Selected</p>
+                        </div>
+                      );
+                    }
+                    if (manuscript.status === 'UNDER_REVIEW') {
+                      return (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-blue-700 text-center">Peer Review Underway</p>
+                          <p className="text-xs text-blue-600 text-center mt-1">Waiting for reviewer reports</p>
+                        </div>
+                      );
+                    }
+                    const currentPeerReviewRoundNumber = latestRevisionForReview?.origin === 'PEER_REVIEW' ? (latestRevisionForReview.revision_number || 0) : 0;
+                    const activeReviewsForStatus = (reviewerAssignments || []).filter(
+                      r => r.status !== 'DECLINED' && (r.revision_number || 0) === currentPeerReviewRoundNumber
+                    );
+                    const latestReviewSubmittedAtForStatus = activeReviewsForStatus.reduce<string | null>(
+                      (latest, r) => (r.submitted_at && (!latest || r.submitted_at > latest) ? r.submitted_at : latest), null
+                    );
+                    const recommendationIsCurrentForStatus = !!assignment.recommendation && !!assignment.recommendation_submitted_at && (
+                      activeReviewsForStatus.length > 0
+                        ? (!!latestReviewSubmittedAtForStatus && assignment.recommendation_submitted_at > latestReviewSubmittedAtForStatus)
+                        : (!!latestRevisionForReview && assignment.recommendation_submitted_at > latestRevisionForReview.requested_at)
+                    );
+                    if (recommendationIsCurrentForStatus && ['EDITOR_REVIEW', 'AWAITING_DECISION'].includes(manuscript.status)) {
+                      return (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-emerald-700 text-center">✓ Decision Submitted</p>
+                        </div>
+                      );
+                    }
+                    if (!evaluationSubmitted) {
+                      return (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-blue-700 text-center">In Progress</p>
+                          <p className="text-xs text-blue-600 text-center mt-1">Complete your evaluation below</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                        <p className="text-xs font-semibold text-emerald-700 text-center">✓ Evaluation Submitted</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* EDITOR DECISION */}
+                {evaluationSubmitted && assignment.recommendation && (
+                  <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-1">
+                    <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
+                      Editor Decision
+                    </h3>
+                    <p className="text-sm font-bold text-slate-900">{assignment.recommendation === 'ADDITIONAL_REVIEW' ? 'Peer Review 2' : assignment.recommendation.replace(/_/g, ' ')}</p>
+                    <p className="text-xs text-slate-500">Recommendation submitted</p>
+                  </div>
+                )}
+
+                {/* REVIEW WORKFLOW -- standardized to the same 5-stage
+                    pipeline as the Author's Submission Timeline (Submitted /
+                    Editorial Review / Peer Review / Accepted / Published)
+                    instead of a separate, ever-growing Editor-specific step
+                    list, so both roles read the same manuscript progress the
+                    same way. */}
+                <div className="bg-white rounded-xl border border-slate-200 p-5">
+                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900 mb-5 pb-3 border-b border-slate-100">
+                    Review Workflow
+                  </h3>
+                  <div className="relative pl-5 ml-2.5 space-y-6 text-xs border-l-2 border-emerald-100">
+                    {(() => {
+                      const STANDARD_PIPELINE: { key: string; label: string }[] = [
+                        { key: 'SUBMITTED', label: 'Submitted' },
+                        { key: 'EDITORIAL REVIEW', label: 'Editorial Review' },
+                        { key: 'PEER REVIEW', label: 'Peer Review' },
+                        { key: 'ACCEPTED', label: 'Accepted' },
+                        { key: 'PUBLISHED', label: 'Published' },
+                      ];
+                      const rawStatusFor = ['SUBMITTED', 'EDITOR_REVIEW', 'UNDER_REVIEW', 'ACCEPTED', 'PUBLISHED'];
+                      const firstTimestampFor = (rawStatus: string): string | null => {
+                        const hit = (details.statusHistory || [])
+                          .filter((h) => h.to_status === rawStatus)
+                          .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0];
+                        return hit ? hit.created_at : null;
+                      };
+                      const fmt = (iso: string | null) => (iso ? formatDateTime(iso) : '');
+                      const latestRevisionForTimeline = getLatestRevision(details.revisions);
+
+                      let items: { label: string; sub: string; status: 'completed' | 'active' | 'pending' }[];
+
+                      if (manuscript.status === 'REJECTED') {
+                        const rejectedFromPeerReview = (reviewerAssignments?.length ?? 0) > 0;
+                        const idx = rejectedFromPeerReview ? 2 : 1;
+                        items = STANDARD_PIPELINE.map((s, i) => ({
+                          label: s.label,
+                          sub: i < idx ? (fmt(firstTimestampFor(rawStatusFor[i])) || 'Completed') : i === idx ? 'Rejected' : 'Not Reached',
+                          status: i < idx ? 'completed' : i === idx ? 'active' : 'pending',
+                        }));
+                      } else {
+                        const label = getManuscriptStatusLabel(manuscript, latestRevisionForTimeline);
+                        let currentIndex = STANDARD_PIPELINE.findIndex((s) => s.key === label);
+                        let detourSub: string | null = null;
+                        if (label === 'IN REVISION') {
+                          currentIndex = latestRevisionForTimeline?.origin === 'PEER_REVIEW' ? 2 : 1;
+                          detourSub = `In Revision (Revision ${latestRevisionForTimeline?.revision_number ?? ''})`;
+                        }
+                        if (currentIndex < 0) currentIndex = 0;
+                        items = STANDARD_PIPELINE.map((s, i) => {
+                          const ts = fmt(firstTimestampFor(rawStatusFor[i]));
+                          return {
+                            label: s.label,
+                            sub: i < currentIndex ? (ts || 'Completed') : i === currentIndex ? (detourSub || ts || 'In Progress') : 'Pending',
+                            status: i < currentIndex ? 'completed' : i === currentIndex ? 'active' : 'pending',
+                          };
+                        });
+                      }
+
+                      return items.map((item, idx) => {
+                        let markerStyle = 'bg-white border-slate-300 text-slate-400';
+                        let textStyle = 'text-slate-950 font-bold text-[14px]';
+                        let subStyle = 'text-slate-700 font-bold text-[12px] font-mono';
+                        if (item.status === 'completed') {
+                          markerStyle = 'bg-[#008751] border-[#008751] text-white';
+                          textStyle = 'text-black font-semibold text-[14px]';
+                          subStyle = 'text-[#004d2b] font-bold text-[12px] font-mono';
+                        } else if (item.status === 'active') {
+                          markerStyle = 'border-2 border-[#008751] bg-[#eefcf5] text-[#008751]';
+                          textStyle = 'text-[#008751] font-semibold text-[14px]';
+                          subStyle = 'text-emerald-800 font-bold text-[12px] font-mono';
+                        }
+                        return (
+                          <div key={idx} className="relative">
+                            <div className={`absolute -left-[30.5px] top-0.5 w-5 h-5 rounded-full flex items-center justify-center border-2 transition duration-150 ${markerStyle}`}>
+                              {item.status === 'completed' ? (
+                                <Check className="w-2.5 h-2.5 stroke-[3.5]" />
+                              ) : item.status === 'active' ? (
+                                <span className="w-1.5 h-1.5 bg-[#008751] rounded-full" />
+                              ) : (
+                                <span className="w-1.5 h-1.5 bg-slate-300 rounded-full" />
+                              )}
+                            </div>
+                            <div className="space-y-0.5 text-left">
+                              <span className={`block ${textStyle}`}>{item.label}</span>
+                              <span className={`block ${subStyle}`}>{item.sub}</span>
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+
+                {/* REVIEWERS */}
+                <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-2">
+                  <h3 className="text-[13px] font-semibold uppercase tracking-wide text-slate-900">
+                    Reviewers
+                  </h3>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-slate-500 uppercase">Assigned</span>
+                    <span className="text-[13px] font-bold text-slate-900">{reviewerAssignments?.length || 0}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-slate-500 uppercase">Completed</span>
+                    <span className="text-[13px] font-bold text-slate-900">
+                      {reviewerAssignments?.filter(r => r.status === 'SUBMITTED').length || 0} / {reviewerAssignments?.length || 0}
+                    </span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+          </aside>
+        </div>
+      </main>
+      <RejectReasonDialog
+        isOpen={rejectDialogOpen}
+        busy={decisionBusy}
+        error={decisionError}
+        onCancel={() => setRejectDialogOpen(false)}
+        onConfirm={handleConfirmReject}
+      />
     </div>
   );
 }
 
-function RecommendationForm({ busy, onSubmit }: { busy: boolean; onSubmit: (rec: ReviewerRecommendation) => void }) {
-  const [rec, setRec] = useState<ReviewerRecommendation>('MINOR_REVISION');
+function AcceptDeclineModal({
+  details,
+  onAccept,
+  onDecline,
+  onBack,
+  isAcceptLoading,
+  isDeclineLoading
+}: {
+  details: EditorManuscriptDetails;
+  onAccept: () => Promise<void>;
+  onDecline: () => Promise<void>;
+  /** Leaves the invitation unanswered and returns to the dashboard list. */
+  onBack: () => void;
+  isAcceptLoading?: boolean;
+  isDeclineLoading?: boolean;
+}) {
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6">
-      <h3 className="text-sm font-black text-slate-900 mb-3">Submit Your Recommendation</h3>
-      <select value={rec} onChange={(e) => setRec(e.target.value as ReviewerRecommendation)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs mb-3">
-        <option value="ACCEPT">Accept</option>
-        <option value="MINOR_REVISION">Minor Revision</option>
-        <option value="MAJOR_REVISION">Major Revision</option>
-        <option value="REJECT">Reject</option>
-      </select>
-      <button disabled={busy} onClick={() => onSubmit(rec)} className="bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50">
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit Recommendation'}
-      </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-[#2f7d55] to-[#4b8b62] text-white p-6 rounded-t-2xl shrink-0">
+          <button
+            type="button"
+            onClick={onBack}
+            disabled={isAcceptLoading || isDeclineLoading}
+            className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-100 hover:text-white disabled:opacity-50 cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" /> Back to dashboard
+          </button>
+          <h2 className="text-2xl font-black">Editorial Assignment</h2>
+          <p className="text-emerald-100 text-sm mt-1">You have been invited to evaluate a manuscript</p>
+        </div>
+
+        {/* Content */}
+        <div className="p-8 space-y-6 overflow-y-auto">
+          {/* Title */}
+          <div>
+            <p className="text-xs uppercase tracking-wider font-semibold text-slate-600 mb-2">Title</p>
+            <h3 className="font-bold text-slate-900 text-base leading-tight">{details.manuscript.title}</h3>
+          </div>
+
+          {/* Running Title */}
+          <div>
+            <p className="text-xs uppercase tracking-wider font-semibold text-slate-600 mb-2">Running Title</p>
+            <p className="text-sm text-slate-700">{details.manuscript.subtitle || 'Not provided'}</p>
+          </div>
+
+          {/* Abstract */}
+          <div>
+            <p className="text-xs uppercase tracking-wider font-semibold text-slate-600 mb-2">Abstract</p>
+            <p className="text-sm text-slate-700 leading-relaxed">
+              {details.manuscript.abstract || 'Not provided'}
+            </p>
+          </div>
+
+          {/* Buttons */}
+          <div className="space-y-3 pt-4">
+            <button
+              onClick={onAccept}
+              disabled={isAcceptLoading}
+              className="w-full bg-emerald-600 text-white py-3 rounded-lg font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+            >
+              {isAcceptLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-5 h-5" />}
+              {isAcceptLoading ? 'Accepting...' : '✓ Accept Assignment'}
+            </button>
+
+            <button
+              onClick={onDecline}
+              disabled={isDeclineLoading}
+              className="w-full border-2 border-red-600 text-red-600 py-3 rounded-lg font-semibold hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+            >
+              {isDeclineLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <XIcon className="w-5 h-5" />}
+              {isDeclineLoading ? 'Declining...' : '✕ Decline Assignment'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
