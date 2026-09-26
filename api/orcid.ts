@@ -123,6 +123,7 @@ async function issueLoginToken(
 // ---------- actions ----------
 
 function start(req: any, res: any) {
+  res.setHeader('Cache-Control', 'no-store'); // never reuse an earlier redirect (each attempt needs a fresh state + login)
   const state = crypto.randomBytes(16).toString('hex');
   res.setHeader('Set-Cookie', `${STATE_COOKIE}=${state}; Path=/; Max-Age=600; HttpOnly; SameSite=Lax${origin(req).startsWith('https') ? '; Secure' : ''}`);
   const q = new URLSearchParams({
