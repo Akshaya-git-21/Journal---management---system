@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, AlertTriangle, MailCheck } from 'lucide-react';
+import { Loader2, AlertTriangle, MailWarning } from 'lucide-react';
 import {
   OrcidHandoff,
   loginWithOrcidToken,
@@ -15,7 +15,7 @@ interface Props {
   onBack: () => void;
 }
 
-type Step = 'working' | 'form' | 'link' | 'verify' | 'error';
+type Step = 'working' | 'form' | 'link' | 'private' | 'error';
 
 const inputStyle =
   'w-full bg-white text-slate-900 border border-emerald-100/80 rounded-lg px-3 py-2 text-sm font-semibold focus:ring-2 focus:outline-none focus:border-[#008751] focus:ring-[#008751]';
@@ -27,7 +27,13 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
   const claims = handoff.kind === 'pending' && handoff.token ? readPendingClaims(handoff.token) : null;
 
   const [step, setStep] = useState<Step>(
-    handoff.kind === 'login' ? 'working' : handoff.kind === 'pending' && claims ? 'form' : 'error'
+    handoff.kind === 'login'
+      ? 'working'
+      : handoff.kind === 'pending' && claims
+        ? claims.emails.length
+          ? 'form'
+          : 'private' // ORCID shared no email: the account cannot be created
+        : 'error'
   );
   const [error, setError] = useState(handoff.kind === 'error' ? handoff.message || 'ORCID sign-in failed.' : '');
   const [busy, setBusy] = useState(false);
@@ -72,7 +78,6 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
     void run(async () => {
       const r = await completeOrcidSignup(handoff.token!, email, firstName, lastName, { affiliation, department, country });
       if (r.status === 'link_required') setStep('link');
-      else if (r.status === 'verify_email') setStep('verify');
       else if (r.token) await finish(r.token);
     });
   };
@@ -105,7 +110,6 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
             <h2 className="text-xl font-extrabold text-slate-900">Welcome{claims.given ? `, ${claims.given}` : ''}</h2>
             <p className="text-xs text-slate-500 font-semibold">
               ORCID iD <span className="text-[#008751] font-bold">{claims.orcid}</span> is verified. Confirm your details to create your Author account.
-              {!orcidEmails.length && ' ORCID did not share an email, so please enter one.'}
             </p>
             {errorBox}
             <div>
@@ -124,16 +128,10 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
                     <option key={m} value={m}>{m}</option>
                   ))}
                 </select>
-              ) : orcidEmails.length === 1 ? (
-                <input className={`${inputStyle} bg-slate-50 cursor-not-allowed`} type="email" value={email} readOnly />
               ) : (
-                <input className={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <input className={`${inputStyle} bg-slate-50 cursor-not-allowed`} type="email" value={email} readOnly />
               )}
-              <p className="text-[11px] text-slate-400 font-semibold mt-1">
-                {orcidEmails.length
-                  ? 'Taken from your ORCID record and verified by ORCID.'
-                  : 'We will email you a link to confirm this address. To skip that step, set an email on your ORCID record to visible to "Everyone" and sign in with ORCID again.'}
-              </p>
+              <p className="text-[11px] text-slate-400 font-semibold mt-1">Taken from your ORCID record and verified by ORCID. It cannot be changed.</p>
             </div>
             <div>
               <label className={labelStyle}>Primary affiliation</label>
@@ -170,19 +168,26 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
             <button type="submit" disabled={busy} className={primaryBtn}>
               {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing...</> : 'Link and continue'}
             </button>
-            <button type="button" onClick={() => { setStep('form'); setError(''); }} className="text-xs font-bold text-slate-500 hover:underline cursor-pointer">
-              ‹ Use a different email
-            </button>
           </form>
         )}
 
-        {step === 'verify' && (
-          <div className="space-y-3 text-center py-2">
-            <MailCheck className="w-8 h-8 text-[#008751] mx-auto" />
-            <h2 className="text-xl font-extrabold text-slate-900">Check your inbox</h2>
-            <p className="text-xs text-slate-500 font-semibold">
-              Your account is created. We sent a confirmation link to <span className="font-bold">{email}</span>. Click it, then sign in with ORCID.
+        {step === 'private' && (
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 text-amber-700">
+              <MailWarning className="w-5 h-5 mt-0.5 shrink-0" />
+              <h2 className="text-lg font-extrabold text-slate-900">We couldn't get your email from ORCID</h2>
+            </div>
+            <p className="text-xs text-slate-600 font-semibold">
+              Your ORCID email is private and cannot be retrieved. Please make your verified email visible to Everyone in ORCID and then try Continue with ORCID again.
             </p>
+            <ol className="text-[11px] text-slate-500 font-semibold list-decimal pl-4 space-y-0.5">
+              <li>Sign in at orcid.org and open Account settings, then Emails.</li>
+              <li>Set your verified email's visibility to Everyone and save.</li>
+              <li>Come back here and try again.</li>
+            </ol>
+            <a href="/api/orcid/start" className={primaryBtn}>
+              Try Continue with ORCID again
+            </a>
           </div>
         )}
 

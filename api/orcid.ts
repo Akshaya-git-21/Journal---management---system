@@ -28,7 +28,6 @@ const ORCID_PUB = IS_SANDBOX ? 'https://pub.sandbox.orcid.org/v3.0' : 'https://p
 
 const STATE_COOKIE = 'orcid_state';
 const PENDING_TTL_S = 15 * 60;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ORCID_RE = /^[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X]$/;
 
 // ---------- small helpers ----------
@@ -228,21 +227,31 @@ async function callback(req: any, res: any, admin: any, anon: any) {
   backToApp(res, { orcid: 'pending', t: pending });
 }
 
-async function complete(body: any, admin: any, anon: any, siteUrl: string): Promise<{ status: number; body: any }> {
+const PRIVATE_EMAIL_MESSAGE =
+  'Your ORCID email is private and cannot be retrieved. Please make your verified email visible to Everyone in ORCID and then try Continue with ORCID again.';
+
+/**
+ * The account email must come from ORCID itself. Returns an error response when ORCID
+ * shared no verified email, or when the submitted email is not one of them -- a manually
+ * typed address is never accepted, whatever the browser sends.
+ */
+function checkOrcidEmail(pending: Record<string, any>, email: string): { status: number; body: any } | null {
+  const orcidEmails: string[] = Array.isArray(pending.emails) ? pending.emails : [];
+  if (!orcidEmails.length) return { status: 403, body: { error: PRIVATE_EMAIL_MESSAGE, code: 'orcid_email_private' } };
+  if (!orcidEmails.includes(email)) return { status: 400, body: { error: 'Use the email address from your ORCID record.' } };
+  return null;
+}
+
+async function complete(body: any, admin: any): Promise<{ status: number; body: any }> {
   const pending = verify(body?.pending);
   if (!pending) return { status: 400, body: { error: 'Your ORCID session expired. Please start again.' } };
 
   const email = String(body?.email || '').trim().toLowerCase();
   const firstName = String(body?.firstName || '').trim().slice(0, 100);
   const lastName = String(body?.lastName || '').trim().slice(0, 100);
-  if (!EMAIL_RE.test(email) || email.length > 320) return { status: 400, body: { error: 'Enter a valid email address.' } };
+  const emailError = checkOrcidEmail(pending, email);
+  if (emailError) return emailError;
   if (!firstName) return { status: 400, body: { error: 'Given names are required.' } };
-
-  // When ORCID shared verified emails, only those may be used.
-  const orcidEmails: string[] = Array.isArray(pending.emails) ? pending.emails : [];
-  if (orcidEmails.length && !orcidEmails.includes(email)) {
-    return { status: 400, body: { error: 'Use the email address from your ORCID record.' } };
-  }
 
   const { data: taken } = await admin.from('orcid_identities').select('user_id').eq('orcid_id', pending.orcid).maybeSingle();
   if (taken) return { status: 409, body: { error: 'This ORCID iD is already linked to an account. Sign in with ORCID.' } };
@@ -252,12 +261,11 @@ async function complete(body: any, admin: any, anon: any, siteUrl: string): Prom
   const { data: existing } = await admin.from('profiles').select('id').ilike('email', escaped).limit(1);
   if (existing?.length) return { status: 200, body: { status: 'link_required', email } };
 
-  // Email came straight from ORCID (which verified it) -> trusted. A typed email must be confirmed first.
-  const trusted = orcidEmails.includes(email);
+  // The email came straight from ORCID, which has already verified it.
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email,
     password: crypto.randomBytes(24).toString('base64url'),
-    email_confirm: trusted,
+    email_confirm: true,
     user_metadata: {
       full_name: `${firstName} ${lastName}`.trim(),
       first_name: firstName,
@@ -280,11 +288,6 @@ async function complete(body: any, admin: any, anon: any, siteUrl: string): Prom
     return { status: 500, body: { error: 'Unable to link your ORCID iD.' } };
   }
 
-  if (!trusted) {
-    // Supabase emails a confirmation link; the account only becomes usable once it is clicked.
-    await anon.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: siteUrl } });
-    return { status: 200, body: { status: 'verify_email', email } };
-  }
   const { token, error } = await issueLoginToken(admin, created.user.id);
   return token ? { status: 200, body: { status: 'ok', token } } : { status: 403, body: { error } };
 }
@@ -294,7 +297,9 @@ async function link(body: any, admin: any, anon: any, siteUrl: string): Promise<
   if (!pending) return { status: 400, body: { error: 'Your ORCID session expired. Please start again.' } };
   const email = String(body?.email || '').trim().toLowerCase();
   const password = String(body?.password || '');
-  if (!EMAIL_RE.test(email) || !password) return { status: 400, body: { error: 'Email and password are required.' } };
+  if (!password) return { status: 400, body: { error: 'Email and password are required.' } };
+  const emailError = checkOrcidEmail(pending, email);
+  if (emailError) return emailError;
 
   const { data: signedIn, error: pwError } = await anon.auth.signInWithPassword({ email, password });
   if (pwError || !signedIn?.user) return { status: 401, body: { error: 'Incorrect email or password.' } };
@@ -330,7 +335,7 @@ export async function orcidHandler(req: any, res: any, actionOverride?: string) 
     if (req.method === 'GET' && action === 'start') return start(req, res);
     if (req.method === 'GET' && action === 'callback') return await callback(req, res, admin, anon);
     if (req.method === 'POST' && action === 'complete') {
-      const r = await complete(body, admin, anon, origin(req));
+      const r = await complete(body, admin);
       return res.status(r.status).json(r.body);
     }
     if (req.method === 'POST' && action === 'link') {
