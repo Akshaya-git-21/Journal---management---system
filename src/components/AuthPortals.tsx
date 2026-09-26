@@ -217,10 +217,18 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
   const textareaStyle = `w-full bg-white text-slate-900 placeholder-slate-400 border border-emerald-100/80 rounded-lg pl-9 pr-3 py-1.5 focus:ring-2 focus:outline-none ${colors.focusBorder} font-sans font-semibold text-sm transition-all duration-200 shadow-xs`;
   const selectStyle = `w-full bg-white text-slate-900 border border-emerald-100/80 rounded-lg pl-9 pr-9 py-1.5 focus:ring-2 focus:outline-none ${colors.focusBorder} font-sans font-semibold text-sm transition-all duration-200 shadow-xs appearance-none`;
 
+  // Author sign-up goes through ORCID only (the button below); Reviewer/Editor keep the normal form.
+  const orcidOnly = mode === 'REGISTER' && localRole === 'AUTHOR';
+
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
+
+    if (orcidOnly) {
+      setErrorMsg('Authors register with ORCID. Click "Continue with ORCID".');
+      return;
+    }
 
     if (mode === 'REGISTER') {
       if (!email) {
@@ -442,7 +450,9 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
           )}
 
           <form onSubmit={handleAuthSubmit} className="space-y-3">
-            
+            {/* Authors register only through ORCID, so their email/password fields are hidden. */}
+            <div className={orcidOnly ? 'hidden' : 'contents'}>
+
             {/* REGISTER PORTAL FORMS */}
             {mode === 'REGISTER' && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
@@ -924,6 +934,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                 </div>
               )}
             </div>
+            </div>
 
             {/* Portal picker. On REGISTER this genuinely chooses the role being
                 requested. On LOGIN it only switches the portal branding/copy
@@ -981,6 +992,7 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
             )}
 
             {/* SUBMIT ACTION CONTROLS */}
+            {!orcidOnly && (
             <button
               id="btn-auth-submit"
               type="submit"
@@ -998,15 +1010,22 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                 </>
               )}
             </button>
+            )}
 
           </form>
 
           {/* CONTINUE WITH ORCID (Authors only) */}
           {localRole === 'AUTHOR' && (
             <div className="space-y-2">
+              {orcidOnly ? (
+                <p className="text-xs text-slate-600 font-semibold bg-emerald-50/60 border border-emerald-100 rounded-lg px-3 py-2">
+                  Authors register with their ORCID iD. We verify your iD with ORCID, then you confirm your details to create the account.
+                </p>
+              ) : (
               <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest text-slate-400">
                 <span className="flex-1 h-px bg-slate-200" /> or <span className="flex-1 h-px bg-slate-200" />
               </div>
+              )}
               <a
                 id="btn-auth-orcid"
                 href="/api/orcid/start"
