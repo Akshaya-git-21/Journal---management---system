@@ -131,6 +131,7 @@ function start(req: any, res: any) {
     scope: '/authenticate',
     redirect_uri: redirectUri(req),
     state,
+    prompt: 'login', // always show ORCID's login page, even if the browser is already signed in to ORCID
   });
   res.redirect(302, `${ORCID_BASE}/oauth/authorize?${q.toString()}`);
 }
