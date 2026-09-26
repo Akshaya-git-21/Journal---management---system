@@ -2,5 +2,8 @@
   "buildCommand": "vite build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/api/orcid/:action", "destination": "/api/orcid?action=:action" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }

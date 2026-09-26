@@ -1,8 +1,5 @@
 import { supabase } from './supabase';
 import { ManuscriptStatus, ReviewerRecommendation } from '../types';
-import { editorSeesReplacementNeeded } from './reviewerStatus';
-import { getEditorAcceptanceState } from './editorAcceptance';
-export type { ReviewerRecommendation };
 
 /**
  * Typed client wrapper around the Module 2 RPCs (see
@@ -17,9 +14,7 @@ export interface EditorAssignmentRow {
   manuscript_id: string;
   editor_id: string;
   assigned_by: string | null;
-  status: 'INVITED' | 'ACCEPTED' | 'DECLINED' | 'REPLACED';
-  replaced_at?: string | null;
-  replacement_reason?: string | null;
+  status: 'INVITED' | 'ACCEPTED' | 'DECLINED';
   assigned_at: string;
   responded_at: string | null;
   scientific_merit: number | null;
@@ -33,29 +28,10 @@ export interface EditorAssignmentRow {
   weaknesses: string | null;
   mandatory_revisions: string | null;
   comments_to_coordinator: string | null;
-  criteria_reasons: Record<string, string> | null;
-  screening_responses: ScreeningResponse[];
-  screening_comments: string | null;
-  action_reason: string | null;
-  peer_review_comments: string | null;
   assessment_status: 'NOT_STARTED' | 'SUBMITTED';
   assessment_submitted_at: string | null;
   recommendation: ReviewerRecommendation | null;
   recommendation_submitted_at: string | null;
-  /** Module 97 -- the deadline the Coordinator set for the Editor's first
-   * editorial evaluation, visible to both roles. Null for assignments made
-   * before this module. */
-  timeline_start_date: string | null;
-  timeline_end_date: string | null;
-  /** Module 97 -- when the Coordinator last sent a manual reminder about
-   * the pending evaluation. Null until the first reminder is sent. */
-  last_reminder_sent_at: string | null;
-}
-
-export interface ScreeningResponse {
-  question_id: string;
-  answer: boolean;
-  reason: string;
 }
 
 export interface ReviewerAssignmentRow {
@@ -67,18 +43,6 @@ export interface ReviewerAssignmentRow {
   invited_at: string;
   responded_at: string | null;
   due_date: string | null;
-  /** Module 98 -- the deadline the Coordinator set when sending this
-   * reviewer's invitation, visible to both the Coordinator and the
-   * Reviewer. Null for assignments made before this module. */
-  timeline_start_date: string | null;
-  /** Module 98 -- when the Coordinator last sent a manual reminder about
-   * this pending review. Null until the first reminder is sent. */
-  last_reminder_sent_at: string | null;
-  /** Module 104 -- when the Coordinator explicitly requested a replacement
-   * for this reviewer (declined or overdue). Null until requested; required
-   * before the Editor can select a replacement for an overdue (not yet
-   * declined) assignment -- see editor_select_replacement_reviewer(). */
-  replacement_requested_at: string | null;
   recommendation: ReviewerRecommendation | null;
   comments_to_author: string | null;
   comments_to_editor: string | null;
@@ -89,18 +53,7 @@ export interface ReviewerAssignmentRow {
   ethical_compliance: number | null;
   data_reliability: number | null;
   writing_quality: number | null;
-  criteria_reasons: Record<string, string> | null;
-  screening_responses: ScreeningResponse[];
-  decline_reason: string | null;
-  revision_number: number;
   submitted_at: string | null;
-  assigned_at?: string | null;
-  due_at?: string | null;
-  review_status?: string | null;
-  scores?: Record<string, number> | null;
-  strengths?: string | null;
-  weaknesses?: string | null;
-  mandatory_revisions?: string | null;
 }
 
 export interface StatusHistoryRow {
@@ -110,17 +63,6 @@ export interface StatusHistoryRow {
   to_status: ManuscriptStatus;
   actor_id: string | null;
   note: string | null;
-  created_at: string;
-}
-
-export interface AuditLogRow {
-  id: string;
-  actor_id: string | null;
-  action: string;
-  manuscript_id: string | null;
-  before_status: string | null;
-  after_status: string | null;
-  metadata: Record<string, unknown>;
   created_at: string;
 }
 
@@ -145,34 +87,8 @@ function rpcOrThrow<T>(promise: PromiseLike<{ data: T; error: any }>): Promise<T
 export const submitManuscript = (manuscriptId: string) =>
   rpcOrThrow(supabase.rpc('submit_manuscript', { p_manuscript_id: manuscriptId }));
 
-export const assignEditor = (manuscriptId: string, editorId: string, startDate: string, endDate: string) =>
-  rpcOrThrow(supabase.rpc('assign_editor', { p_manuscript_id: manuscriptId, p_editor_id: editorId, p_start_date: startDate, p_end_date: endDate }));
-
-/** Coordinator-only (Module 97): manual reminder to the assigned Editor
- * about the pending first editorial evaluation -- refuses server-side once
- * already submitted. See coordinator_send_editor_reminder() in
- * 0097_editorial_timeline_and_reminder.sql. */
-export const coordinatorSendEditorReminder = (manuscriptId: string) =>
-  rpcOrThrow<EditorAssignmentRow>(supabase.rpc('coordinator_send_editor_reminder', { p_manuscript_id: manuscriptId }));
-
-export interface ManuscriptReviewerPoolRow {
-  manuscript_id: string;
-  reviewer_id: string;
-  added_by: string | null;
-  created_at: string;
-}
-
-/** Coordinator-only: replaces the curated reviewer pool made available to
- * the assigned Editor's "Select Reviewers" step for this manuscript.
- * See coordinator_set_reviewer_pool() in 0087_coordinator_reviewer_pool.sql. */
-export const coordinatorSetReviewerPool = (manuscriptId: string, reviewerIds: string[]) =>
-  rpcOrThrow<ManuscriptReviewerPoolRow[]>(supabase.rpc('coordinator_set_reviewer_pool', { p_manuscript_id: manuscriptId, p_reviewer_ids: reviewerIds }));
-
-/** Editor/Coordinator: the manuscript's curated reviewer pool (the subset
- * the Coordinator selected for this manuscript, not the full Reviewer
- * Board). See get_manuscript_reviewer_pool() in 0087_coordinator_reviewer_pool.sql. */
-export const getManuscriptReviewerPool = (manuscriptId: string) =>
-  rpcOrThrow<ProfileRow[]>(supabase.rpc('get_manuscript_reviewer_pool', { p_manuscript_id: manuscriptId }));
+export const assignEditor = (manuscriptId: string, editorId: string) =>
+  rpcOrThrow(supabase.rpc('assign_editor', { p_manuscript_id: manuscriptId, p_editor_id: editorId }));
 
 export const respondToEditorAssignment = (assignmentId: string, accept: boolean) =>
   rpcOrThrow(supabase.rpc('respond_to_editor_assignment', { p_assignment_id: assignmentId, p_accept: accept }));
@@ -190,7 +106,6 @@ export interface EditorAssessmentInput {
   mandatoryRevisions: string;
   commentsToCoordinator: string;
   suggestedReviewers?: { name: string; email?: string; note?: string }[];
-  criteriaReasons?: Record<string, string>;
 }
 
 export const submitEditorAssessment = (assignmentId: string, input: EditorAssessmentInput) =>
@@ -207,280 +122,45 @@ export const submitEditorAssessment = (assignmentId: string, input: EditorAssess
     p_weaknesses: input.weaknesses,
     p_mandatory_revisions: input.mandatoryRevisions,
     p_comments_to_coordinator: input.commentsToCoordinator,
-    p_suggested_reviewers: input.suggestedReviewers ?? [],
-    p_criteria_reasons: input.criteriaReasons ?? {}
-  }));
-
-/** Editor-only: submits the 10-question Initial Editorial Screening
- * questionnaire (Yes/No + mandatory reason per question) + Editor Comments.
- * See submit_editor_screening() in 0025_editor_screening_questionnaire.sql. */
-export const submitEditorScreening = (assignmentId: string, responses: ScreeningResponse[], comments: string) =>
-  rpcOrThrow<EditorAssignmentRow>(supabase.rpc('submit_editor_screening', {
-    p_assignment_id: assignmentId,
-    p_responses: responses,
-    p_comments: comments
+    p_suggested_reviewers: input.suggestedReviewers ?? []
   }));
 
 export const assignReviewers = (manuscriptId: string, reviewerIds: [string, string]) =>
   rpcOrThrow(supabase.rpc('assign_reviewers', { p_manuscript_id: manuscriptId, p_reviewer_ids: reviewerIds }));
 
-// ------------------------------------------
-// New reviewer suggestion workflow RPCs (Phase 8)
-// ------------------------------------------
+export const respondToReviewInvite = (assignmentId: string, accept: boolean) =>
+  rpcOrThrow(supabase.rpc('respond_to_review_invite', { p_assignment_id: assignmentId, p_accept: accept }));
 
-export interface EditorReviewerActionRow {
-  id: string;
-  manuscript_id: string;
-  suggestion_id: string;
-  action: 'ACCEPTED' | 'DECLINED' | 'REPLACED';
-  replacement_reviewer_id: string | null;
-  decline_reason: string | null;
-  coordinator_id: string;
-  created_at: string;
+export interface ReviewSubmissionInput {
+  recommendation: ReviewerRecommendation;
+  commentsToAuthor: string;
+  commentsToEditor: string;
+  scientificMerit: number;
+  noveltyInnovation: number;
+  methodologyQuality: number;
+  literatureAdequacy: number;
+  ethicalCompliance: number;
+  dataReliability: number;
+  writingQuality: number;
 }
 
-export type CoordinatorAcceptResult =
-  | { status: 'ASSIGNED'; action: EditorReviewerActionRow }
-  | { status: 'NEEDS_ACCOUNT'; suggestion_id: string; name: string; email: string; note: string | null };
-
-export const coordinatorAcceptSuggestion = (suggestionId: string, startDate: string, endDate: string) =>
-  rpcOrThrow<CoordinatorAcceptResult>(supabase.rpc('coordinator_accept_suggestion', { p_suggestion_id: suggestionId, p_start_date: startDate, p_end_date: endDate }));
-
-export const coordinatorFinalizeReviewerSuggestion = (suggestionId: string, reviewerId: string, startDate: string, endDate: string) =>
-  rpcOrThrow<EditorReviewerActionRow>(supabase.rpc('coordinator_finalize_reviewer_suggestion', { p_suggestion_id: suggestionId, p_reviewer_id: reviewerId, p_start_date: startDate, p_end_date: endDate }));
-
-export const coordinatorReactivateReviewer = (profileId: string) =>
-  rpcOrThrow<ProfileRow>(supabase.rpc('coordinator_reactivate_reviewer', { p_profile_id: profileId }));
-
-export const coordinatorDeclineSuggestion = (suggestionId: string, reason: string = '') =>
-  rpcOrThrow<EditorReviewerActionRow>(supabase.rpc('coordinator_decline_suggestion', { p_suggestion_id: suggestionId, p_reason: reason }));
-
-export const coordinatorReplaceSuggestion = (suggestionId: string, replacementReviewerId: string) =>
-  rpcOrThrow<EditorReviewerActionRow>(supabase.rpc('coordinator_replace_suggestion', { p_suggestion_id: suggestionId, p_replacement_reviewer_id: replacementReviewerId }));
-
-export const coordinatorAssignReviewerDirectly = (manuscriptId: string, reviewerId: string) =>
-  rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('coordinator_assign_reviewer_directly', { p_manuscript_id: manuscriptId, p_reviewer_id: reviewerId }));
-
-export const finalizeReviewerBoard = (manuscriptId: string) =>
-  rpcOrThrow(supabase.rpc('finalize_reviewer_board', { p_manuscript_id: manuscriptId }));
-
-/** Editor-only: selects reviewers from the existing Reviewer Board after
- * "Move to Next Stage" -- fills however many of the 2 total slots are still
- * open (1 or 2; a slot may already be filled by a promoted Author
- * suggestion, see 0088/0089). Records them as EDITOR suggestions -- the
- * Coordinator sends the actual invitations via coordinatorSendReviewerInvitations.
- * See editor_select_reviewers() in 0090_editor_select_remaining_reviewer_slots.sql. */
-export const editorSelectReviewers = (manuscriptId: string, reviewerIds: string[]) =>
-  rpcOrThrow<SuggestedReviewerRow[]>(supabase.rpc('editor_select_reviewers', { p_manuscript_id: manuscriptId, p_reviewer_ids: reviewerIds }));
-
-/** Editor-only: promotes one of the Author's suggested reviewers into an
- * EDITOR suggestion, reusing the exact same Coordinator Accept & Assign /
- * Decline / Replace pipeline as editor_select_reviewers() above -- the
- * Coordinator then creates the account (if needed) and sends the invitation
- * from the same "Suggested Reviewers" card they already use.
- * See editor_select_author_suggestion() in 0088_editor_select_author_suggestion.sql. */
-export const editorSelectAuthorSuggestion = (suggestionId: string) =>
-  rpcOrThrow<SuggestedReviewerRow>(supabase.rpc('editor_select_author_suggestion', { p_suggestion_id: suggestionId }));
-
-/** Coordinator-only: sends invitations for every still-pending Editor-selected
- * reviewer on this manuscript in one action. Manuscript status stays
- * EDITOR_REVIEW until both reviewers accept -- see respond_to_review_invite()
- * in 0026_editor_reviewer_selection.sql. */
-export const coordinatorSendReviewerInvitations = (manuscriptId: string, startDate: string, endDate: string) =>
-  rpcOrThrow<ReviewerAssignmentRow[]>(supabase.rpc('coordinator_send_reviewer_invitations', { p_manuscript_id: manuscriptId, p_start_date: startDate, p_end_date: endDate }));
-
-/** Coordinator-only (Module 98): manual reminder to a specific reviewer
- * about their pending review -- refuses server-side once submitted or
- * declined. See coordinator_send_reviewer_reminder() in
- * 0098_reviewer_timeline_and_reminder.sql. */
-export const coordinatorSendReviewerReminder = (reviewerAssignmentId: string) =>
-  rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('coordinator_send_reviewer_reminder', { p_reviewer_assignment_id: reviewerAssignmentId }));
-
-/** Editor-only: selects a single replacement reviewer for a declined slot,
- * or (Module 104) an overdue slot the Coordinator has explicitly requested a
- * replacement for. See editor_select_replacement_reviewer() in
- * 0104_reviewer_overdue_replacement_flow.sql. */
-export const editorSelectReplacementReviewer = (declinedAssignmentId: string, replacementReviewerId: string) =>
-  rpcOrThrow<SuggestedReviewerRow>(supabase.rpc('editor_select_replacement_reviewer', { p_declined_assignment_id: declinedAssignmentId, p_replacement_reviewer_id: replacementReviewerId }));
-
-/** Shared by the dashboard-wide and per-manuscript replacement alerts so
- * both agree on when a slot actually needs replacing: manuscript still
- * EDITOR_REVIEW OR UNDER_REVIEW (a re-review round is UNDER_REVIEW from the
- * moment the Coordinator sends it to reviewers -- see
- * coordinator_send_revision_to_reviewers() in 0031_reviewer_revision_loop.sql
- * -- so a decline there never has EDITOR_REVIEW to key off of), and fewer
- * than 2 reviewer slots are covered in the CURRENT round once you count both
- * non-declined reviewer assignments AND replacements the Editor has already
- * selected (pending EDITOR suggestions the Coordinator hasn't sent an
- * invitation for yet -- see editor_select_replacement_reviewer() in
- * 0104_reviewer_overdue_replacement_flow.sql). Round-scoped (revision_number)
- * so a decline/overdue in one re-review round can never be masked by an
- * earlier round's already-resolved assignments, nor vice versa. Once the
- * Editor picks someone, the alert's job is done; the Coordinator invitation
- * happens separately.
- *
- * Module 104: the Editor is only allowed to act on an overdue (not yet
- * declined) assignment once the Coordinator has explicitly requested a
- * replacement for it (replacement_requested_at set) -- there's no more
- * automatic-after-N-days trigger, so an overdue row without that timestamp
- * doesn't qualify here even though it IS overdue.
- *
- * The "already have 2 covered" short-circuit must NOT count an actionable
- * row (declined, or overdue+requested) as covering a slot -- an overdue
- * reviewer is still status INVITED/ACCEPTED, so counting it as "active"
- * the same as a healthy assignment would permanently hide the alert from
- * the Editor even though a replacement was explicitly requested.
- *
- * Module 107: a decline is no longer auto-visible to the Editor either --
- * both a decline and an overdue reviewer stay hidden until the Coordinator
- * has explicitly notified them (replacement_requested_at set), same rule,
- * see editorSeesReplacementNeeded() in lib/reviewerStatus.ts.
- *
- * Returns the most recently actionable assignment in the current round (by
- * replacement_requested_at, since that's now always the trigger for both
- * cases), or null if no replacement is needed. */
-export function getReviewerNeedingReplacement(
-  reviewerAssignments: ReviewerAssignmentRow[],
-  manuscriptStatus: string,
-  pendingReplacementCount: number = 0
-): ReviewerAssignmentRow | null {
-  if (manuscriptStatus !== 'EDITOR_REVIEW' && manuscriptStatus !== 'UNDER_REVIEW') return null;
-  if (reviewerAssignments.length === 0) return null;
-  const currentRound = Math.max(...reviewerAssignments.map(r => r.revision_number ?? 0));
-  const roundAssignments = reviewerAssignments.filter(r => (r.revision_number ?? 0) === currentRound);
-  const healthyCount = roundAssignments.filter(r => !editorSeesReplacementNeeded(r)).length;
-  if (healthyCount + pendingReplacementCount >= 2) return null;
-  const actionable = roundAssignments
-    .filter(editorSeesReplacementNeeded)
-    .sort((a, b) => new Date(b.replacement_requested_at!).getTime() - new Date(a.replacement_requested_at!).getTime());
-  return actionable[0] || null;
-}
-
-/** Unactioned EDITOR-suggested reviewers -- selected by the Editor but not
- * yet turned into an invitation by the Coordinator (see
- * coordinator_send_reviewer_invitations() in 0026_editor_reviewer_selection.sql,
- * which is what stamps an editor_reviewer_actions row onto a suggestion).
- * Pass revisionNumber to scope to a single round (e.g. matching the round
- * getReviewerNeedingReplacement resolved) -- omit it to get every pending
- * suggestion regardless of round. */
-export function getPendingEditorSuggestions(
-  suggestedReviewers: SuggestedReviewerRow[],
-  editorReviewerActions: EditorReviewerActionRow[],
-  revisionNumber?: number
-): SuggestedReviewerRow[] {
-  const actioned = new Set(editorReviewerActions.map(a => a.suggestion_id));
-  return suggestedReviewers.filter(s =>
-    s.suggested_by === 'EDITOR' && !actioned.has(s.id) &&
-    (revisionNumber === undefined || (s.revision_number ?? 0) === revisionNumber)
-  );
-}
-
-/** Coordinator-only: lazily checks for any reviewer-replacement deadline
- * that has expired with no Editor action taken, and notifies Coordinators
- * exactly once per expired slot (see notify_expired_reviewer_replacements()
- * in 0034_reviewer_replacement_round_isolation.sql -- idempotent, safe to
- * call on every Coordinator page load). Returns how many were notified. */
-export const notifyExpiredReviewerReplacements = () =>
-  rpcOrThrow<number>(supabase.rpc('notify_expired_reviewer_replacements'));
-
-/** Coordinator-only (Module 104): request a replacement for a declined OR
- * overdue reviewer -- the Coordinator never picks the replacement reviewer
- * directly anymore, only requests one; the Editor always makes the actual
- * selection (editorSelectReplacementReviewer). Idempotent -- safe to call
- * again to re-notify the Editor. Supersedes coordinatorReplaceReviewer() and
- * coordinatorNotifyEditorReviewerDeclined(). See
- * coordinator_request_reviewer_replacement() in
- * 0104_reviewer_overdue_replacement_flow.sql. */
-export const coordinatorRequestReviewerReplacement = (reviewerAssignmentId: string) =>
-  rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('coordinator_request_reviewer_replacement', { p_reviewer_assignment_id: reviewerAssignmentId }));
-
-/** Coordinator-only: forwards a submitted revision (manuscript_revisions.status
- * = 'REVISION_SUBMITTED') to the assigned editor for re-review. See
- * coordinator_send_revision_to_editor() in 0018_coordinator_revision_gate.sql. */
-export const coordinatorSendRevisionToEditor = (manuscriptId: string) =>
-  rpcOrThrow(supabase.rpc('coordinator_send_revision_to_editor', { p_manuscript_id: manuscriptId }));
-
-/** Coordinator-only: forwards a submitted PEER_REVIEW-origin revision
- * (manuscript_revisions.origin = 'PEER_REVIEW', status = 'REVISION_SUBMITTED')
- * to the same reviewers who reviewed the prior round, instead of the Editor.
- * See coordinator_send_revision_to_reviewers() in 0031_reviewer_revision_loop.sql. */
-export const coordinatorSendRevisionToReviewers = (manuscriptId: string) =>
-  rpcOrThrow(supabase.rpc('coordinator_send_revision_to_reviewers', { p_manuscript_id: manuscriptId }));
-
-/** Coordinator-only: releases a completed round of peer reviews to the
- * Editor -- the Editor's decision screen stays locked until this is called.
- * See coordinator_send_reviews_to_editor() in 0041_coordinator_releases_reviews_to_editor.sql. */
-export const coordinatorSendReviewsToEditor = (manuscriptId: string) =>
-  rpcOrThrow(supabase.rpc('coordinator_send_reviews_to_editor', { p_manuscript_id: manuscriptId }));
-
-/** Reviewer-only: accept/decline a review invitation. Declining requires a
- * reason (see respond_to_review_invite() in 0028_reviewer_peer_review_questionnaire.sql)
- * and feeds the existing 0027 replacement-deadline mechanism unchanged. */
-export const respondToReviewInvite = (assignmentId: string, accept: boolean, reason?: string) =>
-  rpcOrThrow(supabase.rpc('respond_to_review_invite', { p_assignment_id: assignmentId, p_accept: accept, p_reason: reason ?? null }));
-
-/** Reviewer-only: submits the 10-question peer-review questionnaire
- * (Yes/No + mandatory reason per question), Comments to Author, and a
- * recommendation. See submit_peer_review() in
- * 0028_reviewer_peer_review_questionnaire.sql. */
-export const submitPeerReview = (
-  assignmentId: string,
-  responses: ScreeningResponse[],
-  commentsToAuthor: string,
-  recommendation: ReviewerRecommendation,
-  commentsToEditor: string = ''
-) =>
-  rpcOrThrow<ReviewerAssignmentRow>(supabase.rpc('submit_peer_review', {
+export const submitReview = (assignmentId: string, input: ReviewSubmissionInput) =>
+  rpcOrThrow(supabase.rpc('submit_review', {
     p_assignment_id: assignmentId,
-    p_responses: responses,
-    p_comments_to_author: commentsToAuthor,
-    p_recommendation: recommendation,
-    p_comments_to_editor: commentsToEditor
+    p_recommendation: input.recommendation,
+    p_comments_to_author: input.commentsToAuthor,
+    p_comments_to_editor: input.commentsToEditor,
+    p_scientific_merit: input.scientificMerit,
+    p_novelty_innovation: input.noveltyInnovation,
+    p_methodology_quality: input.methodologyQuality,
+    p_literature_adequacy: input.literatureAdequacy,
+    p_ethical_compliance: input.ethicalCompliance,
+    p_data_reliability: input.dataReliability,
+    p_writing_quality: input.writingQuality
   }));
 
-export interface ReviewerReviewAttachmentRow {
-  id: string;
-  assignment_id: string;
-  file_name: string;
-  file_size: string | null;
-  storage_path: string | null;
-  public_url: string | null;
-  uploaded_at: string;
-}
-
-/** Reviewer-only: attach a PDF (e.g. an annotated manuscript copy) to their
- * own review. See reviewer_upload_review_attachment() in
- * 0091_reviewer_review_attachments.sql. */
-export const reviewerUploadReviewAttachment = (
-  assignmentId: string, fileName: string, fileSize: string, storagePath: string, publicUrl: string
-) =>
-  rpcOrThrow<ReviewerReviewAttachmentRow>(supabase.rpc('reviewer_upload_review_attachment', {
-    p_assignment_id: assignmentId, p_file_name: fileName, p_file_size: fileSize, p_storage_path: storagePath, p_public_url: publicUrl
-  }));
-
-export const reviewerDeleteReviewAttachment = (attachmentId: string) =>
-  rpcOrThrow(supabase.rpc('reviewer_delete_review_attachment', { p_attachment_id: attachmentId }));
-
-export async function getReviewAttachments(assignmentId: string): Promise<ReviewerReviewAttachmentRow[]> {
-  const { data, error } = await supabase.from('reviewer_review_attachments').select('*').eq('assignment_id', assignmentId).order('uploaded_at', { ascending: true });
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-export const submitEditorRecommendation = (
-  manuscriptId: string,
-  recommendation: ReviewerRecommendation,
-  comments?: string,
-  checklist?: ChecklistItem[],
-  reason?: string
-) =>
-  rpcOrThrow(supabase.rpc('submit_editor_recommendation', {
-    p_manuscript_id: manuscriptId,
-    p_recommendation: recommendation,
-    p_comments: comments ?? null,
-    p_checklist: checklist ?? [],
-    p_reason: reason ?? null
-  }));
+export const submitEditorRecommendation = (manuscriptId: string, recommendation: ReviewerRecommendation) =>
+  rpcOrThrow(supabase.rpc('submit_editor_recommendation', { p_manuscript_id: manuscriptId, p_recommendation: recommendation }));
 
 export type PublishDecision = 'ACCEPT' | 'MINOR_REVISION' | 'MAJOR_REVISION' | 'REJECT';
 
@@ -490,32 +170,8 @@ export const publishDecision = (manuscriptId: string, decision: PublishDecision,
 export const submitRevision = (manuscriptId: string, responseNote: string = '') =>
   rpcOrThrow(supabase.rpc('submit_revision', { p_manuscript_id: manuscriptId, p_response_note: responseNote }));
 
-export const markPublished = (manuscriptId: string, doi: string, volume: string, issue: string, publishedPdfUrl?: string) =>
-  rpcOrThrow(supabase.rpc('mark_published', {
-    p_manuscript_id: manuscriptId, p_doi: doi, p_volume: volume, p_issue: issue,
-    p_published_pdf_url: publishedPdfUrl ?? null
-  }));
-
-/** Coordinator-only: hand an ACCEPTED manuscript to one specific Publisher
- * account. That Publisher cannot see the manuscript until this has been
- * called (see manuscripts_select RLS -- assigned_publisher_id must match). */
-export const sendToPublisher = (manuscriptId: string, publisherId: string) =>
-  rpcOrThrow(supabase.rpc('send_to_publisher', { p_manuscript_id: manuscriptId, p_publisher_id: publisherId }));
-
-/** Publisher-only (Module 83): explicit "Proceed" click on an assignment
- * sitting in Scheduled Publications -- only after this does the manuscript
- * move into Publication Queue and the actual 4-step publish wizard. See
- * publisher_accept_assignment() in 0083_publisher_accepts_assignment.sql. */
-export const publisherAcceptAssignment = (manuscriptId: string) =>
-  rpcOrThrow(supabase.rpc('publisher_accept_assignment', { p_manuscript_id: manuscriptId }));
-
-export async function uploadPublishedGalley(manuscriptId: string, file: File): Promise<string> {
-  const path = `${manuscriptId}/published/${Date.now()}_${file.name}`;
-  const { error: uploadError } = await supabase.storage.from('manuscript-files').upload(path, file, { upsert: false });
-  if (uploadError) throw new Error(uploadError.message);
-  const { data } = supabase.storage.from('manuscript-files').getPublicUrl(path);
-  return data.publicUrl;
-}
+export const markPublished = (manuscriptId: string, doi: string, volume: string, issue: string) =>
+  rpcOrThrow(supabase.rpc('mark_published', { p_manuscript_id: manuscriptId, p_doi: doi, p_volume: volume, p_issue: issue }));
 
 // ------------------------------------------
 // Reads (RLS-scoped -- each caller only ever sees rows they're allowed to)
@@ -527,66 +183,14 @@ export async function getEditorAssignments(manuscriptId: string): Promise<Editor
   return data ?? [];
 }
 
-/** Author-only: the Editor's screening comments and Return to Author /
- * Rejection reason for their own manuscript -- editor_assignments has no
- * SELECT policy for the Author at all (it also carries an Editor-to-
- * Coordinator private note), so this reads through a narrow RPC instead of
- * the raw table. See get_author_editor_notes() in
- * 0037_author_editor_notes.sql. */
-export async function getAuthorEditorNotes(manuscriptId: string): Promise<{ screening_comments: string | null; action_reason: string | null; recommendation: string | null } | null> {
-  const { data, error } = await supabase.rpc('get_author_editor_notes', { p_manuscript_id: manuscriptId });
-  if (error) throw new Error(error.message);
-  return data?.[0] ?? null;
-}
-
 export async function getReviewerAssignments(manuscriptId: string): Promise<ReviewerAssignmentRow[]> {
   const { data, error } = await supabase.from('reviewer_assignments').select('*').eq('manuscript_id', manuscriptId).order('invited_at', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
 }
 
-export async function getEditorReviewerActions(manuscriptId: string): Promise<EditorReviewerActionRow[]> {
-  const { data, error } = await supabase.from('editor_reviewer_actions').select('*').eq('manuscript_id', manuscriptId).order('created_at', { ascending: true });
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
 export async function getStatusHistory(manuscriptId: string): Promise<StatusHistoryRow[]> {
   const { data, error } = await supabase.from('manuscript_status_history').select('*').eq('manuscript_id', manuscriptId).order('created_at', { ascending: true });
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-export async function getRecentStatusHistory(limit: number = 8): Promise<StatusHistoryRow[]> {
-  const { data, error } = await supabase.from('manuscript_status_history').select('*').order('created_at', { ascending: false }).limit(limit);
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-/** Coordinator-only (audit_log RLS: audit_log_select_coordinator). Every
- * workflow RPC writes one row here per transition it makes. */
-export async function getRecentAuditLog(limit: number = 100): Promise<AuditLogRow[]> {
-  const { data, error } = await supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(limit);
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-export interface OverdueReviewRow {
-  id: string;
-  manuscript_id: string;
-  reviewer_id: string;
-  status: 'INVITED' | 'ACCEPTED' | 'DECLINED' | 'SUBMITTED';
-  due_date: string;
-}
-
-export async function getOverdueReviewerAssignments(): Promise<OverdueReviewRow[]> {
-  const { data, error } = await supabase
-    .from('reviewer_assignments')
-    .select('id, manuscript_id, reviewer_id, status, due_date')
-    .in('status', ['INVITED', 'ACCEPTED'])
-    .not('due_date', 'is', null)
-    .lt('due_date', new Date().toISOString())
-    .order('due_date', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
 }
@@ -603,75 +207,28 @@ export async function getMyNotifications(unreadOnly: boolean = false): Promise<N
 // Manuscripts, contributors, suggested reviewers, discussions, profile pickers
 // ------------------------------------------
 
-export interface ManuscriptFileRow {
-  id: string;
-  manuscript_id: string;
-  revision_id: string | null;
-  file_name: string;
-  file_type: string;
-  file_size: string | null;
-  storage_path: string | null;
-  public_url: string | null;
-  uploaded_by: string | null;
-  uploaded_at: string;
-}
-
 export interface ManuscriptRow {
   id: string;
   title: string;
-  subtitle?: string | null;
   abstract: string;
   references: string;
   is_double_blind: boolean;
   cover_letter: string;
   language: string;
   status: ManuscriptStatus;
-  /** Computed column (see 0036_standard_display_status.sql) -- the single
-   * standardized user-facing status (SUBMITTED / EDITORIAL REVIEW /
-   * IN REVISION / PEER REVIEW / ACCEPTED / REJECTED / PROOFREADING /
-   * PUBLISHED). Always render this, not `status`, in the UI -- see
-   * lib/manuscriptStatusLabel.ts. */
-  display_status?: string | null;
-  /** Set by coordinator_send_reviews_to_editor() (0041) once the
-   * Coordinator forwards a completed round of peer reviews -- the Editor's
-   * decision screen stays locked until this is set, cleared automatically
-   * whenever a fresh round of reviews starts being collected. */
-  reviews_released_at?: string | null;
   author_id: string;
   author_name: string;
   author_email: string;
   assigned_editor_id: string | null;
-  assigned_publisher_id?: string | null;
-  /** Set by publisher_accept_assignment() (Module 83) once the Publisher
-   * clicks "Proceed" on a Scheduled Publications entry -- only then does the
-   * manuscript move into Publication Queue. */
-  publisher_accepted_at?: string | null;
   submission_step: number;
   editors_notes: string;
   doi: string | null;
   volume: string | null;
   issue: string | null;
-  production_stage: 'SENT_TO_PUBLISHER' | 'PUBLISHED' | null;
-  published_pdf_url: string | null;
-  /** Publication metadata (Task 20) -- entered by the assigned GD Member
-   * while READY_FOR_PUBLICATION, validated at publish time. See
-   * gd_member_save_publication_metadata() in
-   * 0065_final_proof_review_and_publishing.sql. */
-  page_numbers: string | null;
-  article_url: string | null;
-  publication_date: string | null;
   submitted_at: string | null;
   published_at: string | null;
   created_at: string;
   updated_at: string;
-  files?: ManuscriptFileRow[];
-  section?: string | null;
-  manuscript_type?: string | null;
-  draft_state?: Record<string, any> | null;
-  keywords?: string | null;
-  word_count?: string | number | null;
-  num_figures?: string | number | null;
-  num_tables?: string | number | null;
 }
 
 export interface ContributorRow {
@@ -680,7 +237,6 @@ export interface ContributorRow {
   name: string;
   email: string;
   affiliation: string;
-  department?: string;
   contributor_role: string;
   position: number;
 }
@@ -692,22 +248,8 @@ export interface SuggestedReviewerRow {
   suggested_by_user: string | null;
   name: string;
   email: string;
-  department?: string;
   note: string;
   created_at: string;
-  revision_number: number;
-  /** Set on an EDITOR suggestion created by editor_select_author_suggestion()
-   * -- points back at the AUTHOR suggestion it was promoted from, so the UI
-   * can mark that original suggestion as already selected. */
-  promoted_from?: string | null;
-  /** Module 106: set on an EDITOR suggestion created by
-   * editor_select_replacement_reviewer() -- points at the exact
-   * reviewer_assignments row this suggestion replaces, so the UI can tell
-   * precisely which declined/overdue reviewer has actually been replaced
-   * instead of guessing from a count (wrong the moment two reviewers in the
-   * same round need replacing and only one has a pick so far). Null for
-   * every ordinary (non-replacement) suggestion. */
-  replaces_assignment_id?: string | null;
 }
 
 export interface DiscussionRow {
@@ -718,7 +260,6 @@ export interface DiscussionRow {
   file_name: string | null;
   file_size: string | null;
   created_at: string;
-  channel: 'GENERAL' | 'COORDINATOR_AUTHOR' | 'PRODUCTION';
 }
 
 export interface ProfileRow {
@@ -728,14 +269,6 @@ export interface ProfileRow {
   role: string | null;
   requested_role?: string | null;
   status: string;
-  created_at?: string | null;
-  metadata?: Record<string, any> | null;
-}
-
-export interface ChecklistItem {
-  id: string;
-  label: string;
-  checked: boolean;
 }
 
 export interface RevisionRow {
@@ -744,39 +277,23 @@ export interface RevisionRow {
   revision_number: number;
   requested_by: string | null;
   decision_letter: string;
-  decision_type: 'MINOR_REVISION' | 'MAJOR_REVISION' | null;
   status: string;
   requested_at: string;
   submitted_at: string | null;
-  editor_comments: string | null;
-  editor_checklist: ChecklistItem[];
-  editor_decision: ReviewerRecommendation | null;
-  editor_decision_at: string | null;
-  coordinator_decision: ReviewerRecommendation | null;
-  coordinator_decision_at: string | null;
-  coordinator_note: string | null;
-  origin: 'EDITOR_SCREENING' | 'PEER_REVIEW';
-  author_response: string | null;
 }
 
 /** RLS scopes this to whatever the caller is allowed to see: their own
  * manuscripts (Author), assigned ones (Editor/Reviewer), or all (Coordinator). */
 export async function listManuscripts(): Promise<ManuscriptRow[]> {
-  const { data, error } = await supabase.from('manuscripts').select('*, display_status').order('created_at', { ascending: false });
+  const { data, error } = await supabase.from('manuscripts').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return data ?? [];
 }
 
 export async function getManuscript(id: string): Promise<ManuscriptRow | null> {
-  const { data, error } = await supabase.from('manuscripts').select('*, display_status').eq('id', id).maybeSingle();
+  const { data, error } = await supabase.from('manuscripts').select('*').eq('id', id).maybeSingle();
   if (error) throw new Error(error.message);
   return data;
-}
-
-export async function getManuscriptFiles(manuscriptId: string): Promise<ManuscriptFileRow[]> {
-  const { data, error } = await supabase.from('manuscript_files').select('*').eq('manuscript_id', manuscriptId).is('revision_id', null).order('uploaded_at', { ascending: false });
-  if (error) throw new Error(error.message);
-  return data ?? [];
 }
 
 export async function getContributors(manuscriptId: string): Promise<ContributorRow[]> {
@@ -791,15 +308,14 @@ export async function getSuggestedReviewers(manuscriptId: string): Promise<Sugge
   return data ?? [];
 }
 
-
 export async function getDiscussions(manuscriptId: string): Promise<DiscussionRow[]> {
   const { data, error } = await supabase.from('manuscript_discussions').select('*').eq('manuscript_id', manuscriptId).order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
 }
 
-export async function postDiscussionMessage(manuscriptId: string, senderId: string, message: string, channel: 'GENERAL' | 'COORDINATOR_AUTHOR' = 'GENERAL'): Promise<void> {
-  const { error } = await supabase.from('manuscript_discussions').insert({ manuscript_id: manuscriptId, sender_id: senderId, message, channel });
+export async function postDiscussionMessage(manuscriptId: string, senderId: string, message: string): Promise<void> {
+  const { error } = await supabase.from('manuscript_discussions').insert({ manuscript_id: manuscriptId, sender_id: senderId, message });
   if (error) throw new Error(error.message);
 }
 
@@ -809,129 +325,17 @@ export async function getRevisions(manuscriptId: string): Promise<RevisionRow[]>
   return data ?? [];
 }
 
-/** Batched latest-revision-per-manuscript lookup for list/table views (e.g.
- * the Coordinator's manuscript queue), so status labels can show
- * "REVISION N -- MINOR/MAJOR REVISION" without an N+1 query per row. */
-export async function getLatestRevisionsByManuscriptIds(manuscriptIds: string[]): Promise<Record<string, RevisionRow>> {
-  if (manuscriptIds.length === 0) return {};
-  const { data, error } = await supabase
-    .from('manuscript_revisions')
-    .select('*')
-    .in('manuscript_id', manuscriptIds)
-    .order('revision_number', { ascending: true });
-  if (error) throw new Error(error.message);
-
-  const latest: Record<string, RevisionRow> = {};
-  (data ?? []).forEach((row: RevisionRow) => {
-    latest[row.manuscript_id] = row; // ascending order -> last write wins = highest revision_number
-  });
-  return latest;
-}
-
-export async function getRevisionById(revisionId: string): Promise<RevisionRow | null> {
-  const { data, error } = await supabase.from('manuscript_revisions').select('*').eq('id', revisionId).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data;
-}
-
-export interface ManuscriptFileRow {
-  id: string;
-  manuscript_id: string;
-  revision_id: string | null;
-  file_name: string;
-  file_type: string;
-  file_size: string;
-  storage_path: string;
-  public_url: string | null;
-  uploaded_by: string | null;
-  uploaded_at: string;
-}
-
-export async function getRevisionFiles(revisionId: string): Promise<ManuscriptFileRow[]> {
-  const { data, error } = await supabase.from('manuscript_files').select('*').eq('revision_id', revisionId).order('uploaded_at', { ascending: false });
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-export async function uploadRevisionFile(revisionId: string, manuscriptId: string, file: File, fileType: string): Promise<ManuscriptFileRow> {
-  const { data: userData } = await supabase.auth.getUser();
-  const path = `${manuscriptId}/revisions/${revisionId}/${Date.now()}_${file.name}`;
-  const { error: uploadError } = await supabase.storage.from('manuscript-files').upload(path, file);
-  if (uploadError) throw new Error(uploadError.message);
-  const { data: urlData } = supabase.storage.from('manuscript-files').getPublicUrl(path);
-
-  const { data: fileRecord, error: dbError } = await supabase.from('manuscript_files').insert({
-    manuscript_id: manuscriptId,
-    revision_id: revisionId,
-    file_name: file.name,
-    file_type: fileType,
-    file_size: (file.size / 1024).toFixed(2) + ' KB',
-    storage_path: path,
-    public_url: urlData.publicUrl,
-    uploaded_by: userData.user?.id ?? null
-  }).select().single();
-
-  if (dbError) throw new Error(dbError.message);
-  return fileRecord as ManuscriptFileRow;
-}
-
-export async function deleteManuscriptFile(fileId: string): Promise<void> {
-  const { error } = await supabase.from('manuscript_files').delete().eq('id', fileId);
-  if (error) throw new Error(error.message);
-}
-
-export async function updateRevisionStatus(revisionId: string, status: 'AWAITING_AUTHOR_UPLOAD' | 'REVISION_SUBMITTED' | 'UNDER_REVIEW' | 'COMPLETED'): Promise<RevisionRow> {
-  const { data, error } = await supabase.from('manuscript_revisions').update({ status }).eq('id', revisionId).select().single();
-  if (error) throw new Error(error.message);
-  return data as RevisionRow;
-}
-
-export async function assignRevisedManuscriptToEditor(manuscriptId: string, editorId: string): Promise<EditorAssignmentRow> {
-  const { data, error } = await supabase.rpc('assign_editor', { p_manuscript_id: manuscriptId, p_editor_id: editorId });
-  if (error) throw new Error(error.message);
-  return data as EditorAssignmentRow;
-}
-
 /** Active accounts for a given role -- used by Coordinator's editor/reviewer pickers. */
-export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'GD_MEMBER'): Promise<ProfileRow[]> {
-  const { data, error } = await supabase.from('profiles').select('id, name, email, role, status, created_at, metadata').eq('role', role).eq('status', 'ACTIVE').order('name', { ascending: true });
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-/** Team members of a role that the Coordinator can manage: ACTIVE and INACTIVE
- * (so a deactivated member stays visible and can be switched back on). Use
- * listActiveProfilesByRole for pickers that must only offer usable accounts. */
-export async function listManagedProfilesByRole(role: 'EDITOR' | 'REVIEWER' | 'PUBLISHER' | 'GD_MEMBER'): Promise<ProfileRow[]> {
-  const { data, error } = await supabase.from('profiles').select('id, name, email, role, status, created_at, metadata').eq('role', role).in('status', ['ACTIVE', 'INACTIVE']).order('name', { ascending: true });
+export async function listActiveProfilesByRole(role: 'EDITOR' | 'REVIEWER'): Promise<ProfileRow[]> {
+  const { data, error } = await supabase.from('profiles').select('id, name, email, role, status').eq('role', role).eq('status', 'ACTIVE').order('name', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
 }
 
 export async function listPendingApprovals(): Promise<ProfileRow[]> {
-  const { data, error } = await supabase.from('profiles').select('id, name, email, role, requested_role, status').eq('status', 'PENDING_APPROVAL').or('requested_role.is.null,requested_role.neq.ADMIN').order('created_at', { ascending: true });
+  const { data, error } = await supabase.from('profiles').select('id, name, email, role, requested_role, status').eq('status', 'PENDING_APPROVAL').order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
   return data ?? [];
-}
-
-/** Real invited/accepted/completed counts per reviewer, aggregated from reviewer_assignments. */
-export async function getReviewerAssignmentCounts(reviewerIds: string[]): Promise<Record<string, { invited: number; accepted: number; completed: number }>> {
-  const result: Record<string, { invited: number; accepted: number; completed: number }> = {};
-  if (reviewerIds.length === 0) return result;
-
-  const { data, error } = await supabase
-    .from('reviewer_assignments')
-    .select('reviewer_id, status')
-    .in('reviewer_id', Array.from(new Set(reviewerIds)));
-  if (error) throw new Error(error.message);
-
-  for (const row of data ?? []) {
-    const bucket = (result[row.reviewer_id] ??= { invited: 0, accepted: 0, completed: 0 });
-    bucket.invited += 1;
-    if (row.status === 'ACCEPTED' || row.status === 'SUBMITTED') bucket.accepted += 1;
-    if (row.status === 'SUBMITTED') bucket.completed += 1;
-  }
-  return result;
 }
 
 export async function approveUserRole(targetId: string, approve: boolean): Promise<ProfileRow> {
@@ -957,8 +361,7 @@ export interface DraftManuscriptInput {
   isDoubleBlind: boolean;
   coverLetter: string;
   language: string;
-  manuscriptType?: string;
-  contributors: { name: string; email: string; affiliation: string; department?: string; role: string }[];
+  contributors: { name: string; email: string; affiliation: string; role: string }[];
   suggestedReviewers: { name: string; email: string; note?: string }[];
 }
 
@@ -974,7 +377,6 @@ export async function createDraftManuscript(input: DraftManuscriptInput): Promis
     is_double_blind: input.isDoubleBlind,
     cover_letter: input.coverLetter,
     language: input.language,
-    manuscript_type: input.manuscriptType ?? '',
     status: 'DRAFT'
   });
   if (insertErr) throw new Error(insertErr.message);
@@ -982,7 +384,7 @@ export async function createDraftManuscript(input: DraftManuscriptInput): Promis
   if (input.contributors.length > 0) {
     const { error } = await supabase.from('manuscript_contributors').insert(
       input.contributors.map((c, i) => ({
-        manuscript_id: id, name: c.name, email: c.email, affiliation: c.affiliation, department: c.department ?? '', contributor_role: c.role, position: i
+        manuscript_id: id, name: c.name, email: c.email, affiliation: c.affiliation, contributor_role: c.role, position: i
       }))
     );
     if (error) throw new Error(error.message);
@@ -1002,24 +404,12 @@ export async function createDraftManuscript(input: DraftManuscriptInput): Promis
   return id;
 }
 
-let manuscriptsChannelSeq = 0;
-
-// Channel names must be unique per open subscription -- supabase-js throws
-// "cannot add postgres_changes callbacks ... after subscribe()" if a second
-// .channel() call reuses a topic that's already subscribed. A single fixed
-// name broke the moment a nested component (ProductionSection) started
-// calling this alongside its parent workspace (CoordinatorWorkspace), which
-// already holds one open for the session -- every top-level workspace before
-// that had been the only caller in the app at any given time.
 export function subscribeToManuscripts(onChange: () => void): () => void {
   const channel = supabase
-    .channel(`manuscripts-workflow-changes-${++manuscriptsChannelSeq}`)
+    .channel('manuscripts-workflow-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscripts' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'editor_assignments' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'reviewer_assignments' }, onChange)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_revisions' }, onChange)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_files' }, onChange)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'manuscript_status_history' }, onChange)
     .subscribe();
   return () => { supabase.removeChannel(channel); };
 }
@@ -1028,54 +418,3 @@ export async function markNotificationRead(notificationId: string): Promise<void
   const { error } = await supabase.from('workflow_notifications').update({ read_at: new Date().toISOString() }).eq('id', notificationId);
   if (error) throw new Error(error.message);
 }
-
-/** Marks every currently-unread notification for the logged-in user as
- * read in one write -- RLS (recipient_id = auth.uid()) scopes this to their
- * own rows, so no explicit recipient filter is needed. Used when the bell
- * dropdown is opened, so the unread badge clears as soon as the user has
- * actually seen the list instead of requiring them to click each one. */
-export async function markAllNotificationsRead(): Promise<void> {
-  const { error } = await supabase.from('workflow_notifications').update({ read_at: new Date().toISOString() }).is('read_at', null);
-  if (error) throw new Error(error.message);
-}
-
-/** Coordinator-only: permanently deletes submitted manuscripts and everything
- * attached to them (see 0112_coordinator_delete_manuscripts.sql). Returns how
- * many were actually deleted. */
-export const deleteManuscripts = (ids: string[]) =>
-  rpcOrThrow<number>(supabase.rpc('coordinator_delete_manuscripts', { p_ids: ids }));
-
-export interface EditorWorkload {
-  open: number;
-  pending: number;
-  overdue: number;
-}
-
-/** Per-editor workload shown next to each name in the Coordinator's editor
- * picker (read-only; Coordinators can already read every editor_assignments
- * row). open = not declined and first evaluation not submitted; pending =
- * invited, awaiting accept/decline; overdue = no response after 96h (new
- * assignments only) or past the editorial completion deadline. */
-export async function getEditorWorkloads(): Promise<Record<string, EditorWorkload>> {
-  const { data, error } = await supabase
-    .from('editor_assignments')
-    .select('editor_id, status, assessment_status, assigned_at, timeline_end_date');
-  if (error) throw new Error(error.message);
-  const today = new Date().toISOString().slice(0, 10);
-  const out: Record<string, EditorWorkload> = {};
-  for (const a of data ?? []) {
-    if (a.status === 'DECLINED' || a.status === 'REPLACED' || a.assessment_status === 'SUBMITTED') continue;
-    const w = (out[a.editor_id] ??= { open: 0, pending: 0, overdue: 0 });
-    w.open += 1;
-    if (a.status === 'INVITED') w.pending += 1;
-    const noResponseOverdue = getEditorAcceptanceState(a) === 'OVERDUE';
-    const pastDeadline = !!a.timeline_end_date && a.timeline_end_date < today;
-    if (noResponseOverdue || pastDeadline) w.overdue += 1;
-  }
-  return out;
-}
-
-/** Coordinator-only: replaces an editor who never responded within the 4-day
- * acceptance window. A reason is required. See 0128_replace_overdue_editor.sql. */
-export const coordinatorReplaceEditor = (manuscriptId: string, newEditorId: string, startDate: string, endDate: string, reason: string) =>
-  rpcOrThrow(supabase.rpc('coordinator_replace_editor', { p_manuscript_id: manuscriptId, p_new_editor_id: newEditorId, p_start_date: startDate, p_end_date: endDate, p_reason: reason }));

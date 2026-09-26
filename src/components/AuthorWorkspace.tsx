@@ -1,200 +1,98 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Role, ManuscriptStatus, Manuscript } from '../types';
+import { Role, ManuscriptStatus } from '../types';
 import {
   ManuscriptRow,
-  RevisionRow,
   listManuscripts,
   getManuscript,
-  subscribeToManuscripts,
-  getManuscriptFiles,
+  createDraftManuscript,
   submitManuscript,
-  getLatestRevisionsByManuscriptIds
+  subscribeToManuscripts
 } from '../lib/workflow';
-import { supabase, ensureAuthorProfile } from '../lib/supabase';
-import { getManuscriptStatusLabel, STANDARD_STATUS_COLORS } from '../lib/manuscriptStatusLabel';
-import { listProduction, subscribeToProduction } from '../lib/production';
 import NewSubmissionFlow from './NewSubmissionFlow';
 import OjsSubmissionDetail from './OjsSubmissionDetail';
-import ManuscriptDiscussion from './ManuscriptDiscussion';
-import NotificationBell, { JMS_OPEN_MANUSCRIPT_EVENT, JmsOpenManuscriptDetail } from './NotificationBell';
-import AuthorRevisionRequest from './AuthorRevisionRequest';
-import { NavGroup, NavItem } from './SidebarNavGroup';
-import { SidebarBrand, SidebarDecoration, TopBar } from './RoleChrome';
-import { StatusStatCard } from './StatusStatCard';
-import { SidebarThemeContext, LIGHT_SIDEBAR_SURFACE, LIGHT_PAGE_SURFACE } from './sidebarTheme';
-import { usePermissions } from '../lib/permissions';
-import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, AlertCircle, ChevronDown, Settings, Trash2, User, Send, Eye, Pencil, CheckCircle2, Newspaper } from 'lucide-react';
+import { Plus, FileText, Loader2, Inbox, Clock, CheckCircle, Archive, XCircle, BookOpen, Globe, Settings, BarChart, AlertCircle } from 'lucide-react';
 
 interface AuthorWorkspaceProps {
   manuscripts?: any[];
-  currentUser?: { name: string; email: string; role: Role; id?: string } | null;
+  onSaveManuscript?: (manuscript: any) => void;
+  onSubmitManuscript?: (manuscriptId: string) => void;
+  onDeleteManuscript?: (manuscriptId: string) => void;
+  currentUser?: { name: string; email: string; role: Role } | null;
   onSignOut?: () => void;
 }
 
-const WORKFLOW_STAGES = ['SUBMITTED', 'EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED'];
-const PROGRESS_STEPS = ['Intake', 'Evaluation', 'Revision', 'Production', 'Published'];
+const STATUS_STYLES: Record<ManuscriptStatus, string> = {
+  DRAFT: 'bg-slate-100 text-slate-600 border-slate-200',
+  SUBMITTED: 'bg-amber-50 text-amber-700 border-amber-200',
+  EDITOR_REVIEW: 'bg-blue-50 text-blue-700 border-blue-200',
+  UNDER_REVIEW: 'bg-purple-50 text-purple-700 border-purple-200',
+  REVISION_REQUESTED: 'bg-orange-50 text-orange-700 border-orange-200',
+  AWAITING_DECISION: 'bg-sky-50 text-sky-700 border-sky-200',
+  ACCEPTED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  PUBLISHED: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+  REJECTED: 'bg-red-50 text-red-700 border-red-200',
+};
+
+function StatusBadge({ status }: { status: ManuscriptStatus }) {
+  return (
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wide ${STATUS_STYLES[status]}`}>
+      {status.replace(/_/g, ' ')}
+    </span>
+  );
+}
 
 function formatDate(iso: string | null) {
   if (!iso) return '--';
   return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function getProgressTimeline(status: ManuscriptStatus) {
-  const stageIndex = WORKFLOW_STAGES.indexOf(status);
-  return PROGRESS_STEPS.map((_, idx) => idx <= Math.max(0, stageIndex));
-}
-
 export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorkspaceProps) {
-  const { can } = usePermissions();
   const [items, setItems] = useState<ManuscriptRow[]>([]);
   const [selectedDetail, setSelectedDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
-  const [view, setView] = useState<'list' | 'new' | 'detail' | 'discussion' | 'revision'>('list');
-  // The Incomplete (DRAFT) submission being resumed; null = a brand-new submission.
-  const [resumeDraft, setResumeDraft] = useState<ManuscriptRow | null>(null);
+  const [view, setView] = useState<'list' | 'new' | 'detail'>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Which tab OjsSubmissionDetail should open on -- set when "Review
-  // Proofreading" is clicked so it lands straight on the production tab
-  // instead of the default submission overview.
-  const [detailInitialTab, setDetailInitialTab] = useState<string | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState('');
-  const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
-  const [expandedSections, setExpandedSections] = useState({ submissions: true });
-  const [statusFilter, setStatusFilter] = useState<'incomplete' | 'active' | 'review' | 'revisions' | 'accepted' | 'rejected' | 'published'>('active');
-  const [submissionsGroupExpanded, setSubmissionsGroupExpanded] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
-  // Task 11: manuscript_id -> production_status, for the "PROOFREADING"
-  // label once a proof is with the author (see PROOFREADING_PRODUCTION_STATUSES
-  // in lib/manuscriptStatusLabel.ts). RLS already scopes listProduction() to
-  // rows the author owns, same as their manuscripts themselves.
-  const [productionByManuscript, setProductionByManuscript] = useState<Record<string, string>>({});
-  // manuscript_id -> latest manuscript_revisions row. Needed to tell "revision
-  // requested, not yet submitted" (AWAITING_AUTHOR_UPLOAD -- show "Submit
-  // Revision") apart from "already submitted, waiting on the Coordinator to
-  // forward it" (REVISION_SUBMITTED -- manuscripts.status stays
-  // REVISION_REQUESTED until then, see submit_revision() in
-  // 0038_revision_loop_accept_and_author_response.sql, so the raw status
-  // alone can't distinguish these two).
-  const [latestRevisionByManuscript, setLatestRevisionByManuscript] = useState<Record<string, RevisionRow>>({});
 
-  useEffect(() => {
-    const refetch = () => listProduction().then((rows) => {
-      setProductionByManuscript(Object.fromEntries(rows.map((r) => [r.manuscript_id, r.production_status])));
-    }).catch(() => {});
-    refetch();
-    const unsubscribe = subscribeToProduction(refetch);
-    return unsubscribe;
-  }, []);
-
-  // Load manuscripts for current user
   const load = async () => {
     try {
-      console.log('[LOAD] Starting to fetch manuscripts...');
-      const { data: userData } = await supabase.auth.getUser();
-      console.log('[LOAD] Current user ID:', userData.user?.id);
-
-      if (!userData.user?.id) {
-        setError('Not authenticated');
-        console.log('[LOAD] ERROR: Not authenticated');
-        return;
-      }
-
-      // Fetch manuscripts for this user
-      console.log('[LOAD] Querying manuscripts table where author_id =', userData.user.id);
-      const { data, error: queryError } = await supabase
-        .from('manuscripts')
-        .select('*, display_status')
-        .eq('author_id', userData.user.id)
-        .order('submitted_at', { ascending: false });
-
-      console.log('[LOAD] Query result - error:', queryError, 'data count:', data?.length);
-      if (queryError) throw queryError;
-
-      console.log('[LOAD] Fetched manuscripts:', data?.map((m: any) => ({ id: m.id, title: m.title, author_id: m.author_id, submitted_at: m.submitted_at })));
-
-      // Fetch files for each manuscript
-      const manuscriptsWithFiles = await Promise.all(
-        (data || []).map(async (manuscript) => {
-          const files = await getManuscriptFiles(manuscript.id);
-          return { ...manuscript, files };
-        })
-      );
-
-      console.log('[LOAD] Setting items with', manuscriptsWithFiles.length, 'manuscripts');
-      setItems((manuscriptsWithFiles || []) as ManuscriptRow[]);
-      setError('');
-
-      getLatestRevisionsByManuscriptIds((data || []).map((m: any) => m.id))
-        .then(setLatestRevisionByManuscript)
-        .catch((e) => console.error('[LOAD] Error loading latest revisions:', e));
+      const rows = await listManuscripts();
+      setItems(rows);
     } catch (e: any) {
-      setError(e.message || 'Failed to load manuscripts');
-      console.error('[LOAD] Error loading manuscripts:', e);
+      setError(e.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Filter manuscripts by sidebar category, then by search. Keyed off the
-  // standardized display status (getManuscriptStatusLabel), not the raw
-  // manuscripts.status column -- e.g. "review" must not include a manuscript
-  // that's technically UNDER_REVIEW but hasn't actually reached Peer Review
-  // yet (only one reviewer has accepted so far).
-  const STATUS_FILTER_PREDICATES: Record<typeof statusFilter, (m: ManuscriptRow) => boolean> = {
-    incomplete: (m) => m.status === 'DRAFT',
-    active: (m) => m.status !== 'DRAFT',
-    review: (m) => ['EDITORIAL REVIEW', 'PEER REVIEW'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id])),
-    revisions: (m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'IN REVISION',
-    accepted: (m) => ['ACCEPTED', 'PROOFREADING'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id])),
-    rejected: (m) => m.status === 'REJECTED',
-    published: (m) => m.status === 'PUBLISHED',
-  };
-
   const filteredItems = items.filter((m) => {
-    if (!STATUS_FILTER_PREDICATES[statusFilter](m)) return false;
     const query = searchTerm.toLowerCase();
     return (
       m.title.toLowerCase().includes(query) ||
-      m.id.toLowerCase().includes(query)
+      m.id.toLowerCase().includes(query) ||
+      m.author_name.toLowerCase().includes(query)
     );
   });
 
-  // Pagination calculations
-  const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const paginatedItems = filteredItems.slice(startIndex, endIndex);
-
-  // Reset to page 1 when search/filter changes
-  useMemo(() => {
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter]);
-
-  // Calculate status counts -- bucketed by the standardized display status,
-  // not the raw manuscripts.status column (see STATUS_FILTER_PREDICATES).
   const statusCounts = {
-    incomplete: items.filter((m) => m.status === 'DRAFT').length,
-    submitted: items.filter((m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'SUBMITTED').length,
-    editorialReview: items.filter((m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'EDITORIAL REVIEW').length,
-    peerReview: items.filter((m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'PEER REVIEW').length,
-    underReview: items.filter((m) => ['EDITORIAL REVIEW', 'PEER REVIEW'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]))).length,
-    revisionRequested: items.filter((m) => getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) === 'IN REVISION').length,
-    accepted: items.filter((m) => ['ACCEPTED', 'PROOFREADING'].includes(getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]))).length,
+    submitted: items.filter((m) => m.status === 'SUBMITTED').length,
+    underReview: items.filter((m) => m.status === 'UNDER_REVIEW').length,
+    revisionRequested: items.filter((m) => m.status === 'REVISION_REQUESTED').length,
+    awaitingDecision: items.filter((m) => m.status === 'AWAITING_DECISION').length,
+    accepted: items.filter((m) => m.status === 'ACCEPTED').length,
     published: items.filter((m) => m.status === 'PUBLISHED').length,
     rejected: items.filter((m) => m.status === 'REJECTED').length,
+    revisionProcessing: items.filter((m) => ['UNDER_REVIEW', 'AWAITING_DECISION', 'EDITOR_REVIEW'].includes(m.status)).length
   };
 
-  // Setup subscriptions
   useEffect(() => {
     load();
     const unsubscribe = subscribeToManuscripts(load);
     return unsubscribe;
   }, []);
 
-  // Load manuscript details
   useEffect(() => {
     if (!selectedId || view !== 'detail') {
       setSelectedDetail(null);
@@ -210,725 +108,326 @@ export default function AuthorWorkspace({ currentUser, onSignOut }: AuthorWorksp
       .finally(() => setDetailLoading(false));
   }, [selectedId, view]);
 
-  // Clicking a manuscript-linked notification jumps straight to that
-  // manuscript, same pattern as EditorWorkspace.
-  useEffect(() => {
-    const onOpenManuscript = (e: Event) => {
-      const detail = (e as CustomEvent<JmsOpenManuscriptDetail>).detail;
-      if (!detail) return;
-      setSelectedId(detail.manuscriptId);
-      setView('detail');
-    };
-    window.addEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
-    return () => window.removeEventListener(JMS_OPEN_MANUSCRIPT_EVENT, onOpenManuscript);
-  }, []);
-
-  // Delete manuscript
-  const handleDelete = async (manuscriptId: string, manuscript: ManuscriptRow) => {
-    // Authors can only delete an unsubmitted draft -- never after submission.
-    if (manuscript.status !== 'DRAFT') {
-      setError('A submitted manuscript cannot be deleted');
-      return;
-    }
-
-    if (!confirm('Are you sure you want to delete this manuscript?')) return;
-
-    setDeleteLoading(manuscriptId);
-    try {
-      const { error: deleteError } = await supabase
-        .from('manuscripts')
-        .delete()
-        .eq('id', manuscriptId);
-
-      if (deleteError) throw deleteError;
-
-      setItems(items.filter(m => m.id !== manuscriptId));
-      setError('');
-    } catch (e: any) {
-      setError(e.message || 'Failed to delete manuscript');
-    } finally {
-      setDeleteLoading(null);
-    }
-  };
-
   const selected = selectedDetail || items.find((m) => m.id === selectedId) as any || null;
-
-  // Handle manuscript submission from NewSubmissionFlow
-  const handleNewSubmission = async (paperDetails: any) => {
-    try {
-      console.log('[SUBMIT] Starting new manuscript submission...');
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setError('Not authenticated');
-        console.log('[SUBMIT] ERROR: User not authenticated');
-        return;
-      }
-
-      console.log('[SUBMIT] Current authenticated user ID:', user.id);
-
-      // Ensure author profile exists (SECURITY DEFINER RPC bypasses RLS)
-      console.log('[SUBMIT] Ensuring author profile exists...');
-      await ensureAuthorProfile();
-      console.log('[SUBMIT] Author profile ready');
-
-      // Use manuscript ID from paperDetails (generated in NewSubmissionFlow)
-      // This ensures consistency across the entire flow
-      const manuscriptId = paperDetails.id;
-      if (!manuscriptId) {
-        throw new Error('Manuscript ID not provided from submission');
-      }
-      console.log('[SUBMIT] Using manuscript ID:', manuscriptId);
-
-      // Create Manuscript object from submission data
-      const newManuscript: Manuscript = {
-        id: manuscriptId,
-        title: paperDetails.title || 'Untitled Manuscript',
-        subtitle: paperDetails.subtitle || '',
-        abstract: paperDetails.abstract || '',
-        references: '',
-        isDoubleBlind: paperDetails.isDoubleBlind || false,
-        coverLetter: paperDetails.coverLetter || '',
-        fileName: paperDetails.fileName || null,
-        fileSize: paperDetails.fileSize || null,
-        uploadedAt: new Date().toISOString(),
-        storagePath: paperDetails.storagePath || null,
-        publicUrl: paperDetails.publicUrl || null,
-        uploadedFiles: paperDetails.additionalFiles || [],
-        contributors: paperDetails.contributors || [],
-        status: 'SUBMITTED' as ManuscriptStatus,
-        submittedAt: new Date().toISOString(),
-        reviewers: [],
-        suggestedReviewers: paperDetails.reviewerSuggestions || [],
-        discussions: [],
-        doi: null,
-        volume: null,
-        issue: null,
-        publishedAt: null,
-        authorId: user.id,
-        authorName: currentUser?.name || 'Unknown Author',
-        authorEmail: currentUser?.email || user.email || '',
-        submissionStep: 9,
-        editorsNotes: '',
-        language: paperDetails.language || 'English',
-        manuscriptType: paperDetails.manuscriptType || ''
-      };
-
-      console.log('[SUBMIT] Manuscript object created:', { id: newManuscript.id, title: newManuscript.title, authorId: newManuscript.authorId, submittedAt: newManuscript.submittedAt });
-
-      // Create the manuscript as a DRAFT first, then transition it through
-      // the real submit_manuscript() RPC below -- this is the same
-      // server-enforced state machine every other workflow step goes
-      // through (writes manuscript_status_history, notifies Coordinators),
-      // instead of a direct insert with status='SUBMITTED' that silently
-      // skipped both. A manuscript ID is generated exactly once by
-      // NewSubmissionFlow (reused across "Save Draft" clicks and the final
-      // submit), so the author may already have a DRAFT row under this same
-      // id from an earlier Save Draft. RLS only grants authors UPDATE on a
-      // specific column list (not status/author_id/etc, see
-      // 0002_manuscripts_workflow.sql) -- a plain .upsert() would name every
-      // column in its ON CONFLICT DO UPDATE SET clause and get rejected for
-      // the restricted ones even though they're not actually changing here,
-      // so this checks for an existing row and does a real INSERT or a
-      // column-scoped UPDATE instead.
-      console.log('[SUBMIT] Saving manuscript record as DRAFT (pre-transition)...');
-      const { data: existingDraft, error: lookupError } = await supabase
-        .from('manuscripts')
-        .select('id')
-        .eq('id', manuscriptId)
-        .maybeSingle();
-      if (lookupError) {
-        throw new Error(`Failed to check for existing draft: ${lookupError.message}`);
-      }
-
-      const insertError = existingDraft
-        ? (await supabase
-            .from('manuscripts')
-            .update({
-              title: newManuscript.title,
-              subtitle: newManuscript.subtitle,
-              abstract: newManuscript.abstract,
-              references: newManuscript.references,
-              is_double_blind: newManuscript.isDoubleBlind,
-              cover_letter: newManuscript.coverLetter,
-              language: newManuscript.language,
-              manuscript_type: newManuscript.manuscriptType
-            })
-            .eq('id', manuscriptId)).error
-        : (await supabase
-            .from('manuscripts')
-            .insert([{
-              id: newManuscript.id,
-              title: newManuscript.title,
-              subtitle: newManuscript.subtitle,
-              abstract: newManuscript.abstract,
-              references: newManuscript.references,
-              is_double_blind: newManuscript.isDoubleBlind,
-              cover_letter: newManuscript.coverLetter,
-              status: 'DRAFT',
-              author_id: user.id,
-              author_name: newManuscript.authorName,
-              author_email: newManuscript.authorEmail,
-              language: newManuscript.language,
-              manuscript_type: newManuscript.manuscriptType
-            }])).error;
-
-      if (insertError) {
-        throw new Error(`Failed to insert manuscript: ${insertError.message}`);
-      }
-
-      console.log('[SUBMIT] Manuscript record inserted successfully as DRAFT');
-
-      // Persist contributors (co-authors) -- previously captured in the
-      // wizard but never written to manuscript_contributors.
-      const saveContributors = async () => {
-        if (!(paperDetails.contributors && paperDetails.contributors.length > 0)) return;
-        // A retry after a failed attempt must not duplicate rows.
-        await supabase.from('manuscript_contributors').delete().eq('manuscript_id', manuscriptId);
-        const contributorRows = paperDetails.contributors.map((c: any, i: number) => ({
-          manuscript_id: manuscriptId,
-          name: [c.firstName, c.lastName].filter(Boolean).join(' ').trim() || c.name || '',
-          email: c.email || '',
-          affiliation: c.affiliation || '',
-          department: c.department || '',
-          contributor_role: c.role || (c.isPrincipalContact ? 'Primary Author' : 'Co-Author'),
-          position: i
-        }));
-        let { error: contributorsError } = await supabase.from('manuscript_contributors').insert(contributorRows);
-        // Department column (migration 0124) not deployed yet -- save without it.
-        if (contributorsError && /department/i.test(contributorsError.message)) {
-          ({ error: contributorsError } = await supabase.from('manuscript_contributors').insert(
-            contributorRows.map(({ department, ...rest }: any) => rest)
-          ));
-        }
-        if (contributorsError) {
-          throw new Error(`Failed to save contributors: ${contributorsError.message}`);
-        }
-      };
-
-      // Persist author-suggested reviewers -- same table the Editor's later
-      // suggestions land in, discriminated by suggested_by='AUTHOR'.
-      const saveReviewers = async () => {
-        if (!(paperDetails.reviewerSuggestions && paperDetails.reviewerSuggestions.length > 0)) return;
-        await supabase.from('manuscript_suggested_reviewers').delete().eq('manuscript_id', manuscriptId).eq('suggested_by', 'AUTHOR');
-        const reviewerRows = paperDetails.reviewerSuggestions.map((r: any) => ({
-          manuscript_id: manuscriptId,
-          suggested_by: 'AUTHOR' as const,
-          suggested_by_user: user.id,
-          name: r.name || '',
-          email: r.email || '',
-          department: r.department || '',
-          note: r.reason || r.note || ''
-        }));
-        let { error: reviewersError } = await supabase.from('manuscript_suggested_reviewers').insert(reviewerRows);
-        // Department column (migration 0125) not deployed yet -- save without it.
-        if (reviewersError && /department/i.test(reviewersError.message)) {
-          ({ error: reviewersError } = await supabase.from('manuscript_suggested_reviewers').insert(
-            reviewerRows.map(({ department, ...rest }: any) => rest)
-          ));
-        }
-        if (reviewersError) {
-          throw new Error(`Failed to save suggested reviewers: ${reviewersError.message}`);
-        }
-      };
-
-      // Now sync uploaded files to manuscript_files table via server-side RPC
-      // -- includes both the main submission files (Title Page, Blind
-      // Manuscript, Author Form) AND the Step 5.2 supplementary/auxiliary
-      // files. The latter previously uploaded fine to storage but were
-      // never synced here, so they never appeared in manuscript_files and
-      // the Supplementary Files tab always showed "No supplementary files"
-      // regardless of what was actually uploaded.
-      const syncFiles = async () => {
-      const allFilesToSync = [...(paperDetails.uploadedFiles || []), ...(paperDetails.additionalFiles || [])];
-      if (allFilesToSync.length > 0) {
-        console.log('[SUBMIT] Syncing files to manuscript_files table:', allFilesToSync);
-
-        // Transform files to match the RPC parameter format
-        const filesForSync = allFilesToSync.map((file: any) => {
-          console.log('[SUBMIT] Transforming file:', {
-            fileName: file.fileName,
-            componentType: file.componentType,
-            storagePath: file.storagePath,
-            publicUrl: file.publicUrl
-          });
-          return {
-            file_name: file.fileName,
-            file_type: file.componentType,
-            file_size: file.fileSize,
-            storage_path: file.storagePath,
-            public_url: file.publicUrl
-          };
-        });
-
-        console.log('[SUBMIT] Transformed files for sync:', filesForSync);
-
-        try {
-          const { data: syncResult, error: syncError } = await supabase.rpc(
-            'sync_manuscript_files',
-            {
-              p_manuscript_id: manuscriptId,
-              p_files: filesForSync
-            }
-          );
-
-          if (syncError) {
-            console.error('[SUBMIT] File sync RPC error:', syncError.message, syncError);
-            throw new Error(`File sync failed: ${syncError.message}`);
-          } else {
-            console.log('[SUBMIT] Files synced successfully:', syncResult);
-          }
-        } catch (fileError) {
-          console.error('[SUBMIT] Failed to sync files:', fileError);
-          throw fileError;
-        }
-      } else {
-        console.warn('[SUBMIT] No files to sync.');
-      }
-      };
-
-      // The three saves are independent of each other (the DRAFT row already
-      // exists), so run them together instead of one after another.
-      await Promise.all([saveContributors(), saveReviewers(), syncFiles()]);
-
-      // Transition DRAFT -> SUBMITTED through the real workflow RPC. This is
-      // the single point where the manuscript actually becomes visible to
-      // Coordinators (submit_manuscript() writes manuscript_status_history
-      // and notifies every ACTIVE Coordinator) -- everything above this line
-      // only populated a DRAFT row the author already owns exclusively.
-      console.log('[SUBMIT] Calling submit_manuscript RPC to finalize submission...');
-      await submitManuscript(manuscriptId);
-      console.log('[SUBMIT] Manuscript submitted (DRAFT -> SUBMITTED)');
-
-      // Refresh the list to show the new manuscript
-      // Refresh the list in the background; the wizard stays open to show its
-      // completion screen (MSS ID), and leaving it reloads the list anyway.
-      void load();
-      console.log('[SUBMIT] Submission complete!');
-    } catch (err: any) {
-      const errorMsg = err.message || 'Failed to submit manuscript';
-      setError(errorMsg);
-      console.error('[SUBMIT] Submission error:', errorMsg, err);
-      // Let the wizard show the failure instead of a false "submitted" screen.
-      throw new Error(errorMsg);
-    }
-  };
-
-  // Persist the in-progress wizard as an incomplete (DRAFT) manuscript.
-  // The manuscripts table's RLS grant only allows authors to UPDATE a
-  // specific column list (title, abstract, references, is_double_blind,
-  // cover_letter, language, submission_step, editors_notes) -- status,
-  // author_id etc. can only be set at INSERT time / through the workflow
-  // RPCs. A plain .upsert() issues an INSERT ... ON CONFLICT DO UPDATE that
-  // names every column (including the restricted ones) in its SET clause,
-  // which Postgres rejects for lack of privilege even when no conflict
-  // actually occurs -- so this checks for an existing row first and does a
-  // real INSERT or a column-scoped UPDATE accordingly, rather than upserting.
-  const handleSaveDraft = async (paperDetails: any) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setError('Not authenticated');
-        return;
-      }
-      await ensureAuthorProfile();
-
-      const manuscriptId = paperDetails.id;
-      if (!manuscriptId) return;
-
-      const { data: existing, error: lookupError } = await supabase
-        .from('manuscripts')
-        .select('id')
-        .eq('id', manuscriptId)
-        .maybeSingle();
-      if (lookupError) throw new Error(lookupError.message);
-
-      // The full-wizard snapshot lives in manuscripts.draft_state (migration 0126).
-      // If that column isn't deployed yet, still save the basic fields and rely on
-      // the local copy rather than losing the draft entirely.
-      const persist = async (includeState: boolean): Promise<string | null> => {
-        if (existing) {
-          const { error: updateError } = await supabase
-            .from('manuscripts')
-            .update({
-              title: paperDetails.title || '',
-              subtitle: paperDetails.subtitle || '',
-              abstract: paperDetails.abstract || '',
-              cover_letter: paperDetails.coverLetter || '',
-              language: paperDetails.language || 'English',
-              manuscript_type: paperDetails.manuscriptType || '',
-              ...(includeState ? { draft_state: paperDetails.draftState ?? null } : {}),
-              submission_step: paperDetails.submissionStep || 1
-            })
-            .eq('id', manuscriptId);
-          if (updateError) return updateError.message;
-        } else {
-          const { error: insertError } = await supabase
-            .from('manuscripts')
-            .insert([{
-              id: manuscriptId,
-              title: paperDetails.title || '',
-              subtitle: paperDetails.subtitle || '',
-              abstract: paperDetails.abstract || '',
-              cover_letter: paperDetails.coverLetter || '',
-              status: 'DRAFT',
-              author_id: user.id,
-              author_name: currentUser?.name || 'Unknown Author',
-              author_email: currentUser?.email || user.email || '',
-              language: paperDetails.language || 'English',
-              manuscript_type: paperDetails.manuscriptType || '',
-              ...(includeState ? { draft_state: paperDetails.draftState ?? null } : {}),
-              submission_step: paperDetails.submissionStep || 1
-            }]);
-          if (insertError) return insertError.message;
-        }
-        return null;
-      };
-      let persistError = await persist(true);
-      if (persistError && /draft_state/i.test(persistError)) persistError = await persist(false);
-      if (persistError) throw new Error(persistError);
-
-      await load();
-      setStatusFilter('incomplete');
-      setResumeDraft(null);
-      setView('list');
-    } catch (err: any) {
-      console.error('[SAVE DRAFT] Error:', err);
-      throw new Error(err.message || 'Failed to save draft');
-    }
-  };
+  const detailPaper = useMemo(() => {
+    if (!selected) return null;
+    return {
+      ...selected,
+      author: selected.author_name || selected.authorName || currentUser?.name || 'Author',
+      receivedAt: selected.submitted_at || selected.uploaded_at || selected.uploadedAt || '08 June 2026',
+      fileName: selected.file_name || selected.fileName,
+      fileSize: selected.file_size || selected.fileSize,
+      uploadedFiles: selected.uploaded_files || selected.uploadedFiles || [],
+      discussions: selected.discussions || selected.discussion_threads || [],
+      reviewers: selected.reviewers || [],
+      stage: selected.stage || '',
+      raw: selected
+    };
+  }, [selected, currentUser?.name]);
 
   if (view === 'new') {
     return (
-      <div key={resumeDraft?.id ?? 'new'} className={`w-full min-h-screen flex flex-col ${LIGHT_PAGE_SURFACE} role-tint`}>
-        <NewSubmissionFlow
-          resumeDraft={resumeDraft}
-          currentUser={currentUser ?? null}
-          onCancel={() => { setResumeDraft(null); setView('list'); load(); }}
-          onSubmit={handleNewSubmission}
-          onSaveDraft={handleSaveDraft}
-        />
-      </div>
-    );
-  }
-
-  if (view === 'discussion' && selectedId) {
-    return (
-      <ManuscriptDiscussion
-        manuscriptId={selectedId}
-        onBack={() => { setView('list'); setSelectedId(null); }}
-        currentUser={currentUser}
+      <NewSubmissionFlow
+        currentUser={currentUser ?? null}
+        onCancel={() => { setView('list'); load(); }}
+        onSubmit={(paperObj) => {
+          submitFromWizard(paperObj).catch((e: any) => setError(e.message || 'Could not submit manuscript.'));
+        }}
       />
     );
   }
 
-  if (view === 'revision' && selectedId) {
-    return (
-      <div className={`w-full min-h-screen ${LIGHT_PAGE_SURFACE} role-tint p-6 md:p-8`}>
-        <div className="w-full space-y-5">
-          <button
-            onClick={() => { setView('list'); setSelectedId(null); load(); }}
-            className="text-xs font-bold text-slate-500 hover:text-slate-700"
-          >
-            &larr; Back to My Manuscripts
-          </button>
-          <AuthorRevisionRequest
-            manuscriptId={selectedId}
-            onRevisionSubmitted={() => { load(); }}
-          />
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className={`w-full min-h-screen ${LIGHT_PAGE_SURFACE} role-tint flex flex-col md:flex-row font-sans`}>
-      {/* Dark Green Sidebar */}
-      {view === 'list' && (
-        <div className={`w-full md:w-[220px] xl:w-[270px] ${LIGHT_SIDEBAR_SURFACE} md:min-h-screen md:sticky md:top-0 md:max-h-screen md:overflow-y-auto shrink-0 flex flex-col`}>
-          <SidebarThemeContext.Provider value="light">
-          <SidebarBrand />
-          <div className="px-3 pb-6">
-
-          {/* Menu */}
-          <div className="space-y-3">
-            {can('MY_SUBMISSIONS', 'VIEW') && (
-            <NavGroup title="My Submissions" icon={<Send className="w-4 h-4" />} expanded={submissionsGroupExpanded} onToggle={() => setSubmissionsGroupExpanded((v) => !v)}>
-              {([
-                { id: 'active', label: 'Active', count: items.filter(m => m.status !== 'DRAFT').length, icon: <Send className="w-4 h-4" /> },
-                { id: 'review', label: 'Under Review', count: statusCounts.underReview, icon: <Eye className="w-4 h-4" /> },
-                { id: 'revisions', label: 'Revisions', count: statusCounts.revisionRequested, icon: <Pencil className="w-4 h-4" /> },
-                { id: 'accepted', label: 'Accepted', count: statusCounts.accepted, icon: <CheckCircle2 className="w-4 h-4" /> },
-                { id: 'rejected', label: 'Rejected', count: statusCounts.rejected, icon: <XCircle className="w-4 h-4" /> },
-                { id: 'published', label: 'Published', count: statusCounts.published, icon: <Newspaper className="w-4 h-4" /> },
-                { id: 'incomplete', label: 'Incomplete Submissions', count: statusCounts.incomplete, icon: <FileText className="w-4 h-4" /> },
-              ] as const).map((item) => (
-                <NavItem
-                  key={item.id}
-                  icon={item.icon}
-                  label={item.label}
-                  count={item.count}
-                  active={statusFilter === item.id}
-                  onClick={() => { setStatusFilter(item.id); setView('list'); }}
-                />
-              ))}
-            </NavGroup>
-            )}
-          </div>
-          </div>
-          <SidebarDecoration />
-          </SidebarThemeContext.Provider>
+    <div className="w-full min-h-screen bg-slate-50 flex flex-col font-sans">
+      <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-30">
+        <div>
+          <h1 className="text-lg font-black text-slate-900">My Manuscripts</h1>
+          <p className="text-xs text-slate-500 font-semibold">{currentUser?.name} &middot; {currentUser?.email}</p>
         </div>
-      )}
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <TopBar
-          user={currentUser ? { name: currentUser.name, role: 'AUTHOR' } : null}
-          onSignOut={onSignOut}
-          tinted
-          left={
-            <h1 className="whitespace-nowrap text-2xl font-black leading-tight text-[#0a2e22]">My Manuscripts</h1>
-          }
-          leading={view !== 'new' && can('MY_SUBMISSIONS', 'CREATE') ? (
-            <button
-              onClick={() => { setResumeDraft(null); setView('new'); }}
-              className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer"
-            >
-              <Plus className="w-4 h-4" /> New Submission
+<div className="flex items-center gap-2 flex-wrap">
+            {view !== 'new' && (
+              <button
+                onClick={() => { setView('new'); setSelectedId(null); }}
+                className="flex items-center gap-1.5 bg-[#008751] hover:bg-[#007043] text-white text-xs font-bold px-4 py-2 rounded-lg transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4" /> New Submission
+              </button>
+            )}
+            <button onClick={onSignOut} className="text-xs font-bold text-red-600 hover:text-red-700 px-3 py-2 cursor-pointer">
+              Log Out
             </button>
-          ) : undefined}
-        />
+          </div>
+        </header>
 
-        {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto">
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-4 m-6 mb-4">
-              {error}
+        <div className="bg-white border-b border-slate-200 p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Submission Dashboard</p>
+              <h2 className="text-xl font-black text-slate-900 mt-2">Your manuscripts at a glance</h2>
             </div>
-          )}
+            <div className="relative w-full max-w-md">
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search by title, ID, or author"
+                className="w-full rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
+              />
+            </div>
+          </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Submitted</p>
+              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.submitted}</p>
+            </div>
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Under Review</p>
+              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.underReview}</p>
+            </div>
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Awaiting Decision</p>
+              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.awaitingDecision}</p>
+            </div>
+            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Revisions</p>
+              <p className="mt-3 text-2xl font-black text-slate-900">{statusCounts.revisionRequested}</p>
+            </div>
+          </div>
+        </div>
 
-          {view === 'detail' && selected && (
-            <OjsSubmissionDetail
-              paper={selected}
-              onBack={() => { setView('list'); setSelectedId(null); setDetailInitialTab(undefined); }}
-              currentUser={currentUser}
-              onSubmitRevision={() => setView('revision')}
-              initialTab={detailInitialTab}
-            />
-          )}
+      <main className={`flex-1 w-full ${view === 'detail' ? 'max-w-full px-0' : 'max-w-5xl mx-auto px-6'} py-8`}>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">{error}</div>}
 
-          {view === 'list' && (
-            <div className="p-6 md:p-8 w-full">
-              {/* Stats Cards */}
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+        {view === 'list' && (
+          <div className="grid grid-cols-12 gap-6">
+            <aside className="col-span-12 xl:col-span-3 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">My Submissions as Author</p>
+                  <h2 className="text-xl font-black text-slate-900 mt-2">Dashboard</h2>
+                </div>
+                <span className="inline-flex h-9 min-w-[2.25rem] items-center justify-center rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold">{items.length}</span>
+              </div>
+              <nav className="space-y-2">
                 {[
-                  { label: 'Submitted', count: statusCounts.submitted, icon: <Send className="w-5 h-5" />, tone: 'emerald' as const },
-                  { label: 'Editorial Review', count: statusCounts.editorialReview, icon: <FileText className="w-5 h-5" />, tone: 'amber' as const },
-                  { label: 'Peer Review', count: statusCounts.peerReview, icon: <Eye className="w-5 h-5" />, tone: 'sky' as const },
-                  { label: 'In Revision', count: statusCounts.revisionRequested, icon: <Pencil className="w-5 h-5" />, tone: 'violet' as const }
+                  { label: 'Active submissions', count: items.length, icon: Inbox },
+                  { label: 'Revisions requested', count: statusCounts.revisionRequested, icon: AlertCircle },
+                  { label: 'Revisions submitted', count: statusCounts.awaitingDecision, icon: Archive },
+                  { label: 'Incomplete submissions', count: items.filter((m) => m.status === 'DRAFT').length, icon: XCircle },
+                  { label: 'Scheduled for publication', count: statusCounts.accepted, icon: Clock },
+                  { label: 'Published', count: statusCounts.published, icon: CheckCircle },
+                  { label: 'Declined', count: statusCounts.rejected, icon: XCircle }
                 ].map((item) => (
-                  <StatusStatCard key={item.label} title={item.label} value={item.count} icon={item.icon} tone={item.tone} />
+                  <button
+                    key={item.label}
+                    type="button"
+                    className="w-full flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 transition"
+                  >
+                    <span className="flex items-center gap-3">
+                      <item.icon className="w-4 h-4 text-emerald-600" />
+                      <span>{item.label}</span>
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 border border-slate-200">{item.count}</span>
+                  </button>
+                ))}
+              </nav>
+              <div className="mt-6 border-t border-slate-200 pt-5 space-y-3 text-sm text-slate-600">
+                <div className="font-bold text-slate-900">Quick actions</div>
+                <button onClick={() => setView('new')} className="w-full rounded-2xl bg-emerald-50 px-4 py-3 text-left font-semibold text-emerald-800 hover:bg-emerald-100 transition">New submission</button>
+                <button onClick={() => alert('Open issues panel placeholder')} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-slate-700 hover:bg-slate-50 transition">Issues</button>
+                <button onClick={() => alert('Open announcement panel placeholder')} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-slate-700 hover:bg-slate-50 transition">Announcements</button>
+              </div>
+            </aside>
+
+            <div className="col-span-12 xl:col-span-9 space-y-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] uppercase tracking-[0.22em] font-bold text-emerald-800">
+                    <span>/queue/submitted</span>
+                  </div>
+                  <h2 className="text-2xl font-black text-slate-900">Active submissions</h2>
+                  <p className="text-sm text-slate-500">Manage your active tasks, review stages, and submission progress.</p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={() => alert('Open filter options')}
+                    className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
+                  >
+                    Filters
+                  </button>
+                  <button
+                    onClick={() => setView('new')}
+                    className="rounded-2xl bg-[#008751] px-4 py-2 text-sm font-bold text-white hover:bg-[#007043] transition"
+                  >
+                    + New Submission
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {[
+                  { label: 'SUBMITTED', count: statusCounts.submitted },
+                  { label: 'UNDER REVIEW', count: statusCounts.underReview },
+                  { label: 'REVISION REQUIRED', count: statusCounts.revisionRequested },
+                  { label: 'REVISION PROCESSING', count: statusCounts.revisionProcessing }
+                ].map((item) => (
+                  <div key={item.label} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">{item.label}</p>
+                    <p className="mt-3 text-2xl font-black text-slate-900">{item.count}</p>
+                  </div>
                 ))}
               </div>
 
-              {/* Search & Title */}
-              <div className="bg-white border border-slate-200 rounded-lg p-4 mb-6 shadow-sm">
-                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 className="text-lg font-semibold text-slate-900">
-                      {{ incomplete: 'Incomplete submissions', active: 'Active submissions', review: 'Under review', revisions: 'Revisions requested', accepted: 'Accepted submissions', rejected: 'Rejected submissions', published: 'Published submissions' }[statusFilter]}
-                    </h2>
-                    <p className="text-sm text-slate-600">Manage your submissions and track their progress through the editorial workflow.</p>
+              <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="text-sm font-semibold text-slate-600">Search papers, authors...</div>
+                  <div className="relative w-full max-w-md">
+                    <input
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Search papers, authors..."
+                      className="w-full rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Search Box */}
-              <div className="bg-white border border-slate-200 rounded-lg p-4 mb-6 shadow-sm">
-                <input
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search by manuscript ID or title..."
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 focus:border-[#008751] focus:outline-none"
-                />
-              </div>
-
-              {/* Manuscript Table */}
-              <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
-                <div className="border-b border-slate-100 bg-slate-50 px-6 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Manuscript Queue</p>
-                </div>
+              <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+                <div className="border-b border-slate-100 bg-slate-50 p-4 text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Manuscript queue</div>
                 <div className="overflow-x-auto">
-                  {loading ? (
-                    <div className="flex items-center justify-center py-24 text-slate-400">
-                      <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading manuscripts...
-                    </div>
-                  ) : filteredItems.length === 0 ? (
-                    <div className="text-center py-16 px-6">
-                      <FileText className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-                      <p className="text-sm font-bold text-slate-600">No manuscripts found</p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        {searchTerm ? 'Try a different search term' : 'Click "New Submission" to submit your first manuscript.'}
-                      </p>
-                    </div>
-                  ) : (
-                    <table className="w-full text-left text-sm min-w-[1000px]">
-                      <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600 font-semibold border-b border-slate-200">
-                        <tr>
-                          <th className="px-6 py-3">Manuscript ID</th>
-                          <th className="px-6 py-3">Title</th>
-                          <th className="px-6 py-3">Date Submitted</th>
-                          <th className="px-6 py-3">Current Status</th>
-                          <th className="px-6 py-3">Files</th>
-                          <th className="px-6 py-3">Progress Timeline</th>
-                          <th className="px-6 py-3">Actions</th>
+                  <table className="w-full min-w-[900px] text-left text-sm">
+                    <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="px-4 py-4">MANUSCRIPT ID</th>
+                        <th className="px-4 py-4">TITLE</th>
+                        <th className="px-4 py-4">DATE SUBMITTED</th>
+                        <th className="px-4 py-4">CURRENT STATUS</th>
+                        <th className="px-4 py-4">PROGRESS TIMELINE</th>
+                        <th className="px-4 py-4">ACTIONS</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredItems.map((m) => (
+                        <tr key={m.id} className="hover:bg-slate-50 transition">
+                          <td className="px-4 py-4 font-mono text-xs text-slate-500">{m.id}</td>
+                          <td className="px-4 py-4">
+                            <div className="font-semibold text-slate-900">{m.title}</div>
+                            <div className="mt-1 text-xs text-slate-500">By {m.author_name} • Section: Articles • Doc: {m.file_name || 'test.pdf'}</div>
+                          </td>
+                          <td className="px-4 py-4 text-slate-500 text-xs">{formatDate(m.submitted_at)}</td>
+                          <td className="px-4 py-4">
+                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase text-emerald-700">{m.status.replace(/_/g, ' ')}</span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                              {['Intake', 'Evaluation', 'Revision', 'Production', 'Published'].map((step, idx) => {
+                                const activeSteps = ['SUBMITTED', 'EDITOR_REVIEW', 'UNDER_REVIEW', 'AWAITING_DECISION', 'ACCEPTED', 'PUBLISHED'].indexOf(m.status);
+                                const isCompleted = idx <= Math.max(0, activeSteps);
+                                return (
+                                  <span key={step} className={`inline-flex h-3.5 w-3.5 rounded-full ${isCompleted ? 'bg-emerald-600' : 'bg-slate-200'}`} />
+                                );
+                              })}
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 space-x-2">
+                            <button
+                              onClick={() => { setSelectedId(m.id); setView('detail'); }}
+                              className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition"
+                            >
+                              View
+                            </button>
+                            <button className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition">
+                              Contact
+                            </button>
+                            <button className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 transition">
+                              Delete
+                            </button>
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {paginatedItems.map((m) => (
-                          <tr key={m.id} className="hover:bg-slate-50 transition">
-                            <td className="px-6 py-4 font-mono text-xs text-slate-500 whitespace-nowrap">{m.id}</td>
-                            <td className="px-6 py-4">
-                              <div className="font-medium text-slate-900 text-sm max-w-xs truncate">{m.title}</div>
-                              <div className="mt-0.5 text-xs text-slate-500">Section: {m.section || 'Articles'}</div>
-                            </td>
-                            <td className="px-6 py-4 text-slate-600 text-sm whitespace-nowrap">{formatDate(m.submitted_at)}</td>
-                            <td className="px-6 py-4">
-                              <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase ${STANDARD_STATUS_COLORS[getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id]) as keyof typeof STANDARD_STATUS_COLORS] || STANDARD_STATUS_COLORS.DRAFT}`}>
-                                {getManuscriptStatusLabel(m, undefined, productionByManuscript[m.id])}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-2 text-sm text-slate-600">
-                                {m.files && m.files.length > 0 ? (
-                                  <div className="flex items-center gap-1.5">
-                                    <FileText className="w-4 h-4 text-emerald-600" />
-                                    <span className="text-xs">{m.files.length} file{m.files.length !== 1 ? 's' : ''}</span>
-                                  </div>
-                                ) : (
-                                  <span className="text-xs text-slate-400">No files</span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-1.5">
-                                {getProgressTimeline(m.status).map((completed, idx) => (
-                                  <span
-                                    key={idx}
-                                    className={`inline-flex h-3 w-3 rounded-full transition ${
-                                      completed ? 'bg-[#008751]' : 'bg-slate-300'
-                                    }`}
-                                    title={PROGRESS_STEPS[idx]}
-                                  />
-                                ))}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 space-x-2 whitespace-nowrap">
-                              {/* Review Proofreading -- straight to the production
-                                  tab (AuthorProductionPanel) instead of requiring
-                                  View then a second click once inside. Same
-                                  visibility condition as OjsSubmissionDetail's own
-                                  "View Proofreading" button (accepted + production
-                                  actually started). */}
-                              {m.status === 'ACCEPTED' && productionByManuscript[m.id] && productionByManuscript[m.id] !== 'NOT_STARTED' && (
-                                <button
-                                  onClick={() => { setSelectedId(m.id); setDetailInitialTab('production'); setView('detail'); }}
-                                  className="rounded border border-emerald-300 bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-200 transition"
-                                >
-                                  Review Proofreading
-                                </button>
-                              )}
-                              {m.status === 'DRAFT' ? (
-                                <button
-                                  onClick={() => { setResumeDraft(m); setView('new'); }}
-                                  className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 transition"
-                                >
-                                  Resume Draft
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => { setSelectedId(m.id); setView('detail'); }}
-                                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
-                                >
-                                  View
-                                </button>
-                              )}
-                              {m.status === 'REVISION_REQUESTED' && (
-                                latestRevisionByManuscript[m.id]?.status === 'AWAITING_AUTHOR_UPLOAD' ? (
-                                  <button
-                                    onClick={() => { setSelectedId(m.id); setView('revision'); }}
-                                    className="rounded border border-orange-300 bg-orange-50 px-3 py-1.5 text-xs font-bold text-orange-700 hover:bg-orange-100 transition"
-                                  >
-                                    Submit Revision
-                                  </button>
-                                ) : (
-                                  <span className="inline-flex items-center rounded border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
-                                    Revision {latestRevisionByManuscript[m.id]?.revision_number ?? 1} — Submitted
-                                  </span>
-                                )
-                              )}
-                              {m.status === 'DRAFT' && (
-                                <button
-                                  onClick={() => handleDelete(m.id, m)}
-                                  disabled={deleteLoading === m.id}
-                                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  {deleteLoading === m.id ? <Loader2 className="w-3 h-3 animate-spin inline" /> : 'Delete'}
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-
-                {/* Pagination Controls */}
-                {filteredItems.length > 0 && (
-                  <div className="border-t border-slate-100 bg-slate-50 px-6 py-4 flex items-center justify-between">
-                    <div className="text-xs text-slate-600 font-medium">
-                      Showing {startIndex + 1} to {Math.min(endIndex, filteredItems.length)} of {filteredItems.length} manuscripts
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                        disabled={currentPage === 1}
-                        className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        ← Previous
-                      </button>
-                      <div className="flex items-center gap-1">
-                        {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                          <button
-                            key={page}
-                            onClick={() => setCurrentPage(page)}
-                            className={`w-8 h-8 rounded text-xs font-semibold transition ${
-                              currentPage === page
-                                ? 'bg-[#008751] text-white'
-                                : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                            }`}
-                          >
-                            {page}
-                          </button>
-                        ))}
-                      </div>
-                      <button
-                        onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                        disabled={currentPage === totalPages}
-                        className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Next →
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
-          )}
-        </main>
-      </div>
+          </div>
+        )}
+
+        {view === 'detail' && detailPaper && (
+          <OjsSubmissionDetail
+            paper={detailPaper}
+            onBack={() => { setView('list'); setSelectedId(null); }}
+            currentUser={currentUser}
+          />
+        )}
+      </main>
     </div>
   );
 }
+
+function ManuscriptList({ items, loading, onOpen }: { items: ManuscriptRow[]; loading: boolean; onOpen: (id: string) => void }) {
+  if (loading) {
+    return <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...</div>;
+  }
+  if (items.length === 0) {
+    return (
+      <div className="text-center py-24 bg-white border border-dashed border-slate-300 rounded-2xl">
+        <FileText className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+        <p className="text-sm font-bold text-slate-600">No manuscripts yet</p>
+        <p className="text-xs text-slate-400 mt-1">Click "New Submission" to submit your first manuscript.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
+          <tr>
+            <th className="px-4 py-3">ID</th>
+            <th className="px-4 py-3">Title</th>
+            <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3">Submitted</th>
+            <th className="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {items.map((m) => (
+            <tr key={m.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpen(m.id)}>
+              <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.id}</td>
+              <td className="px-4 py-3 font-bold text-slate-800">{m.title}</td>
+              <td className="px-4 py-3"><StatusBadge status={m.status} /></td>
+              <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(m.submitted_at)}</td>
+              <td className="px-4 py-3 text-right text-[#008751] font-bold text-xs">View &rarr;</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Maps the submission wizard's completed-paper shape onto a real DRAFT
+ * manuscript + contributors + suggested reviewers, then submits it for real. */
+async function submitFromWizard(paperObj: any): Promise<void> {
+  const contributors = (paperObj.contributors || []).map((c: any) => ({
+    name: `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+    email: c.email || '',
+    affiliation: c.affiliation || '',
+    role: c.role || (c.isPrincipalContact ? 'Primary Author' : 'Co-Author')
+  }));
+  const suggestedReviewers = (paperObj.reviewerSuggestions || []).map((r: any) => ({
+    name: r.name, email: r.email, note: r.reason || ''
+  }));
+  const id = await createDraftManuscript({
+    title: paperObj.title || 'Untitled Manuscript',
+    abstract: paperObj.abstract || '',
+    references: '',
+    isDoubleBlind: true,
+    coverLetter: paperObj.coverLetter || '',
+    language: paperObj.language || 'en',
+    contributors,
+    suggestedReviewers
+  });
+  await submitManuscript(id);
+}
+
+

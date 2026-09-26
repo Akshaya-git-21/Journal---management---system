@@ -1001,6 +1001,23 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
 
           </form>
 
+          {/* CONTINUE WITH ORCID (Authors only) */}
+          {localRole === 'AUTHOR' && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                <span className="flex-1 h-px bg-slate-200" /> or <span className="flex-1 h-px bg-slate-200" />
+              </div>
+              <a
+                id="btn-auth-orcid"
+                href="/api/orcid/start"
+                className="w-full bg-white hover:bg-slate-50 border border-[#a6ce39] text-slate-800 font-sans text-xs font-bold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-all duration-150 cursor-pointer shadow-xs"
+              >
+                <span className="w-5 h-5 rounded-full bg-[#a6ce39] text-white text-[10px] font-black flex items-center justify-center">iD</span>
+                Continue with ORCID
+              </a>
+            </div>
+          )}
+
           {/* TOGGLE GATES SCREEN */}
           <div className="text-center pt-3 text-sm border-t border-slate-100">
             {mode === 'LOGIN' ? (

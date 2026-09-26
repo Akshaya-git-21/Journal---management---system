@@ -17,6 +17,8 @@ import AdminWorkspace from './components/AdminWorkspace';
 import PasswordChangeGate from './components/PasswordChangeGate';
 import AuthPortals from './components/AuthPortals';
 import ResetPasswordScreen from './components/ResetPasswordScreen';
+import OrcidCallbackScreen from './components/OrcidCallbackScreen';
+import { readOrcidHandoff, OrcidHandoff } from './lib/orcidAuth';
 import { CheckCircle2, LogOut, User, AlertTriangle } from 'lucide-react';
 import { checkSupabaseConnection } from './lib/supabase';
 import { restoreSession, onAuthChange, logoutAccount } from './lib/auth';
@@ -36,6 +38,8 @@ export default function App() {
   const [authRole, setAuthRole] = useState<Role>('AUTHOR');
   const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER' | 'FORGOT_PASSWORD'>('REGISTER');
   const [showResetPasswordScreen, setShowResetPasswordScreen] = useState(false);
+  // Set when the browser just came back from ORCID (see api/orcid.ts).
+  const [orcidHandoff, setOrcidHandoff] = useState<OrcidHandoff | null>(() => readOrcidHandoff());
 
   // loggedInUser seeded from localStorage only as an optimistic UI cache to
   // avoid a flash of the auth screen -- the effect below always re-validates
@@ -75,6 +79,11 @@ export default function App() {
       active = false;
       unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    if (orcidHandoff) setCurrentScreen('AUTH');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -327,7 +336,25 @@ export default function App() {
         />
       )}
 
-      {currentScreen === 'AUTH' && !showResetPasswordScreen && (
+      {currentScreen === 'AUTH' && orcidHandoff && (
+        <OrcidCallbackScreen
+          handoff={orcidHandoff}
+          onBack={() => {
+            setOrcidHandoff(null);
+            setAuthRole('AUTHOR');
+            setAuthMode('LOGIN');
+          }}
+          onSuccessAuth={(user) => {
+            setOrcidHandoff(null);
+            setLoggedInUser(user);
+            setCurrentScreen('WORKSPACE');
+            setNotification(`Successfully logged in as ${user.name}`);
+            setTimeout(() => setNotification(''), 4000);
+          }}
+        />
+      )}
+
+      {currentScreen === 'AUTH' && !showResetPasswordScreen && !orcidHandoff && (
         <AuthPortals
           activeRole={authRole}
           initialMode={authMode}

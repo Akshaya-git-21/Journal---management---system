@@ -138,6 +138,13 @@ async function startServer() {
     }
   });
 
+  // "Continue with ORCID" (Authors). All logic lives in api/orcid.ts, which is
+  // also the Vercel function for /api/orcid/* in production.
+  app.all("/api/orcid/:action", async (req, res) => {
+    const { orcidHandler } = await import("./api/orcid.ts");
+    return orcidHandler(req, res, req.params.action);
+  });
+
   // User: Reset their own password with current session (called from password reset flow)
   app.post("/api/validate-reset-session", async (req, res) => {
     try {
