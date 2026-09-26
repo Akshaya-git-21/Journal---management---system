@@ -129,10 +129,13 @@ function start(req: any, res: any) {
   const q = new URLSearchParams({
     client_id: ORCID_CLIENT_ID as string,
     response_type: 'code',
-    scope: '/authenticate',
+    // ORCID only honours `prompt` / `max_age` on requests that include the `openid` scope, so it is
+    // requested alongside /authenticate. The token response then also carries an id_token, which we ignore.
+    scope: '/authenticate openid',
     redirect_uri: redirectUri(req),
     state,
     prompt: 'login', // always show ORCID's login page, even if the browser is already signed in to ORCID
+    max_age: '0', // and never accept an existing ORCID login session
   });
   res.redirect(302, `${ORCID_BASE}/oauth/authorize?${q.toString()}`);
 }
