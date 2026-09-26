@@ -188,7 +188,11 @@ async function callback(req: any, res: any, admin: any, anon: any) {
     family = parts.length > 1 ? parts[parts.length - 1] : '';
   }
   const emails = await orcidJson(`${ORCID_PUB}/${orcid}/email`, tokenJson.access_token);
-  const verifiedEmail: string = (emails?.email || []).find((e: any) => e.verified && e.email)?.email || '';
+  // Every verified, publicly visible email on the record (primary first).
+  const verifiedEmails: string[] = (emails?.email || [])
+    .filter((e: any) => e.verified && e.email)
+    .sort((a: any, b: any) => Number(!!b.primary) - Number(!!a.primary))
+    .map((e: any) => String(e.email).toLowerCase());
 
   // Public affiliation + country, where the author has shared them (all optional, all editable on the next screen).
   const [jobs, addresses] = await Promise.all([
@@ -214,7 +218,7 @@ async function callback(req: any, res: any, admin: any, anon: any) {
       orcid,
       given,
       family,
-      email: verifiedEmail.toLowerCase(),
+      emails: verifiedEmails.slice(0, 5),
       affiliation: String(job?.organization?.name || '').slice(0, 200),
       department: String(job?.['department-name'] || '').slice(0, 200),
       country,
@@ -234,6 +238,12 @@ async function complete(body: any, admin: any, anon: any, siteUrl: string): Prom
   if (!EMAIL_RE.test(email) || email.length > 320) return { status: 400, body: { error: 'Enter a valid email address.' } };
   if (!firstName) return { status: 400, body: { error: 'Given names are required.' } };
 
+  // When ORCID shared verified emails, only those may be used.
+  const orcidEmails: string[] = Array.isArray(pending.emails) ? pending.emails : [];
+  if (orcidEmails.length && !orcidEmails.includes(email)) {
+    return { status: 400, body: { error: 'Use the email address from your ORCID record.' } };
+  }
+
   const { data: taken } = await admin.from('orcid_identities').select('user_id').eq('orcid_id', pending.orcid).maybeSingle();
   if (taken) return { status: 409, body: { error: 'This ORCID iD is already linked to an account. Sign in with ORCID.' } };
 
@@ -243,7 +253,7 @@ async function complete(body: any, admin: any, anon: any, siteUrl: string): Prom
   if (existing?.length) return { status: 200, body: { status: 'link_required', email } };
 
   // Email came straight from ORCID (which verified it) -> trusted. A typed email must be confirmed first.
-  const trusted = !!pending.email && pending.email === email;
+  const trusted = orcidEmails.includes(email);
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email,
     password: crypto.randomBytes(24).toString('base64url'),

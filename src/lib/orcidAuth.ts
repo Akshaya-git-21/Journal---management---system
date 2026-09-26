@@ -77,7 +77,7 @@ export const linkOrcidToAccount = (pending: string, email: string, password: str
 /** Decodes the (non-secret) name/email the server pre-filled from ORCID. */
 export function readPendingClaims(
   pending: string
-): ({ orcid: string; given: string; family: string; email: string } & OrcidProfileFields) | null {
+): ({ orcid: string; given: string; family: string; emails: string[] } & OrcidProfileFields) | null {
   try {
     const body = pending.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
     const c = JSON.parse(decodeURIComponent(escape(atob(body))));
@@ -85,7 +85,7 @@ export function readPendingClaims(
       orcid: c.orcid,
       given: c.given || '',
       family: c.family || '',
-      email: c.email || '',
+      emails: Array.isArray(c.emails) ? c.emails : [],
       affiliation: c.affiliation || '',
       department: c.department || '',
       country: c.country || '',

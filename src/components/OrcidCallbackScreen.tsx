@@ -33,7 +33,8 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
   const [busy, setBusy] = useState(false);
   const [firstName, setFirstName] = useState(claims?.given || '');
   const [lastName, setLastName] = useState(claims?.family || '');
-  const [email, setEmail] = useState(claims?.email || '');
+  const orcidEmails = claims?.emails || [];
+  const [email, setEmail] = useState(orcidEmails[0] || '');
   const [affiliation, setAffiliation] = useState(claims?.affiliation || '');
   const [department, setDepartment] = useState(claims?.department || '');
   const [country, setCountry] = useState(claims?.country || '');
@@ -104,7 +105,7 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
             <h2 className="text-xl font-extrabold text-slate-900">Welcome{claims.given ? `, ${claims.given}` : ''}</h2>
             <p className="text-xs text-slate-500 font-semibold">
               ORCID iD <span className="text-[#008751] font-bold">{claims.orcid}</span> is verified. Confirm your details to create your Author account.
-              {!claims.email && ' ORCID did not share an email, so please enter one.'}
+              {!orcidEmails.length && ' ORCID did not share an email, so please enter one.'}
             </p>
             {errorBox}
             <div>
@@ -117,7 +118,22 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
             </div>
             <div>
               <label className={labelStyle}>Email address</label>
-              <input className={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              {orcidEmails.length > 1 ? (
+                <select className={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)}>
+                  {orcidEmails.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              ) : orcidEmails.length === 1 ? (
+                <input className={`${inputStyle} bg-slate-50 cursor-not-allowed`} type="email" value={email} readOnly />
+              ) : (
+                <input className={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              )}
+              <p className="text-[11px] text-slate-400 font-semibold mt-1">
+                {orcidEmails.length
+                  ? 'Taken from your ORCID record and verified by ORCID.'
+                  : 'We will email you a link to confirm this address. To skip that step, set an email on your ORCID record to visible to "Everyone" and sign in with ORCID again.'}
+              </p>
             </div>
             <div>
               <label className={labelStyle}>Primary affiliation</label>
