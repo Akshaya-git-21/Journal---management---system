@@ -34,6 +34,9 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
   const [firstName, setFirstName] = useState(claims?.given || '');
   const [lastName, setLastName] = useState(claims?.family || '');
   const [email, setEmail] = useState(claims?.email || '');
+  const [affiliation, setAffiliation] = useState(claims?.affiliation || '');
+  const [department, setDepartment] = useState(claims?.department || '');
+  const [country, setCountry] = useState(claims?.country || '');
   const [password, setPassword] = useState('');
 
   const finish = async (token: string) => {
@@ -66,7 +69,7 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
   const submitDetails = (e: React.FormEvent) => {
     e.preventDefault();
     void run(async () => {
-      const r = await completeOrcidSignup(handoff.token!, email, firstName, lastName);
+      const r = await completeOrcidSignup(handoff.token!, email, firstName, lastName, { affiliation, department, country });
       if (r.status === 'link_required') setStep('link');
       else if (r.status === 'verify_email') setStep('verify');
       else if (r.token) await finish(r.token);
@@ -116,6 +119,21 @@ export default function OrcidCallbackScreen({ handoff, onSuccessAuth, onBack }: 
               <label className={labelStyle}>Email address</label>
               <input className={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
             </div>
+            <div>
+              <label className={labelStyle}>Primary affiliation</label>
+              <input className={inputStyle} value={affiliation} onChange={(e) => setAffiliation(e.target.value)} placeholder="e.g. Stanford University" />
+            </div>
+            <div>
+              <label className={labelStyle}>Department</label>
+              <input className={inputStyle} value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="e.g. Computer Science" />
+            </div>
+            <div>
+              <label className={labelStyle}>Country</label>
+              <input className={inputStyle} value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. United States" />
+            </div>
+            {(claims.affiliation || claims.country) && (
+              <p className="text-[11px] text-slate-400 font-semibold">Affiliation and country were read from your public ORCID record. You can edit them.</p>
+            )}
             <button type="submit" disabled={busy} className={primaryBtn}>
               {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing...</> : 'Create account'}
             </button>

@@ -190,7 +190,37 @@ async function callback(req: any, res: any, admin: any, anon: any) {
   const emails = await orcidJson(`${ORCID_PUB}/${orcid}/email`, tokenJson.access_token);
   const verifiedEmail: string = (emails?.email || []).find((e: any) => e.verified && e.email)?.email || '';
 
-  const pending = sign({ orcid, given, family, email: verifiedEmail.toLowerCase() }, PENDING_TTL_S);
+  // Public affiliation + country, where the author has shared them (all optional, all editable on the next screen).
+  const [jobs, addresses] = await Promise.all([
+    orcidJson(`${ORCID_PUB}/${orcid}/employments`, tokenJson.access_token),
+    orcidJson(`${ORCID_PUB}/${orcid}/address`, tokenJson.access_token),
+  ]);
+  const summaries = (jobs?.['affiliation-group'] || [])
+    .flatMap((g: any) => g?.summaries || [])
+    .map((s: any) => s?.['employment-summary'])
+    .filter((s: any) => s?.organization?.name);
+  // Prefer a current position (no end date), else the first listed.
+  const job = summaries.find((s: any) => !s['end-date']) || summaries[0];
+  const countryCode: string = addresses?.address?.[0]?.country?.value || job?.organization?.address?.country || '';
+  let country = '';
+  try {
+    country = countryCode ? new Intl.DisplayNames(['en'], { type: 'region' }).of(countryCode.toUpperCase()) || '' : '';
+  } catch {
+    country = '';
+  }
+
+  const pending = sign(
+    {
+      orcid,
+      given,
+      family,
+      email: verifiedEmail.toLowerCase(),
+      affiliation: String(job?.organization?.name || '').slice(0, 200),
+      department: String(job?.['department-name'] || '').slice(0, 200),
+      country,
+    },
+    PENDING_TTL_S
+  );
   backToApp(res, { orcid: 'pending', t: pending });
 }
 
@@ -223,6 +253,9 @@ async function complete(body: any, admin: any, anon: any, siteUrl: string): Prom
       first_name: firstName,
       last_name: lastName,
       orcid_id: pending.orcid,
+      affiliation: String(body?.affiliation || '').trim().slice(0, 200),
+      department: String(body?.department || '').trim().slice(0, 200),
+      country: String(body?.country || '').trim().slice(0, 100),
       requested_role: 'AUTHOR',
     },
   });

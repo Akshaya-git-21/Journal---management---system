@@ -62,18 +62,34 @@ async function post(action: 'complete' | 'link', payload: Record<string, unknown
   return result as { status: 'ok' | 'link_required' | 'verify_email'; token?: string; email?: string };
 }
 
-export const completeOrcidSignup = (pending: string, email: string, firstName: string, lastName: string) =>
-  post('complete', { pending, email, firstName, lastName });
+export interface OrcidProfileFields {
+  affiliation: string;
+  department: string;
+  country: string;
+}
+
+export const completeOrcidSignup = (pending: string, email: string, firstName: string, lastName: string, extra: OrcidProfileFields) =>
+  post('complete', { pending, email, firstName, lastName, ...extra });
 
 export const linkOrcidToAccount = (pending: string, email: string, password: string) =>
   post('link', { pending, email, password });
 
 /** Decodes the (non-secret) name/email the server pre-filled from ORCID. */
-export function readPendingClaims(pending: string): { orcid: string; given: string; family: string; email: string } | null {
+export function readPendingClaims(
+  pending: string
+): ({ orcid: string; given: string; family: string; email: string } & OrcidProfileFields) | null {
   try {
     const body = pending.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
     const c = JSON.parse(decodeURIComponent(escape(atob(body))));
-    return { orcid: c.orcid, given: c.given || '', family: c.family || '', email: c.email || '' };
+    return {
+      orcid: c.orcid,
+      given: c.given || '',
+      family: c.family || '',
+      email: c.email || '',
+      affiliation: c.affiliation || '',
+      department: c.department || '',
+      country: c.country || '',
+    };
   } catch {
     return null;
   }
