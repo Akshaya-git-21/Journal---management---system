@@ -72,6 +72,12 @@ async function buildEmail(
         html: greeting + `<p>Thank you for your submission to ${escapeHtml(jn)}. ${escapeHtml(row.body || '')}</p>` + manuscriptLine + footer(journalContactEmail),
       };
 
+    case 'MANUSCRIPT_SUBMITTED':
+      return {
+        subject: 'New Manuscript Submission',
+        html: greeting + `<p>${escapeHtml(row.title || 'A new manuscript has been submitted.')}</p>` + manuscriptLine + footer(journalContactEmail),
+      };
+
     case 'EDITORIAL_REVIEW_STARTED':
       return {
         subject: 'Your Manuscript Has Entered Editorial Review',
