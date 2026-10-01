@@ -23,12 +23,20 @@
 // ==========================================
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
 const EMAIL_FROM = Deno.env.get('EMAIL_FROM');
 const EMAIL_FROM_NAME = Deno.env.get('EMAIL_FROM_NAME') || 'Tulitics Journal';
 const WEBHOOK_SECRET = Deno.env.get('WEBHOOK_SECRET');
 const APP_URL = Deno.env.get('APP_URL');
+// If all three SMTP secrets are set (same ones as send-test-email-smtp), mail is
+// sent through that mailbox; otherwise falls back to Resend.
+const SMTP_HOST = Deno.env.get('SMTP_HOST');
+const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') || '587');
+const SMTP_USERNAME = Deno.env.get('SMTP_USERNAME');
+const SMTP_PASSWORD = Deno.env.get('SMTP_PASSWORD');
+const USE_SMTP = !!(SMTP_HOST && SMTP_USERNAME && SMTP_PASSWORD);
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -158,7 +166,7 @@ function json(status: number, body: unknown): Response {
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return json(405, { error: 'Method not allowed.' });
 
-  if (!RESEND_API_KEY || !EMAIL_FROM) {
+  if (!USE_SMTP && (!RESEND_API_KEY || !EMAIL_FROM)) {
     return json(500, { error: 'Server misconfiguration: RESEND_API_KEY/EMAIL_FROM secret is not set.' });
   }
   if (!WEBHOOK_SECRET) {
@@ -206,21 +214,47 @@ Deno.serve(async (req: Request) => {
       return json(200, { skipped: true, reason: 'no template' });
     }
 
-    const resendRes = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: `${EMAIL_FROM_NAME} <${EMAIL_FROM}>`,
-        to: [recipient.email],
-        subject: email.subject,
-        html: email.html,
-      }),
-    });
-    const resendBody = await resendRes.json().catch(() => ({}));
-
-    if (!resendRes.ok) {
-      await markFailed(record.id, `Resend error: ${JSON.stringify(resendBody)}`);
-      return json(502, { error: 'Resend rejected the request.', details: resendBody });
+    let sentId: string | null = null;
+    if (USE_SMTP) {
+      const client = new SMTPClient({
+        connection: {
+          hostname: SMTP_HOST!,
+          port: SMTP_PORT,
+          tls: false, // denomailer upgrades via STARTTLS on 587
+          auth: { username: SMTP_USERNAME!, password: SMTP_PASSWORD! },
+        },
+      });
+      try {
+        await client.send({
+          from: `${EMAIL_FROM_NAME} <${SMTP_USERNAME}>`,
+          to: [recipient.email],
+          subject: email.subject,
+          html: email.html,
+        });
+        await client.close();
+      } catch (e) {
+        try { await client.close(); } catch { /* best effort */ }
+        const msg = e instanceof Error ? e.message : 'SMTP send failed.';
+        await markFailed(record.id, `SMTP error: ${msg}`);
+        return json(502, { error: 'SMTP send failed.', details: msg });
+      }
+    } else {
+      const resendRes = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: `${EMAIL_FROM_NAME} <${EMAIL_FROM}>`,
+          to: [recipient.email],
+          subject: email.subject,
+          html: email.html,
+        }),
+      });
+      const resendBody = await resendRes.json().catch(() => ({}));
+      if (!resendRes.ok) {
+        await markFailed(record.id, `Resend error: ${JSON.stringify(resendBody)}`);
+        return json(502, { error: 'Resend rejected the request.', details: resendBody });
+      }
+      sentId = resendBody?.id ?? null;
     }
 
     await admin
@@ -228,7 +262,7 @@ Deno.serve(async (req: Request) => {
       .update({ status: 'SENT', sent_at: new Date().toISOString(), attempts: 1 })
       .eq('id', record.id);
 
-    return json(200, { success: true, id: resendBody?.id ?? null });
+    return json(200, { success: true, id: sentId });
   } catch (e) {
     await markFailed(record.id, e instanceof Error ? e.message : 'Unexpected error.');
     return json(500, { error: 'Unexpected error.' });
