@@ -77,7 +77,6 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
   const [lastName, setLastName] = useState('');
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
-  const [orcidId, setOrcidId] = useState('');
   const [affiliation, setAffiliation] = useState('');
   const [department, setDepartment] = useState('');
   const [country, setCountry] = useState('United States');
@@ -258,7 +257,6 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
         const meta = {
           first_name: firstName,
           last_name: lastName,
-          orcid_id: orcidId,
           affiliation: affiliation,
           department: department,
           country: country,
@@ -481,19 +479,6 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                       </div>
                     </div>
                     <div>
-                      <label className={labelStyle}>ORCID ID ID</label>
-                      <div className="relative flex items-center shadow-xs rounded-lg">
-                        <div className="absolute left-3 w-4.5 h-4.5 rounded-full bg-[#a6e22e] text-white flex items-center justify-center font-bold text-[8px] select-none">iD</div>
-                        <input
-                          type="text"
-                          value={orcidId}
-                          onChange={(e) => setOrcidId(e.target.value)}
-                          placeholder="0000-0002-1825-0097"
-                          className={inputStyle}
-                        />
-                      </div>
-                    </div>
-                    <div>
                       <label className={labelStyle}>Primary Affiliation</label>
                       <div className="relative flex items-center shadow-xs rounded-lg">
                         <Building className="absolute left-3 w-4 h-4 text-slate-400" />
@@ -576,19 +561,6 @@ export default function AuthPortals({ activeRole, initialMode, onBackToLanding, 
                           value={affiliation}
                           onChange={(e) => setAffiliation(e.target.value)}
                           placeholder="Navy Compiler Division"
-                          className={inputStyle}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className={labelStyle}>ORCID ID ID</label>
-                      <div className="relative flex items-center shadow-xs rounded-lg">
-                        <div className="absolute left-3 w-4.5 h-4.5 rounded-full bg-[#a6e22e] text-white flex items-center justify-center font-bold text-[8px] select-none">iD</div>
-                        <input
-                          type="text"
-                          value={orcidId}
-                          onChange={(e) => setOrcidId(e.target.value)}
-                          placeholder="0000-0001-9284-0012"
                           className={inputStyle}
                         />
                       </div>
