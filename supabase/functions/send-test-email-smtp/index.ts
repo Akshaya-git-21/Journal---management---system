@@ -56,7 +56,7 @@ Deno.serve(async (req: Request) => {
     connection: {
       hostname: SMTP_HOST,
       port: SMTP_PORT,
-      tls: false, // denomailer upgrades to TLS itself via STARTTLS on port 587
+      tls: SMTP_PORT === 465, // 465 = implicit SSL; 587 upgrades via STARTTLS
       auth: { username: SMTP_USERNAME, password: SMTP_PASSWORD },
     },
   });
